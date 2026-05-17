@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 const navItems = [
   { emoji: '🏠', label: 'Dashboard', href: '/dashboard' },
   { emoji: '📅', label: 'Planning', href: '/planning' },
+  { emoji: '📋', label: 'Daily Planning', href: '/daily-planning' },
   { emoji: '🧭', label: 'Map', href: '/map' },
   { emoji: '📈', label: 'Analytics', href: '/analytics' },
   { emoji: '👥', label: 'Clients', href: '/clients' },
@@ -27,7 +28,7 @@ export default function Sidebar() {
         <div>
           <p className="text-[11px] uppercase tracking-[0.28em] text-white/70 mb-3">Main Menu</p>
           <div className="space-y-2">
-            {navItems.slice(0, 4).map((item) => {
+            {navItems.slice(0, 5).map((item) => {
               const active = pathname === item.href;
               return (
                 <Link
@@ -48,7 +49,7 @@ export default function Sidebar() {
         <div>
           <p className="text-[11px] uppercase tracking-[0.28em] text-white/70 mb-3">Fleet</p>
           <div className="space-y-2">
-            {navItems.slice(4).map((item) => {
+            {navItems.slice(5).map((item) => {
               const active = pathname === item.href;
               return (
                 <Link

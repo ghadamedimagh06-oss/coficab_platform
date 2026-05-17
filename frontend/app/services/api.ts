@@ -55,6 +55,11 @@ export async function getTransports() {
   return response.data.transports || response.data;
 }
 
+export async function getDailyPlanning(day: string) {
+  const response = await api.get('/api/data/transports', { params: { day, limit: 200 } });
+  return response.data.transports || response.data;
+}
+
 export async function proposeOptimization(payload: any) {
   const response = await api.post('/api/optimization/route', payload);
   return response.data;
