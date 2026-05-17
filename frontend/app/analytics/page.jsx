@@ -5,6 +5,7 @@ import { getKpi, getTransports } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import BarChart from '../../components/charts/BarChart';
 import StatCard from '../../components/cards/StatCard';
+import IconBubble from '../../components/icons/IconBubble';
 
 export default function AnalyticsPage() {
   const [metrics, setMetrics] = useState({ planning_time: 0, detection_latency: 0, data_error_rate: 0 });
@@ -43,9 +44,9 @@ export default function AnalyticsPage() {
     <div className="grid gap-8 xl:grid-cols-[1.5fr_0.85fr]">
       <section className="space-y-6">
         <div className="grid gap-6 sm:grid-cols-3">
-          <StatCard title="Forecast gain" value="+7.4%" hint="Improvement from last run" icon="🚀" />
-          <StatCard title="Error rate" value={`${((metrics.data_error_rate ?? 0) * 100).toFixed(2)}%`} hint="Data integrity" icon="🛡️" />
-          <StatCard title="Latency" value={`${metrics.detection_latency ?? 0}s`} hint="Detection speed" icon="⚡" />
+          <StatCard title="Forecast gain" value="+7.4%" hint="Improvement from last run" icon={<IconBubble kind="chart" />} />
+          <StatCard title="Error rate" value={`${((metrics.data_error_rate ?? 0) * 100).toFixed(2)}%`} hint="Data integrity" icon={<IconBubble kind="default" />} />
+          <StatCard title="Latency" value={`${metrics.detection_latency ?? 0}s`} hint="Detection speed" icon={<IconBubble kind="bolt" />} />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">

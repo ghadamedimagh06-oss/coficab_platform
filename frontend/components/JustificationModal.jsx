@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { getImpactPreview } from '../app/services/api';
 
 const reasonOptions = [
-  { value: 'vehicle_issue', label: '🚚 Vehicle issue' },
-  { value: 'client_request', label: '📦 Client request change' },
-  { value: 'time_constraint', label: '⏰ Time constraint' },
-  { value: 'production_delay', label: '🏭 Production delay' },
-  { value: 'logistics_constraint', label: '🌍 Logistics constraint' },
-  { value: 'other', label: '❓ Other' },
+  { value: 'vehicle_issue', label: 'Vehicle issue' },
+  { value: 'client_request', label: 'Client request change' },
+  { value: 'time_constraint', label: 'Time constraint' },
+  { value: 'production_delay', label: 'Production delay' },
+  { value: 'logistics_constraint', label: 'Logistics constraint' },
+  { value: 'other', label: 'Other' },
 ];
 
 export default function JustificationModal({ change, onConfirm, onCancel }) {

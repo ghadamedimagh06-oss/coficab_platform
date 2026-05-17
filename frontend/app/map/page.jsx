@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { getLiveTracking } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
+import IconBubble from '../../components/icons/IconBubble';
 
 const TruckMap = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
 
@@ -44,9 +45,9 @@ export default function MapPage() {
     <div className="grid gap-8 xl:grid-cols-[1.5fr_0.9fr]">
       <section className="space-y-6">
         <div className="grid gap-6 sm:grid-cols-3">
-          <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon="🚚" />
-          <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon="✅" />
-          <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon="🚨" />
+          <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon={<IconBubble kind="truck" />} />
+          <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon={<IconBubble kind="chart" />} />
+          <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon={<IconBubble kind="bolt" />} />
         </div>
 
         <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
