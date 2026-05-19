@@ -4,9 +4,16 @@ Automatically monitors Excel files and processes them into PostgreSQL
 """
 
 import os
+import sys
+import io
 import time
 import shutil
 from pathlib import Path
+
+# Force UTF-8 stdout so emoji/unicode print statements don't crash on Windows cp1252
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import pandas as pd
@@ -325,8 +332,8 @@ class ExcelWatcherService:
         self.event_handler = None
 
     def start(self):
-        """Start the file monitoring service"""
-        print("🚀 Starting Excel Watcher Service...")
+        """Start the observer thread (non-blocking). For standalone use, call run_forever() instead."""
+        print("[WATCHDOG] Starting Excel Watcher Service...")
 
         # Ensure watch directory exists
         self.watch_path.mkdir(parents=True, exist_ok=True)
@@ -334,15 +341,16 @@ class ExcelWatcherService:
         # Create event handler
         self.event_handler = ExcelFileHandler(str(self.watch_path), str(self.archive_path))
 
-        # Create observer
+        # Create and start observer thread
         self.observer = Observer()
         self.observer.schedule(self.event_handler, str(self.watch_path), recursive=False)
-
-        # Start monitoring
         self.observer.start()
-        print("✅ Excel Watcher Service started successfully")
-        print(f"📁 Monitoring directory: {self.watch_path}")
+        print("[WATCHDOG] Excel Watcher Service started successfully")
+        print(f"[WATCHDOG] Monitoring directory: {self.watch_path}")
 
+    def run_forever(self):
+        """Start the watcher and block until KeyboardInterrupt (standalone mode)."""
+        self.start()
         try:
             while True:
                 time.sleep(1)
@@ -359,9 +367,10 @@ class ExcelWatcherService:
 def main():
     """Main entry point for the Excel watcher service"""
 
-    # Configuration
-    WATCH_PATH = r"C:\Users\USER\OneDrive\Desktop\coficab\weekly planning"
-    ARCHIVE_PATH = r"C:\Users\USER\OneDrive\Desktop\coficab\archive"
+    # Configuration — use env vars or fall back to project-relative paths
+    _base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    WATCH_PATH = os.getenv("WATCH_PATH", os.path.join(_base, "weekly planning"))
+    ARCHIVE_PATH = os.getenv("ARCHIVE_PATH", os.path.join(_base, "archive"))
 
     print("🔧 CofICab Excel Watcher Service")
     print("=" * 50)
@@ -370,11 +379,11 @@ def main():
     watcher = ExcelWatcherService(WATCH_PATH, ARCHIVE_PATH)
 
     try:
-        watcher.start()
+        watcher.run_forever()
     except KeyboardInterrupt:
-        print("\n🛑 Service interrupted by user")
+        print("\n[WATCHDOG] Service interrupted by user")
     except Exception as e:
-        print(f"❌ Service error: {str(e)}")
+        print(f"[WATCHDOG] Service error: {str(e)}")
     finally:
         watcher.stop()
 

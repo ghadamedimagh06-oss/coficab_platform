@@ -10,7 +10,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-WATCH_DIRECTORY = r"C:\Users\USER\OneDrive\Desktop\coficab\DB"
+_default_watch = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "weekly planning")
+WATCH_DIRECTORY = os.getenv("WATCH_PATH", _default_watch)
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
 
 

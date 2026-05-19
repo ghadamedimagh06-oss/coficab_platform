@@ -35,8 +35,8 @@ def vrp_optimization_task():
     try:
         # Step 1: jib deliveries nhar ghudwa mel backend
         deliveries_resp = requests.get(
-            f"{BACKEND_API_URL}/api/data/deliveries",
-            params={"day": tomorrow, "status": "VALIDATED"},
+            f"{BACKEND_API_URL}/api/data/transports",
+            params={"day": tomorrow},
             timeout=10
         )
 
@@ -44,7 +44,7 @@ def vrp_optimization_task():
             logger.error(f"[SCHEDULER] Could not fetch deliveries: {deliveries_resp.status_code}")
             return
 
-        deliveries = deliveries_resp.json().get("deliveries", [])
+        deliveries = deliveries_resp.json().get("transports", [])
         logger.info(f"[SCHEDULER] Found {len(deliveries)} deliveries for {tomorrow}")
 
         if not deliveries:

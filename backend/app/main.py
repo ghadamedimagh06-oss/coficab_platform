@@ -14,8 +14,10 @@ from app.database import engine, Base
 from app.services.excel_watcher import ExcelWatcherService
 import app.models
 
-WATCH_PATH = r"C:\Users\USER\OneDrive\Desktop\coficab\weekly planning"
-ARCHIVE_PATH = r"C:\Users\USER\OneDrive\Desktop\coficab\archive"
+_default_watch = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "weekly planning")
+_default_archive = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "archive")
+WATCH_PATH = os.getenv("WATCH_PATH", _default_watch)
+ARCHIVE_PATH = os.getenv("ARCHIVE_PATH", _default_archive)
 WATCHER_ENABLED = os.getenv("WATCHER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # Create database tables if database is available

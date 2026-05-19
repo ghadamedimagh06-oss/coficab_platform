@@ -8,6 +8,13 @@ import BarChart from "../../components/charts/BarChart";
 import ChatPanel from "../../components/chat/ChatPanel";
 import { clients, drivers, trucks } from "../../data/coficabData";
 
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState({
     planning_time: 0,
@@ -18,6 +25,7 @@ export default function DashboardPage() {
   const [tracking, setTracking] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [period, setPeriod] = useState("Week");
+  const [today] = useState(new Date());
 
   useEffect(() => {
     async function load() {
@@ -81,10 +89,10 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className="text-3xl font-semibold text-[#1a1a2e]">
-              Good morning, John
+              {getGreeting()}, John
             </h1>
             <p className="mt-1 text-sm text-[#6b6b7b]">
-              Monday, December 24, 2024
+              {today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
           </div>
 

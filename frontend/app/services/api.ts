@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001';
+const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 const debugAPI = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
 const api = axios.create({
