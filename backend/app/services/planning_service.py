@@ -95,10 +95,17 @@ class PlanningService:
         return J_PLUS_1_MAPPING.get(weekday_name)
 
     def _infer_delivery_day(self, df: pd.DataFrame) -> List[Optional[str]]:
-        candidate_columns = [c for c in df.columns if str(c).strip().lower() in ("day", "weekday", "delivery_day", "jour")]
+        candidate_columns = [c for c in df.columns if str(c).strip().lower() in ("day", "weekday", "delivery_day", "delivery day", "jour")]
         if candidate_columns:
             day_col = candidate_columns[0]
-            return [self._normalize_weekday(value) for value in df[day_col].tolist()]
+            inferred = []
+            current_day = None
+            for value in df[day_col].tolist():
+                normalized = self._normalize_weekday(value)
+                if normalized:
+                    current_day = normalized
+                inferred.append(current_day)
+            return inferred
 
         first_col = df.columns[0]
         values = df[first_col].tolist()
@@ -138,29 +145,168 @@ class PlanningService:
             return min_date - timedelta(days=min_date.weekday())
         return date.today() - timedelta(days=date.today().weekday())
 
+    def _normalize_column_name(self, column_name: Any) -> Optional[str]:
+        if column_name is None or pd.isna(column_name):
+            return None
+        normalized = str(column_name).strip().lower()
+        normalized = normalized.replace("\xa0", " ")
+        normalized = normalized.replace("-", " ").replace(".", " ")
+        normalized = "_".join(normalized.split())
+        return normalized
+
+    def _read_planning_dataframe(self, file_path: str) -> pd.DataFrame:
+        candidates = [
+            {"sheet_name": "Planning", "header": 2},
+            {"sheet_name": "Planning", "header": 0},
+            {"header": 2},
+            {"header": 0},
+        ]
+        last_error = None
+        for kwargs in candidates:
+            try:
+                df = pd.read_excel(file_path, **kwargs)
+                if not df.empty:
+                    return df
+            except Exception as exc:
+                last_error = exc
+        raise ValueError(f"Failed to read Excel planning sheet: {last_error}")
+
     def parse_weekly_planning(self, file_path: str) -> Dict[str, Any]:
-        df = pd.read_excel(file_path)
+        df = self._read_planning_dataframe(file_path)
         if df.empty:
             raise ValueError("Excel file contains no planning rows")
+
+        column_map = {
+            "delivery_day": "delivery_day",
+            "delivery day": "delivery_day",
+            "jour": "delivery_day",
+            "weekday": "delivery_day",
+            "day": "delivery_day",
+            "n°": "row_number",
+            "no": "row_number",
+            "customer": "client",
+            "client": "client",
+            "driver": "driver",
+            "vehicle": "vehicle",
+            "start": "start_location",
+            "start_location": "start_location",
+            "from": "start_location",
+            "origin": "start_location",
+            "end": "end_location",
+            "end_location": "end_location",
+            "to": "end_location",
+            "destination": "end_location",
+            "distance": "distance_km",
+            "distance_km": "distance_km",
+            "etd": "etd",
+            "eta": "eta",
+            "quantity": "quantity",
+            "status": "status",
+            "priority": "priority",
+            "notes": "notes",
+            "comments": "notes",
+            "pallet_weight": "quantity",
+            "gross_weight": "quantity",
+            "total_gross_weight": "quantity",
+        }
+
+        rename_map = {}
+        used_targets = set()
+        for original in df.columns:
+            normalized = self._normalize_column_name(original)
+            if normalized is None:
+                continue
+            target = column_map.get(normalized, normalized)
+            if target in used_targets:
+                continue
+            rename_map[original] = target
+            used_targets.add(target)
+        df = df.rename(columns=rename_map)
 
         weekday_values = self._infer_delivery_day(df)
         rows = []
         for index, row in df.iterrows():
+            raw_delivery_day = row.get("delivery_day")
+            delivery_day = self._normalize_weekday(raw_delivery_day)
+            if delivery_day is None and index < len(weekday_values):
+                delivery_day = weekday_values[index]
+
+            row_number_value = row.get("row_number")
+            if pd.isna(row_number_value) or str(row_number_value).strip() == "":
+                row_number = int(index + 1)
+            else:
+                try:
+                    row_number = int(row_number_value)
+                except Exception:
+                    row_number = int(index + 1)
+
+            client = str(row.get("client", "")).strip() if not pd.isna(row.get("client", "")) else None
+            driver = str(row.get("driver", "")).strip() if not pd.isna(row.get("driver", "")) else ""
+            vehicle = str(row.get("vehicle", "")).strip() if not pd.isna(row.get("vehicle", "")) else ""
+            start_location = str(row.get("start_location", "")).strip() if not pd.isna(row.get("start_location", "")) else ""
+            end_location = str(row.get("end_location", "")).strip() if not pd.isna(row.get("end_location", "")) else ""
+            if not start_location:
+                start_location = "COFICAB Mégrine"
+            if not end_location:
+                end_location = client or "Unknown destination"
+
+            distance_value = row.get("distance_km", row.get("distance", 0))
+            distance_km = 0.0
+            if not pd.isna(distance_value) and str(distance_value).strip() != "":
+                try:
+                    distance_km = float(distance_value)
+                except Exception:
+                    distance_km = 0.0
+
+            etd = str(row.get("etd", "")).strip() if not pd.isna(row.get("etd", "")) else None
+            eta = str(row.get("eta", "")).strip() if not pd.isna(row.get("eta", "")) else None
+            notes = str(row.get("notes", "")).strip() if not pd.isna(row.get("notes", "")) else None
+            if notes == "":
+                notes = None
+
+            raw_status = str(row.get("status", "pending")).strip() if not pd.isna(row.get("status", "pending")) else "pending"
+            status = raw_status.lower().strip()
+            if status in {"confirmed", "confirmed ", "ok", "scheduled", "planned", "valid"}:
+                status = "pending"
+            elif status in {"completed", "delivered", "done", "finished"}:
+                status = "completed"
+            elif status in {"in transit", "in_transit", "on route", "en route"}:
+                status = "in_transit"
+            elif status == "":
+                status = "pending"
+            elif status not in {"pending", "completed", "in_transit"}:
+                status = "pending"
+
+            priority = str(row.get("priority", "normal")).strip().lower() if not pd.isna(row.get("priority", "normal")) else "normal"
+            if priority not in {"urgent", "high", "normal", "low"}:
+                priority = "normal"
+
+            quantity_value = row.get("quantity", row.get("pallet_weight", row.get("gross_weight", row.get("total_gross_weight", None))))
+            quantity = None
+            if not pd.isna(quantity_value) and str(quantity_value).strip() != "":
+                try:
+                    quantity = int(quantity_value)
+                except Exception:
+                    try:
+                        quantity = int(float(quantity_value))
+                    except Exception:
+                        quantity = None
+
             row_data = {
-                "row_number": int(index + 1),
-                "delivery_day": weekday_values[index] if index < len(weekday_values) else None,
-                "driver": str(row.get("driver", "")).strip() if not pd.isna(row.get("driver", "")) else "",
-                "vehicle": str(row.get("vehicle", "")).strip() if not pd.isna(row.get("vehicle", "")) else "",
-                "start_location": str(row.get("start", row.get("start_location", ""))).strip() if not pd.isna(row.get("start", row.get("start_location", ""))) else "",
-                "end_location": str(row.get("end", row.get("end_location", ""))).strip() if not pd.isna(row.get("end", row.get("end_location", ""))) else "",
-                "distance_km": float(row.get("distance", row.get("distance_km", 0))) if not pd.isna(row.get("distance", row.get("distance_km", 0))) else 0.0,
-                "status": str(row.get("status", "pending")).strip() if not pd.isna(row.get("status", "pending")) else "pending",
-                "priority": str(row.get("priority", "normal")).strip() if not pd.isna(row.get("priority", "normal")) else "normal",
-                "notes": str(row.get("notes", "")).strip() if not pd.isna(row.get("notes", "")) else None,
-                "client": str(row.get("client", row.get("customer", ""))).strip() if not pd.isna(row.get("client", row.get("customer", ""))) else None,
-                "etd": str(row.get("etd", "")).strip() if not pd.isna(row.get("etd", "")) else None,
-                "eta": str(row.get("eta", "")).strip() if not pd.isna(row.get("eta", "")) else None,
-                "quantity": int(row.get("quantity", 0)) if not pd.isna(row.get("quantity", 0)) and str(row.get("quantity", 0)).strip() != "" else None,
+                "row_number": row_number,
+                "delivery_day": delivery_day,
+                "driver": driver,
+                "vehicle": vehicle,
+                "start_location": start_location,
+                "end_location": end_location,
+                "distance_km": distance_km,
+                "status": status,
+                "priority": priority,
+                "notes": notes,
+                "client": client,
+                "etd": etd,
+                "eta": eta,
+                "quantity": quantity,
                 "delivery_date": None,
             }
 
@@ -243,10 +389,23 @@ class PlanningService:
 
         livraison_objects = []
         for row in rows:
-            if not row["driver"] or not row["vehicle"] or not row["start_location"] or not row["end_location"]:
+            if not any([
+                row["client"],
+                row["etd"],
+                row["eta"],
+                row["notes"],
+                row["distance_km"] > 0,
+            ]):
                 continue
-            if row["distance_km"] <= 0:
-                continue
+
+            driver = row["driver"] or ""
+            vehicle = row["vehicle"] or ""
+            start_location = row["start_location"] or "COFICAB Mégrine"
+            end_location = row["end_location"] or row["client"] or "Unknown destination"
+            if row["distance_km"] is None:
+                distance_km = 0.0
+            else:
+                distance_km = row["distance_km"]
 
             livraison = Livraison(
                 planning_id=planning.id,
@@ -257,11 +416,11 @@ class PlanningService:
                 etd=row["etd"],
                 eta=row["eta"],
                 quantity=row["quantity"],
-                driver=row["driver"],
-                vehicle=row["vehicle"],
-                start_location=row["start_location"],
-                end_location=row["end_location"],
-                distance_km=row["distance_km"],
+                driver=driver,
+                vehicle=vehicle,
+                start_location=start_location,
+                end_location=end_location,
+                distance_km=distance_km,
                 status=row["status"] or "pending",
                 priority=row["priority"] or "normal",
                 notes=row["notes"],

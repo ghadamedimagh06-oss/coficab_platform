@@ -56,7 +56,7 @@ export async function getTransports() {
 }
 
 export async function getDailyPlanning(day: string) {
-  const response = await api.get('/api/data/transports', { params: { day, limit: 200 } });
+  const response = await api.get('/api/data/transports', { params: { day, limit: 200, force_file: true } });
   return response.data.transports || response.data;
 }
 

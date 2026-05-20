@@ -6,59 +6,76 @@ API endpoints for retrieving livraison and ingestion data
 from fastapi import APIRouter, Query, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional, List
+import os
 import datetime
+from pathlib import Path
+import pandas as pd
 from app.database import get_db_optional
 from app.models.livraison import Livraison
 from app.models.ingestion_log import IngestionLog
 from app.services.ingestion_service import IngestionService
+from app.services.planning_service import PlanningService
+from app.data.synthetic_daily_planning import MOCK_TRANSPORTS
 
 router = APIRouter()
 
-MOCK_TRANSPORTS = [
-    # Monday
-    {"id": 1,  "row_number": 1,  "delivery_day": "Monday",    "client": "AEC WIRING TECHNOLOGY SARL",        "driver": "Ali Ben Salah",      "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "MGHIRA",          "distance_km": 12.0,  "etd": "07:00", "eta": "07:45", "quantity": 150, "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 2,  "row_number": 2,  "delivery_day": "Monday",    "client": "COFAT TUNIS",                       "driver": "Mehdi Chaabane",     "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "TN",              "distance_km": 1.0,   "etd": "07:30", "eta": "07:40", "quantity": 80,  "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 3,  "row_number": 3,  "delivery_day": "Monday",    "client": "APTIV Services Tunisia SARL",       "driver": "Khalil Mansouri",    "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "MJEZ EL BEB",     "distance_km": 56.0,  "etd": "08:00", "eta": "09:30", "quantity": 200, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 4,  "row_number": 4,  "delivery_day": "Monday",    "client": "CABLISYS Tunisie",                  "driver": "Nizar Trabelsi",     "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "SOUSSE",          "distance_km": 144.0, "etd": "06:30", "eta": "09:00", "quantity": 320, "status": "in_transit", "priority": "high",   "notes": "Priority route"},
-    {"id": 5,  "row_number": 5,  "delivery_day": "Monday",    "client": "ERA CONTACTS TUNISIA",              "driver": "Sami Hamdi",         "vehicle": "TU-624-EE", "start_location": "COFICAB Mégrine", "end_location": "BIZERTE",         "distance_km": 60.7,  "etd": "08:30", "eta": "10:15", "quantity": 110, "status": "pending",    "priority": "normal", "notes": None},
-    {"id": 6,  "row_number": 6,  "delivery_day": "Monday",    "client": "SCHULTE AUTOMOTIVE TUNISIA srl",   "driver": "Riadh Bouzid",       "vehicle": "TU-731-FF", "start_location": "COFICAB Mégrine", "end_location": "BOUARADA",        "distance_km": 90.0,  "etd": "09:00", "eta": "11:30", "quantity": 95,  "status": "pending",    "priority": "normal", "notes": None},
-    # Tuesday
-    {"id": 7,  "row_number": 1,  "delivery_day": "Tuesday",   "client": "LEONI SOUSSE",                      "driver": "Bilel Ayari",        "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "SOUSSE",          "distance_km": 161.0, "etd": "06:00", "eta": "09:00", "quantity": 400, "status": "completed",  "priority": "urgent", "notes": "Urgent shipment"},
-    {"id": 8,  "row_number": 2,  "delivery_day": "Tuesday",   "client": "LEONI MENZEL HAYET",                "driver": "Hatem Khelifi",      "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "MANZEL HAYET",    "distance_km": 186.0, "etd": "05:30", "eta": "09:00", "quantity": 280, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 9,  "row_number": 3,  "delivery_day": "Tuesday",   "client": "KAB-LEM Tunisia SARL",              "driver": "Anis Dhahbi",        "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "BIZERTE",         "distance_km": 64.7,  "etd": "08:00", "eta": "09:45", "quantity": 120, "status": "in_transit", "priority": "normal", "notes": None},
-    {"id": 10, "row_number": 4,  "delivery_day": "Tuesday",   "client": "ELECTROCONTACT TUNISIE",            "driver": "Faouzi Slim",        "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "KSAR HLEL",       "distance_km": 195.0, "etd": "05:00", "eta": "09:30", "quantity": 260, "status": "pending",    "priority": "high",   "notes": None},
-    {"id": 11, "row_number": 5,  "delivery_day": "Tuesday",   "client": "Reflexallen",                       "driver": "Walid Ben Amor",     "vehicle": "TU-624-EE", "start_location": "COFICAB Mégrine", "end_location": "HAMMEM ZRIBA",    "distance_km": 59.0,  "etd": "09:00", "eta": "10:30", "quantity": 75,  "status": "pending",    "priority": "normal", "notes": None},
-    # Wednesday
-    {"id": 12, "row_number": 1,  "delivery_day": "Wednesday", "client": "Kromberg & Schubert Tunisie SARL",  "driver": "Maher Jlassi",       "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "BEJA",            "distance_km": 104.0, "etd": "07:00", "eta": "09:45", "quantity": 180, "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 13, "row_number": 2,  "delivery_day": "Wednesday", "client": "SEBN",                              "driver": "Lotfi Chebbi",       "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "JENDOUBA",        "distance_km": 146.0, "etd": "06:00", "eta": "09:30", "quantity": 210, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 14, "row_number": 3,  "delivery_day": "Wednesday", "client": "DIS Draxlmaier",                    "driver": "Kamel Oueslati",     "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "SELIANA",         "distance_km": 126.0, "etd": "06:30", "eta": "10:00", "quantity": 160, "status": "in_transit", "priority": "normal", "notes": None},
-    {"id": 15, "row_number": 4,  "delivery_day": "Wednesday", "client": "SE BORDNETZE EL FEJJA S.A.R.L",    "driver": "Tarek Bejaoui",      "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "Fejja",           "distance_km": 23.4,  "etd": "10:00", "eta": "10:45", "quantity": 90,  "status": "pending",    "priority": "normal", "notes": None},
-    {"id": 16, "row_number": 5,  "delivery_day": "Wednesday", "client": "AMPHENOL TUNISIE",                  "driver": "Fares Saidi",        "vehicle": "TU-624-EE", "start_location": "COFICAB Mégrine", "end_location": "FAHS",            "distance_km": 51.0,  "etd": "09:30", "eta": "11:00", "quantity": 130, "status": "pending",    "priority": "normal", "notes": None},
-    # Thursday
-    {"id": 17, "row_number": 1,  "delivery_day": "Thursday",  "client": "YAZAKI GAFSA",                      "driver": "Ridha Fenniche",     "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "GAFSSA",          "distance_km": 336.0, "etd": "04:00", "eta": "10:30", "quantity": 500, "status": "in_transit", "priority": "urgent", "notes": "Long haul — check fuel"},
-    {"id": 18, "row_number": 2,  "delivery_day": "Thursday",  "client": "YURA CORPORATION TUNISIA",          "driver": "Sofiene Hammami",    "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "KAIRAOUEN",       "distance_km": 170.0, "etd": "05:30", "eta": "09:30", "quantity": 340, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 19, "row_number": 3,  "delivery_day": "Thursday",  "client": "SEWS TN SARL",                      "driver": "Mourad Gharbi",      "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "MOUNASTIR",       "distance_km": 195.0, "etd": "05:00", "eta": "09:00", "quantity": 290, "status": "pending",    "priority": "high",   "notes": None},
-    {"id": 20, "row_number": 4,  "delivery_day": "Thursday",  "client": "WeWire Hammamet Tunisia SARL",      "driver": "Imed Ferchichi",     "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "HAMMMET",         "distance_km": 74.0,  "etd": "09:00", "eta": "11:00", "quantity": 115, "status": "pending",    "priority": "normal", "notes": None},
-    # Friday
-    {"id": 21, "row_number": 1,  "delivery_day": "Friday",    "client": "COELEC TUNISIA",                    "driver": "Ali Ben Salah",      "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "AGBA",            "distance_km": 10.0,  "etd": "07:30", "eta": "08:00", "quantity": 60,  "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 22, "row_number": 2,  "delivery_day": "Friday",    "client": "COFAT MATEUR",                      "driver": "Mehdi Chaabane",     "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "MATEUR",          "distance_km": 65.5,  "etd": "08:00", "eta": "09:45", "quantity": 175, "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 23, "row_number": 3,  "delivery_day": "Friday",    "client": "LECTRIC",                           "driver": "Khalil Mansouri",    "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "FAHS",            "distance_km": 51.0,  "etd": "09:00", "eta": "10:30", "quantity": 140, "status": "in_transit", "priority": "normal", "notes": None},
-    {"id": 24, "row_number": 4,  "delivery_day": "Friday",    "client": "PROD-ELEC",                         "driver": "Nizar Trabelsi",     "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "KAALA KOBRA",     "distance_km": 160.0, "etd": "06:00", "eta": "09:30", "quantity": 220, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 25, "row_number": 5,  "delivery_day": "Friday",    "client": "TTE International",                 "driver": "Sami Hamdi",         "vehicle": "TU-624-EE", "start_location": "COFICAB Mégrine", "end_location": "BIZERTE",         "distance_km": 65.0,  "etd": "09:30", "eta": "11:15", "quantity": 95,  "status": "pending",    "priority": "normal", "notes": None},
-    # Saturday
-    {"id": 26, "row_number": 1,  "delivery_day": "Saturday",  "client": "A C T Assemblage Cable Tunisie",    "driver": "Riadh Bouzid",       "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "Slimane",         "distance_km": 42.0,  "etd": "08:00", "eta": "09:15", "quantity": 85,  "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 27, "row_number": 2,  "delivery_day": "Saturday",  "client": "Jetty",                             "driver": "Bilel Ayari",        "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "Hammem lif",      "distance_km": 30.4,  "etd": "09:00", "eta": "10:00", "quantity": 50,  "status": "in_transit", "priority": "normal", "notes": None},
-    {"id": 28, "row_number": 3,  "delivery_day": "Saturday",  "client": "Perplastic TN",                     "driver": "Hatem Khelifi",      "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "Mghira",          "distance_km": 9.7,   "etd": "10:00", "eta": "10:30", "quantity": 40,  "status": "pending",    "priority": "low",    "notes": None},
-    # Sunday
-    {"id": 29, "row_number": 1,  "delivery_day": "Sunday",    "client": "COFICAB MED",                       "driver": "Ali Ben Salah",      "vehicle": "TU-201-AA", "start_location": "COFICAB Mégrine", "end_location": "MJEZ EL BEB",     "distance_km": 56.0,  "etd": "07:00", "eta": "08:30", "quantity": 190, "status": "completed",  "priority": "high",   "notes": None},
-    {"id": 30, "row_number": 2,  "delivery_day": "Sunday",    "client": "MEDITERRANEAN ELECTRIC WIRING",     "driver": "Mehdi Chaabane",     "vehicle": "TU-305-BB", "start_location": "COFICAB Mégrine", "end_location": "NADOUR",          "distance_km": 90.0,  "etd": "07:30", "eta": "09:30", "quantity": 215, "status": "completed",  "priority": "normal", "notes": None},
-    {"id": 31, "row_number": 3,  "delivery_day": "Sunday",    "client": "Yazaki Automotive Products Tunisia", "driver": "Khalil Mansouri",    "vehicle": "TU-412-CC", "start_location": "COFICAB Mégrine", "end_location": "BIZERTE",         "distance_km": 65.0,  "etd": "08:00", "eta": "09:45", "quantity": 300, "status": "in_transit", "priority": "high",   "notes": None},
-    {"id": 32, "row_number": 4,  "delivery_day": "Sunday",    "client": "SCHULTE AUTOMOTIVE TUN ZAGHOUAN",   "driver": "Nizar Trabelsi",     "vehicle": "TU-518-DD", "start_location": "COFICAB Mégrine", "end_location": "ZAGHOUEN",        "distance_km": 27.0,  "etd": "09:00", "eta": "10:00", "quantity": 70,  "status": "in_transit", "priority": "normal", "notes": None},
-    {"id": 33, "row_number": 5,  "delivery_day": "Sunday",    "client": "METS MANUFAC ELECTRO.DE SOUSSE",    "driver": "Sami Hamdi",         "vehicle": "TU-624-EE", "start_location": "COFICAB Mégrine", "end_location": "SIDI ABDELHMID",  "distance_km": 163.0, "etd": "05:30", "eta": "09:15", "quantity": 250, "status": "in_transit", "priority": "high",   "notes": "Early departure"},
-    {"id": 34, "row_number": 6,  "delivery_day": "Sunday",    "client": "ADC Sousse",                        "driver": "Riadh Bouzid",       "vehicle": "TU-731-FF", "start_location": "COFICAB Mégrine", "end_location": "SOUSE",           "distance_km": 161.0, "etd": "05:00", "eta": "09:00", "quantity": 280, "status": "pending",    "priority": "high",   "notes": None},
-    {"id": 35, "row_number": 7,  "delivery_day": "Sunday",    "client": "COFAT KAIROUAN",                    "driver": "Bilel Ayari",        "vehicle": "TU-840-GG", "start_location": "COFICAB Mégrine", "end_location": "KAIRAOUEN",       "distance_km": 170.0, "etd": "05:00", "eta": "09:15", "quantity": 310, "status": "pending",    "priority": "urgent", "notes": "Must arrive before 09:30"},
-    {"id": 36, "row_number": 8,  "delivery_day": "Sunday",    "client": "I.C.eM",                            "driver": "Hatem Khelifi",      "vehicle": "TU-955-HH", "start_location": "COFICAB Mégrine", "end_location": "BNI KHALLED",     "distance_km": 57.4,  "etd": "09:00", "eta": "10:30", "quantity": 100, "status": "pending",    "priority": "normal", "notes": None},
-]
+# Prefer explicit environment configuration, otherwise fall back to the user's local Excel file if present.
+env_weekly_file = os.getenv("WEEKLY_PLANNING_FILE_PATH")
+if env_weekly_file:
+    WEEKLY_PLANNING_FILE = Path(env_weekly_file).resolve()
+else:
+    default_local_file = Path(r"C:\Users\USER\OneDrive\Desktop\coficab\DB\weekly planning\Weekly Delivery planning W0526.xlsx")
+    repo_default_file = Path(__file__).resolve().parents[3] / "weekly planning" / "Weekly Delivery planning W0526.xlsx"
+    if default_local_file.exists():
+        WEEKLY_PLANNING_FILE = default_local_file
+    else:
+        WEEKLY_PLANNING_FILE = repo_default_file
+
+
+def _load_weekly_planning_transports(status: Optional[str] = None, day: Optional[str] = None, limit: int = 100, offset: int = 0):
+    if WEEKLY_PLANNING_FILE.exists():
+        try:
+            service = PlanningService(db=None)
+            plan_data = service.parse_weekly_planning(str(WEEKLY_PLANNING_FILE))
+            rows = plan_data["rows"]
+            if status:
+                rows = [row for row in rows if (row.get("status") or "pending") == status]
+            if day:
+                rows = [row for row in rows if row.get("delivery_day") == day]
+            total = len(rows)
+            paginated = rows[offset: offset + limit]
+            transports = []
+            for row in paginated:
+                transports.append({
+                    "id": row.get("row_number"),
+                    "row_number": row.get("row_number"),
+                    "delivery_day": row.get("delivery_day"),
+                    "delivery_date": row.get("delivery_date").isoformat() if row.get("delivery_date") else None,
+                    "client": row.get("client"),
+                    "driver": row.get("driver"),
+                    "vehicle": row.get("vehicle"),
+                    "etd": row.get("etd"),
+                    "eta": row.get("eta"),
+                    "quantity": row.get("quantity"),
+                    "start_location": row.get("start_location"),
+                    "end_location": row.get("end_location"),
+                    "distance_km": row.get("distance_km"),
+                    "status": row.get("status") or "pending",
+                    "priority": row.get("priority") or "normal",
+                    "notes": row.get("notes"),
+                    "created_at": None,
+                })
+            return transports, total
+        except Exception:
+            pass
+
+    mock = MOCK_TRANSPORTS
+    if status:
+        mock = [t for t in mock if t.get("status") == status]
+    if day:
+        mock = [t for t in mock if t.get("delivery_day") == day]
+    total = len(mock)
+    return mock[offset: offset + limit], total
 
 @router.get("/transports")
 async def get_transports(
@@ -66,10 +83,16 @@ async def get_transports(
     day: Optional[str] = Query(None),
     limit: int = Query(100),
     offset: int = Query(0),
+    force_file: Optional[bool] = Query(False),
     db: Optional[Session] = Depends(get_db_optional)
 ):
     """Retrieve all livraisons/transports - public endpoint"""
     try:
+        # If `force_file` requested, return parsed Excel/mock data regardless of DB
+        if force_file:
+            transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
+            return {"transports": transports, "total": total}
+
         # If database is available, fetch real data
         if db:
             query = db.query(Livraison)
@@ -114,23 +137,15 @@ async def get_transports(
                 "total": total
             }
         else:
-            # Return mock data filtered by day if provided
-            mock = MOCK_TRANSPORTS
-            if status:
-                mock = [t for t in mock if t.get("status") == status]
-            if day:
-                mock = [t for t in mock if t.get("delivery_day") == day]
-            paginated = mock[offset: offset + limit]
-            return {"transports": paginated, "total": len(mock)}
+            transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
+            return {"transports": transports, "total": total}
 
     except Exception as e:
-        # Return mock data on error
-        mock = MOCK_TRANSPORTS
-        if day:
-            mock = [t for t in mock if t.get("delivery_day") == day]
+        # Return file-based or mock data on error
+        transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
         return {
-            "transports": mock[:limit],
-            "total": len(mock),
+            "transports": transports,
+            "total": total,
             "error": f"Database error: {str(e)}"
         }
 
