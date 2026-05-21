@@ -1,239 +1,472 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getKpi, getLiveTracking } from "../services/api";
-import StatCard from "../../components/cards/StatCard";
-import IconBubble from '../../components/icons/IconBubble';
-import BarChart from "../../components/charts/BarChart";
-import ChatPanel from "../../components/chat/ChatPanel";
-import { clients, drivers, trucks } from "../../data/coficabData";
+import { useState } from 'react';
+import dynamic from 'next/dynamic';
+import Link from 'next/link';
+import { motion } from 'framer-motion';
+import {
+  Truck,
+  Route,
+  AlertTriangle,
+  BarChart3,
+  TrendingUp,
+  TrendingDown,
+  Download,
+  Plus,
+  MoreHorizontal,
+  ChevronRight,
+  Leaf,
+  Bell,
+  Clock,
+} from 'lucide-react';
+import {
+  AreaChart,
+  Area,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  ComposedChart,
+} from 'recharts';
+import StatusBadge from '../../components/shared/StatusBadge';
+import {
+  kpiData,
+  weeklyData,
+  efficiencySegments,
+  fleetData,
+  timelineEvents,
+  alerts,
+  donutCenterText,
+} from '../../data/dashboardData';
+import { clients as initialClients, getClientPosition } from '../../data/coficabData';
 
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
+const TruckMapPreview = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
+
+const iconMap = {
+  truck: Truck,
+  route: Route,
+  'alert-triangle': AlertTriangle,
+  'bar-chart-3': BarChart3,
+};
+
+const alertIconMap = {
+  'alert-triangle': AlertTriangle,
+  clock: Clock,
+  info: Bell,
+};
+
+const container = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+};
+
+function CustomTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-3 border border-[#e8e5df] text-sm">
+        <p className="font-semibold text-[#1a1a2e] mb-1">{label}</p>
+        {payload.map((entry, index) => (
+          <div key={index} className="flex items-center gap-2 text-xs">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-[#6b6b7b]">{entry.name}:</span>
+            <span className="font-semibold text-[#1a1a2e]">{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
 }
 
 export default function DashboardPage() {
-  const [metrics, setMetrics] = useState({
-    planning_time: 0,
-    detection_latency: 0,
-    data_error_rate: 0,
-  });
-
-  const [tracking, setTracking] = useState([]);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [period, setPeriod] = useState("Week");
-  const [today] = useState(new Date());
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const kpi = await getKpi();
-        setMetrics(kpi);
-
-        const live = await getLiveTracking();
-        const items = live?.tracking_data
-          ? Object.values(live.tracking_data)
-          : live || [];
-
-        setTracking(items);
-
-        setChatMessages((prev) => [
-          "Welcome back! Live logistics data is up-to-date and ready for review.",
-          ...prev,
-        ]);
-      } catch (err) {
-        setChatMessages((prev) => [
-          "Unable to load real-time data. Please verify backend connectivity.",
-          ...prev,
-        ]);
-      }
-    }
-
-    load();
-  }, []);
-
-  const kpiCards = [
-    {
-      title: "Planning time",
-      value: `${metrics.planning_time ?? 0}s`,
-      hint: "Automated planning latency",
-      icon: <IconBubble kind="clock" />,
-    },
-    {
-      title: "Detection latency",
-      value: `${metrics.detection_latency ?? 0}s`,
-      hint: "Delay and anomaly detection",
-      icon: <IconBubble kind="bolt" />,
-    },
-    {
-      title: "Error rate",
-      value: `${((metrics.data_error_rate ?? 0) * 100).toFixed(2)}%`,
-      hint: "Quality of ingested data",
-      icon: <IconBubble kind="chart" />,
-    },
-  ];
-
-  const chartData = [
-    { label: "Planning", value: metrics.planning_time ?? 0 },
-    { label: "Detection", value: metrics.detection_latency ?? 0 },
-    { label: "Errors", value: (metrics.data_error_rate ?? 0) * 100 },
-  ];
+  const [period, setPeriod] = useState('Week');
 
   return (
-    <div className="space-y-8">
-      {/* HEADER */}
-      <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold text-[#1a1a2e]">
-              {getGreeting()}, John
-            </h1>
-            <p className="mt-1 text-sm text-[#6b6b7b]">
-              {today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            {["Week", "Month", "Year"].map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setPeriod(option)}
-                className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                  period === option
-                    ? "bg-[#7c3aed] text-white shadow-sm"
-                    : "bg-[#f0ede8] text-[#6b6b7b] hover:bg-[#e5e7eb]"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
-
-            <button className="rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e] hover:bg-[#faf8f5]">
-              Export
-            </button>
-
-            <button className="rounded-2xl bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9]">
-              + New Route
-            </button>
-          </div>
+    <div className="p-8 min-h-screen bg-[#f8f7f3]">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between mb-8"
+      >
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Operations dashboard</p>
+          <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Good morning, Ghada</h1>
+          <p className="mt-2 text-sm text-[#6b6b7b]">Wednesday, May 20, 2026 · Overview of fleet, routes and delivery performance.</p>
         </div>
-      </div>
+        <div className="flex flex-wrap gap-3">
+          {['Week', 'Month', 'Year'].map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setPeriod(option)}
+              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                period === option
+                  ? 'bg-[#7c3aed] text-white shadow-sm'
+                  : 'bg-white text-[#6b6b7b] border border-[#e8e5df] hover:bg-[#f5f3ff]'
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+          <button className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e] hover:bg-[#faf8f5] transition">
+            <Download size={16} />
+            Export
+          </button>
+          <button className="inline-flex items-center gap-2 rounded-2xl bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition shadow-sm">
+            <Plus size={16} />
+            New Route
+          </button>
+        </div>
+      </motion.div>
 
-      {/* MAIN GRID */}
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
-        <section className="space-y-8">
-          {/* KPI CARDS */}
-          <div className="grid gap-6 sm:grid-cols-3">
-            {kpiCards.map((card) => (
-              <StatCard key={card.title} {...card} />
-            ))}
-          </div>
-
-          {/* CHART + FLEET */}
-          <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
-            <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[#6b6b7b]">
-                    Operational snapshot
-                  </p>
-                  <h2 className="text-2xl font-semibold text-[#1a1a2e]">
-                    Executive overview
-                  </h2>
+      <motion.div variants={container} initial="hidden" animate="show" className="grid gap-6 xl:grid-cols-4 mb-8">
+        {kpiData.map((kpi) => {
+          const Icon = iconMap[kpi.icon] || BarChart3;
+          const isPositive = kpi.trend >= 0;
+          return (
+            <motion.div
+              key={kpi.id}
+              variants={item}
+              whileHover={{ y: -3, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+              className="bg-white rounded-2xl p-6 border border-[#e8e5df] cursor-pointer transition-shadow"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: kpi.iconBg }}>
+                  <Icon size={20} color={kpi.iconColor} />
                 </div>
-                <span className="rounded-full bg-[#f0ede8] px-3 py-2 text-sm text-[#6b6b7b]">
-                  Real-time
-                </span>
+                <button className="text-[#9e9ea4] hover:text-[#6b6b7b]"><MoreHorizontal size={18} /></button>
               </div>
+              <p className="text-sm text-[#6b6b7b] mb-1">{kpi.label}</p>
+              <p className="text-4xl font-bold text-[#1a1a2e] mb-3">{kpi.value}</p>
+              <div className="h-10 mb-3">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={kpi.sparklineData.map((value, index) => ({ value, index }))}>
+                    <defs>
+                      <linearGradient id={`grad-${kpi.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={kpi.iconColor} stopOpacity={0.2} />
+                        <stop offset="100%" stopColor={kpi.iconColor} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <Area type="monotone" dataKey="value" stroke={kpi.iconColor} strokeWidth={2} fill={`url(#grad-${kpi.id})`} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {isPositive ? (
+                  <TrendingUp size={14} className="text-[#22c55e]" />
+                ) : (
+                  <TrendingDown size={14} className="text-[#ef4444]" />
+                )}
+                <span className="text-sm font-medium text-[#22c55e]">{isPositive ? '+' : ''}{kpi.trend}%</span>
+                <span className="text-xs text-[#9e9aa4]">{kpi.trendLabel}</span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </motion.div>
 
-              <BarChart
-                title="Performance distribution"
-                data={chartData}
-                labelKey="label"
-                valueKey="value"
-              />
+      <div className="grid grid-cols-5 gap-6 mb-8">
+        <div className="col-span-3 space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-base font-semibold text-[#1a1a2e]">Weekly Delivery Analytics</h3>
+                <p className="text-sm text-[#6b6b7b]">Deliveries vs. Planned</p>
+              </div>
             </div>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={weeklyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+                  <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#9e9ea4', fontSize: 12 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9e9ea4', fontSize: 12 }} domain={[0, 200]} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="delivered" fill="#7c3aed" radius={[4, 4, 0, 0]} name="Delivered" barSize={28} />
+                  <Line type="monotone" dataKey="planned" stroke="#f97316" strokeWidth={2.5} dot={{ r: 4, fill: '#f97316', strokeWidth: 0 }} name="Planned" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex items-center gap-6 mt-4">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-[#7c3aed]" />
+                <span className="text-sm text-[#6b6b7b]">Delivered</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-[#f97316]" />
+                <span className="text-sm text-[#6b6b7b]">Planned</span>
+              </div>
+            </div>
+          </motion.div>
 
-            <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-xl font-semibold text-[#1a1a2e]">
-                Live fleet highlights
-              </h2>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm text-[#6b6b7b]">Fleet health</p>
+                <h2 className="text-2xl font-semibold text-[#1a1a2e]">Vehicle utilization</h2>
+              </div>
+              <button className="text-sm font-semibold text-[#7c3aed] hover:text-[#5b21b6]">View reports</button>
+            </div>
+            <div className="space-y-4">
+              {fleetData.map((vehicle) => {
+                const fillColor = vehicle.utilization >= 90 ? '#22c55e' : vehicle.utilization >= 80 ? '#f59e0b' : '#ef4444';
+                return (
+                  <div key={vehicle.name} className="space-y-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-semibold text-[#1a1a2e]">{vehicle.name}</p>
+                        <p className="text-sm text-[#6b6b7b] mt-1">{vehicle.type}</p>
+                      </div>
+                      <p className="text-sm font-semibold" style={{ color: fillColor }}>{vehicle.utilization}%</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-[#f0ede8] overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${vehicle.utilization}%`, backgroundColor: fillColor }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
 
-              <div className="space-y-4">
-                {tracking.slice(0, 5).map((truck, i) => (
-                  <div
-                    key={truck.transport_id || i}
-                    className="rounded-3xl border border-[#e8e5df] bg-[#faf8f5] p-4"
-                  >
-                    <p className="font-semibold text-[#1a1a2e]">
-                      {truck.transport_id || `Vehicle ${i + 1}`}
-                    </p>
-                    <p className="text-sm text-[#6b6b7b]">
-                      Status: {truck.status || "On time"}
-                    </p>
-                    <p className="text-sm text-[#6b6b7b]">
-                      ETA:{" "}
-                      {truck.eta_hours
-                        ? `${truck.eta_hours.toFixed(1)}h`
-                        : "Unknown"}
-                    </p>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-base font-semibold text-[#1a1a2e]">Recent Route Activity</h3>
+              <button className="text-sm text-[#7c3aed] font-medium hover:underline">
+                View All <ChevronRight size={14} className="inline" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              {timelineEvents.map((event, index) => (
+                <motion.div
+                  key={event.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 + 0.3 }}
+                  className="flex gap-4 relative"
+                >
+                  {index < timelineEvents.length - 1 && (
+                    <div className="absolute left-[7px] top-6 w-0.5 h-full bg-[#e8e5df]" />
+                  )}
+                  <div className="flex flex-col items-center">
+                    <div
+                      className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-1"
+                      style={{
+                        backgroundColor:
+                          event.status === 'completed'
+                            ? '#22c55e'
+                            : event.status === 'in-transit'
+                            ? '#3b82f6'
+                            : event.status === 'delayed'
+                            ? '#ef4444'
+                            : '#7c3aed',
+                        borderColor:
+                          event.status === 'completed'
+                            ? '#dcfce7'
+                            : event.status === 'in-transit'
+                            ? '#dbeafe'
+                            : event.status === 'delayed'
+                            ? '#fee2e2'
+                            : '#f5f3ff',
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 pb-5">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="text-sm font-semibold text-[#1a1a2e]">{event.route}</span>
+                        <p className="text-sm text-[#6b6b7b] mt-0.5">{event.description}</p>
+                        <p className="text-xs text-[#9e9aa4] mt-1">{event.time}</p>
+                      </div>
+                      <StatusBadge status={event.status === 'in-transit' ? 'in_transit' : event.status === 'completed' ? 'completed' : 'pending'} size="sm" />
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+
+        <div className="col-span-2 space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-[#1a1a2e]">Route Efficiency</h3>
+              <button className="text-[#9e9aa4] hover:text-[#6b6b7b]">
+                <Download size={16} />
+              </button>
+            </div>
+            <div className="flex flex-col items-center">
+              <div className="relative w-48 h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={efficiencySegments}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={3}
+                      dataKey="value"
+                      startAngle={90}
+                      endAngle={-270}
+                    >
+                      {efficiencySegments.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-3xl font-bold text-[#1a1a2e]">{donutCenterText.value}</span>
+                  <span className="text-xs text-[#9e9aa4]">{donutCenterText.label}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 mt-4 flex-wrap justify-center">
+                {efficiencySegments.map((seg) => (
+                  <div key={seg.name} className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: seg.color }} />
+                    <span className="text-xs text-[#6b6b7b]">{seg.name} {seg.value}%</span>
                   </div>
                 ))}
               </div>
-
-              <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-3xl border border-[#e8e5df] bg-[#faf8f5] p-4 text-sm">
-                  <p className="text-[#6b6b7b]">Total clients</p>
-                  <p className="mt-2 text-2xl font-semibold text-[#1a1a2e]">
-                    {clients.length}
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-[#e8e5df] bg-[#faf8f5] p-4 text-sm">
-                  <p className="text-[#6b6b7b]">Fleet size</p>
-                  <p className="mt-2 text-2xl font-semibold text-[#1a1a2e]">
-                    {trucks.length}
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-[#e8e5df] bg-[#faf8f5] p-4 text-sm">
-                  <p className="text-[#6b6b7b]">Active drivers</p>
-                  <p className="mt-2 text-2xl font-semibold text-[#1a1a2e]">
-                    {drivers.length}
-                  </p>
-                </div>
-              </div>
             </div>
-          </div>
-        </section>
+          </motion.div>
 
-        {/* SIDEBAR */}
-        <aside className="space-y-6">
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-400">Audit readiness</p>
-                <h2 className="text-lg font-semibold">
-                  Change tracking is active
-                </h2>
-              </div>
-              <span className="rounded-full bg-emerald-500/15 px-3 py-2 text-sm text-emerald-200">
-                Live
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl border border-[#e8e5df] overflow-hidden"
+          >
+            <div className="flex items-center justify-between p-5 pb-3">
+              <h3 className="text-base font-semibold text-[#1a1a2e]">Live Route Map</h3>
+              <span className="flex items-center gap-1.5 text-xs">
+                <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
+                <span className="text-[#6b6b7b]">12 Active</span>
               </span>
             </div>
-
-            <div className="space-y-3 text-sm text-slate-400">
-              <p>All dashboard operations are timestamped and traceable.</p>
-              <p>AI planning events are captured for audit review.</p>
+            <div className="px-5 pb-5">
+              <TruckMapPreview
+                trucks={[]}
+                clients={initialClients.map((client, index) => {
+                  const [lat, lng] = getClientPosition(client.destination, index);
+                  return { ...client, lat, lng };
+                })}
+                height={220}
+                hideHeader
+              />
             </div>
-          </div>
+            <div className="px-5 pb-5 flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs text-[#6b6b7b]">
+                <span className="w-2 h-2 rounded-full bg-[#7c3aed]" /> Optimized
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-[#6b6b7b]">
+                <span className="w-2 h-2 rounded-full bg-[#f97316]" /> Standard
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-[#6b6b7b]">
+                <span className="w-2 h-2 rounded-full bg-[#ef4444]" /> Delayed
+              </div>
+              <Link href="/map" className="ml-auto text-xs text-[#7c3aed] font-medium hover:underline">
+                View Full Map →
+              </Link>
+            </div>
+          </motion.div>
 
-          <ChatPanel messages={chatMessages} />
-        </aside>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <h3 className="text-base font-semibold text-[#1a1a2e] mb-4">CO₂ Reduction</h3>
+            <div className="flex flex-col items-center text-center">
+              <div className="w-12 h-12 rounded-xl bg-[#14b8a6]/10 flex items-center justify-center mb-3">
+                <Leaf size={24} className="text-[#14b8a6]" />
+              </div>
+              <p className="text-2xl font-bold text-[#14b8a6]">2.4 tonnes</p>
+              <p className="text-sm text-[#6b6b7b] mb-4">saved this month</p>
+              <div className="w-full h-2 bg-[#f0ede8] rounded-full overflow-hidden mb-2">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: '78%' }}
+                  transition={{ duration: 1, ease: 'easeOut' }}
+                  className="h-full bg-[#14b8a6] rounded-full"
+                />
+              </div>
+              <p className="text-xs text-[#9e9aa4] mb-4">78% of monthly target</p>
+              <p className="text-sm text-[#6b6b7b] italic">
+                Equivalent to planting <span className="font-semibold text-[#14b8a6]">120 trees</span>
+              </p>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
+            className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-[#1a1a2e]">Real-time Alerts</h3>
+              <span className="text-xs font-semibold bg-[#f97316] text-white rounded-md px-2 py-0.5">3</span>
+            </div>
+            <div className="space-y-3">
+              {alerts.map((alert) => {
+                const AlertIcon = alertIconMap[alert.icon] || Bell;
+                return (
+                  <motion.div
+                    key={alert.id}
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="p-3 rounded-xl border-l-[3px]"
+                    style={{
+                      backgroundColor: alert.bgColor,
+                      borderLeftColor: alert.borderColor,
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertIcon size={18} style={{ color: alert.borderColor }} className="flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-[#1a1a2e]">{alert.title}</p>
+                        <p className="text-xs text-[#6b6b7b] mt-0.5">{alert.description}</p>
+                        <p className="text-xs text-[#9e9aa4] mt-1">{alert.time}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
+        </div>
       </div>
     </div>
   );

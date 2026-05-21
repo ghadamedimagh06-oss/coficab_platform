@@ -6,8 +6,14 @@ import { getLiveTracking } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
+import { clients as initialClients, getClientPosition } from '../../data/coficabData';
 
 const TruckMap = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
+
+const mapClients = initialClients.map((client, index) => {
+  const [lat, lng] = getClientPosition(client.destination, index);
+  return { ...client, lat, lng };
+});
 
 export default function MapPage() {
   const [tracking, setTracking] = useState([]);
@@ -51,7 +57,7 @@ export default function MapPage() {
         </div>
 
         <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
-          <TruckMap trucks={tracking} />
+          <TruckMap trucks={tracking} clients={mapClients} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">

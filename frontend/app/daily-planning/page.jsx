@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from 'react';
-import { getDailyPlanning } from '../services/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import { CalendarDays, Box, Truck, Clock3, ClipboardList } from 'lucide-react';
+import { getDailyPlanningFromFile } from '../services/api';
 import StatCard from '../../components/cards/StatCard';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEKDAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const REFRESH_INTERVAL = 30;
 
 const STATUS_CONFIG = {
@@ -20,6 +23,16 @@ const PRIORITY_CONFIG = {
   low:    { label: 'Low',    cls: 'bg-slate-50  text-slate-500  border border-slate-200'  },
 };
 
+const container = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+};
+
 function formatDate(date) {
   return date.toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -33,7 +46,10 @@ function formatTime(date) {
 }
 
 export default function DailyPlanningPage() {
-  const [deliveries, setDeliveries] = useState([]);
+  const [allDeliveries, setAllDeliveries] = useState([]);
+  const [selectedDay, setSelectedDay] = useState('');
+  const [availableDays, setAvailableDays] = useState([]);
+  const [dayCounts, setDayCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [now, setNow] = useState(new Date());
@@ -51,15 +67,34 @@ export default function DailyPlanningPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getDailyPlanning(DAYS[new Date().getDay()]);
-      setDeliveries(Array.isArray(data) ? data : []);
+      const data = await getDailyPlanningFromFile();
+      const rows = Array.isArray(data) ? data : [];
+      setAllDeliveries(rows);
+
+      const counts = rows.reduce((acc, row) => {
+        const day = row.delivery_day || 'Unknown';
+        acc[day] = (acc[day] || 0) + 1;
+        return acc;
+      }, {});
+      setDayCounts(counts);
+      setAvailableDays(Object.keys(counts).sort((a, b) => {
+        return WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b);
+      }));
+
+      const defaultDay = counts[todayName] ? todayName : Object.keys(counts).sort((a, b) => {
+        return WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b);
+      })[0] || todayName;
+      setSelectedDay((current) => (current && counts[current] ? current : defaultDay));
     } catch {
-      setError('Unable to load planning data. Showing last known state.');
+      setError('Unable to load planning data from file. Showing last known state.');
+      setAllDeliveries([]);
+      setDayCounts({});
+      setSelectedDay(todayName);
     } finally {
       setLoading(false);
       setCountdown(REFRESH_INTERVAL);
     }
-  }, []);
+  }, [todayName]);
 
   // Initial load
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -75,6 +110,25 @@ export default function DailyPlanningPage() {
     return () => clearInterval(id);
   }, [fetchData]);
 
+  const deliveries = useMemo(
+    () => allDeliveries
+      .filter((delivery) => delivery.delivery_day === selectedDay)
+      .map((delivery) => ({
+        ...delivery,
+        comments:
+          delivery.Comments ||
+          delivery.comments ||
+          delivery.note ||
+          (delivery.special_instructions ? delivery.special_instructions : null) ||
+          (delivery.status === 'pending' ? 'Waiting for dispatch' :
+            delivery.status === 'in_transit' ? 'On the road' :
+            delivery.status === 'completed' ? 'Delivered' :
+            delivery.end_location ? `Destination: ${delivery.end_location}` : 'No comment'),
+      })),
+
+    [allDeliveries, selectedDay]
+  );
+
   const stats = {
     total:      deliveries.length,
     completed:  deliveries.filter((d) => d.status === 'completed').length,
@@ -83,202 +137,200 @@ export default function DailyPlanningPage() {
   };
 
   return (
-    <div className="space-y-8">
-
-      {/* ── Header card ── */}
-      <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-[#6b6b7b]">
-              COFICAB — Weekly Planning
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold text-[#1a1a2e]">Daily Planning</h1>
-            <p className="mt-1 text-sm text-[#6b6b7b]">{formatDate(now)}</p>
-          </div>
-
-          <div className="flex flex-col items-start gap-3 xl:items-end">
-            <div className="rounded-[1.5rem] bg-[#7c3aed] px-7 py-4 text-center min-w-[170px]">
-              <p className="text-[10px] uppercase tracking-[0.28em] text-white/70">Current time</p>
-              <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-white">
-                {formatTime(now)}
-              </p>
+    <div className="p-8 min-h-screen bg-[#f5f5f7]">
+      <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
+        <motion.div variants={item} className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Daily Planning</p>
+              <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Good morning, Ghada</h1>
+              <p className="mt-2 text-sm leading-6 text-[#6b6b7b]">Your delivery plan for the day, refreshed automatically from the planning file.</p>
             </div>
-            <div className="flex items-center gap-2 text-xs text-[#6b6b7b]">
-              <span
-                className={`inline-block h-2 w-2 rounded-full transition-colors ${
-                  loading ? 'bg-amber-400' : 'bg-emerald-400'
-                }`}
-              />
-              {loading ? 'Refreshing…' : `Auto-refresh in ${countdown}s`}
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Current time</p>
+                <p className="mt-3 text-2xl font-semibold text-[#1a1a2e]">{formatTime(now)}</p>
+              </div>
+              <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Date</p>
+                <p className="mt-3 text-lg font-semibold text-[#1a1a2e]">{formatDate(now)}</p>
+              </div>
+              <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Status</p>
+                <p className={`mt-3 inline-flex rounded-full px-4 py-2 text-sm font-semibold ${loading ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                  {loading ? 'Refreshing…' : `Auto-refresh in ${countdown}s`}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {error && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            {error}
+          {error && (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {error}
+            </div>
+          )}
+        </motion.div>
+
+        <motion.div variants={container} className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
+          <div className="space-y-6">
+            <motion.div variants={item} className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[1.75rem] bg-white p-6 border border-[#e8e5df] shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="rounded-2xl bg-[#eef2ff] p-3 text-[#4338ca]">
+                    <Box size={20} />
+                  </div>
+                </div>
+                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Deliveries</p>
+                <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{stats.total}</p>
+                <p className="mt-3 text-xs text-[#9e9aa4]">Selected day total</p>
+              </div>
+              <div className="rounded-[1.75rem] bg-white p-6 border border-[#e8e5df] shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="rounded-2xl bg-[#ecfdf5] p-3 text-[#15803d]">
+                    <Clock3 size={20} />
+                  </div>
+                </div>
+                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Pending</p>
+                <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{stats.pending}</p>
+                <p className="mt-3 text-xs text-[#9e9aa4]">Waiting to depart</p>
+              </div>
+              <div className="rounded-[1.75rem] bg-white p-6 border border-[#e8e5df] shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="rounded-2xl bg-[#eff6ff] p-3 text-[#1d4ed8]">
+                    <Truck size={20} />
+                  </div>
+                </div>
+                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">In transit</p>
+                <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{stats.in_transit}</p>
+                <p className="mt-3 text-xs text-[#9e9aa4]">On the road now</p>
+              </div>
+              <div className="rounded-[1.75rem] bg-white p-6 border border-[#e8e5df] shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="rounded-2xl bg-[#fef3c7] p-3 text-[#b45309]">
+                    <ClipboardList size={20} />
+                  </div>
+                </div>
+                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Completed</p>
+                <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{stats.completed}</p>
+                <p className="mt-3 text-xs text-[#9e9aa4]">Delivered successfully</p>
+              </div>
+            </motion.div>
+
+            <motion.div variants={item} className="rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm overflow-hidden">
+              <div className="flex flex-col gap-4 border-b border-[#e8e5df] bg-[#f8f7f3] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Daily planning — selected day</p>
+                  <h2 className="text-2xl font-semibold text-[#1a1a2e]">
+                    {selectedDay || todayName} deliveries
+                  </h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="rounded-full bg-[#eef2ff] px-3 py-2 text-sm font-semibold text-[#4338ca]">{deliveries.length} active deliveries</span>
+                  <button
+                    onClick={fetchData}
+                    disabled={loading}
+                    className="rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#fafaff] disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-6 py-5">
+                <div className="flex flex-wrap gap-3">
+                  {availableDays.map((day) => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setSelectedDay(day)}
+                      className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                        selectedDay === day
+                          ? 'bg-[#7c3aed] text-white shadow-sm'
+                          : 'bg-[#f8f7f3] text-[#1a1a2e] border border-[#e8e5df] hover:bg-white'
+                      }`}
+                    >
+                      {day} ({dayCounts[day] || 0})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {loading && (
+                <div className="h-1 w-full bg-[#f0ede8]">
+                  <div className="h-1 w-1/3 animate-pulse rounded-full bg-[#7c3aed]" />
+                </div>
+              )}
+
+              {deliveries.length === 0 && !loading ? (
+                <div className="py-16 text-center">
+                  <p className="text-4xl">📭</p>
+                  <p className="mt-4 text-lg font-medium text-[#1a1a2e]">No deliveries scheduled for {selectedDay || todayName}</p>
+                  <p className="mt-2 text-sm text-[#6b6b7b]">Sync the planning file or refresh to update the latest schedule.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-[1.5rem] border border-[#e8e5df] bg-white shadow-sm">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#e8e5df] bg-[#f8f7f3]">
+                        {['#', 'Client', 'Driver', 'Vehicle', 'Comments', 'ETD', 'ETA', 'Dist (km)', 'Qty', 'Status', 'Priority'].map(
+                          (col) => (
+                            <th
+                              key={col}
+                              className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6b6b7b] whitespace-nowrap"
+                            >
+                              {col}
+                            </th>
+                          )
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#e8e5df] bg-white">
+                      {deliveries.map((d, i) => {
+                        const s = STATUS_CONFIG[d.status] ?? STATUS_CONFIG.pending;
+                        const p = PRIORITY_CONFIG[d.priority] ?? PRIORITY_CONFIG.normal;
+                        return (
+                          <tr key={d.id ?? i} className="transition hover:bg-[#faf8f5]">
+                            <td className="px-5 py-4 text-[#6b6b7b]">{d.row_number ?? i + 1}</td>
+                            <td className="px-5 py-4 max-w-[220px]">
+                              <span className="block truncate font-semibold text-[#1a1a2e]" title={d.client || d.end_location}>
+                                {d.client || d.end_location || '—'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4 whitespace-nowrap text-[#1a1a2e]">{d.driver}</td>
+                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.vehicle}</td>
+                            <td className="px-5 py-4 max-w-[260px] overflow-hidden text-[#1a1a2e]">
+                              <span className="block truncate" title={d.comments || d.note || d.end_location || '—'}>
+                                {d.comments || d.note || d.end_location || '—'}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.etd ?? '—'}</td>
+                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.eta ?? '—'}</td>
+                            <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">{d.distance_km != null ? d.distance_km.toFixed(1) : '—'}</td>
+                            <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">{d.quantity ?? '—'}</td>
+                            <td className="px-5 py-4 whitespace-nowrap">
+                              <span className={`rounded-full px-3 py-1 text-xs font-medium ${s.cls}`}>{s.label}</span>
+                            </td>
+                            <td className="px-5 py-4 whitespace-nowrap">
+                              <span className={`rounded-full px-3 py-1 text-xs font-medium ${p.cls}`}>{p.label}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {deliveries.length > 0 && !loading && (
+                <div className="border-t border-[#e8e5df] px-6 py-4 text-xs text-[#9e9eaa]">
+                  {deliveries.length} deliveries shown · Data from <span className="font-medium text-[#6b6b7b]">weekly planning/</span> folder · auto-refreshes every {REFRESH_INTERVAL}s
+                </div>
+              )}
+            </motion.div>
           </div>
-        )}
-      </div>
-
-      {/* ── Stat cards ── */}
-      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Deliveries today"
-          value={stats.total}
-          hint={`${todayName}'s complete plan`}
-          icon="📦"
-        />
-        <StatCard
-          title="Completed"
-          value={stats.completed}
-          hint="Delivered successfully"
-          icon="✅"
-          tone="text-emerald-600"
-        />
-        <StatCard
-          title="In transit"
-          value={stats.in_transit}
-          hint="Currently on route"
-          icon="🚛"
-          tone="text-blue-600"
-        />
-        <StatCard
-          title="Pending"
-          value={stats.pending}
-          hint="Awaiting departure"
-          icon="⏳"
-          tone="text-amber-600"
-        />
-      </div>
-
-      {/* ── Deliveries table ── */}
-      <div className="rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm overflow-hidden">
-
-        {/* Table header */}
-        <div className="flex items-center justify-between border-b border-[#e8e5df] px-6 py-5">
-          <div>
-            <p className="text-sm text-[#6b6b7b]">Weekly planning — filtered by current day</p>
-            <h2 className="text-2xl font-semibold text-[#1a1a2e]">
-              {todayName}&rsquo;s Deliveries
-            </h2>
-          </div>
-          <button
-            onClick={fetchData}
-            disabled={loading}
-            className="rounded-2xl border border-[#e8e5df] bg-[#faf8f5] px-4 py-2 text-sm font-medium text-[#1a1a2e] transition hover:bg-[#f0ede8] disabled:opacity-50"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {/* Loading bar */}
-        {loading && (
-          <div className="h-1 w-full bg-[#f0ede8]">
-            <div className="h-1 w-1/3 animate-pulse rounded-full bg-[#7c3aed]" />
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!loading && deliveries.length === 0 && (
-          <div className="py-24 text-center">
-            <p className="text-5xl">📭</p>
-            <p className="mt-4 text-lg font-medium text-[#1a1a2e]">
-              No deliveries scheduled for {todayName}
-            </p>
-            <p className="mt-1 text-sm text-[#6b6b7b]">
-              Check the weekly planning file or ingest new data from the Admin panel.
-            </p>
-          </div>
-        )}
-
-        {/* Table */}
-        {deliveries.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#e8e5df] bg-[#faf8f5]">
-                  {['#', 'Client', 'Driver', 'Vehicle', 'Route', 'ETD', 'ETA', 'Dist (km)', 'Qty', 'Status', 'Priority'].map(
-                    (col) => (
-                      <th
-                        key={col}
-                        className="px-5 py-4 text-left text-[11px] font-medium uppercase tracking-[0.18em] text-[#6b6b7b] whitespace-nowrap"
-                      >
-                        {col}
-                      </th>
-                    )
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#e8e5df]">
-                {deliveries.map((d, i) => {
-                  const s = STATUS_CONFIG[d.status]   ?? STATUS_CONFIG.pending;
-                  const p = PRIORITY_CONFIG[d.priority] ?? PRIORITY_CONFIG.normal;
-                  return (
-                    <tr key={d.id ?? i} className="transition hover:bg-[#faf8f5]">
-                      <td className="px-5 py-4 text-[#9e9eaa]">{d.row_number ?? i + 1}</td>
-
-                      <td className="px-5 py-4 max-w-[200px]">
-                        <span className="block truncate font-medium text-[#1a1a2e]" title={d.client || d.end_location}>
-                          {d.client || d.end_location || '—'}
-                        </span>
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap text-[#1a1a2e]">{d.driver}</td>
-
-                      <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">
-                        {d.vehicle}
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className="text-[#1a1a2e]">{d.start_location}</span>
-                        <span className="mx-2 text-[#9e9eaa]">→</span>
-                        <span className="text-[#1a1a2e]">{d.end_location}</span>
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">
-                        {d.etd ?? '—'}
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">
-                        {d.eta ?? '—'}
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">
-                        {d.distance_km != null ? d.distance_km.toFixed(1) : '—'}
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">
-                        {d.quantity ?? '—'}
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className={`rounded-full px-3 py-1 text-xs font-medium ${s.cls}`}>
-                          {s.label}
-                        </span>
-                      </td>
-
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className={`rounded-full px-3 py-1 text-xs font-medium ${p.cls}`}>
-                          {p.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Footer row */}
-        {deliveries.length > 0 && (
-          <div className="border-t border-[#e8e5df] px-6 py-4 text-xs text-[#9e9eaa]">
-            {deliveries.length} deliveries shown &middot; Data from&nbsp;
-            <span className="font-medium text-[#6b6b7b]">weekly planning/</span> folder &middot; auto-refreshes every {REFRESH_INTERVAL}s
-          </div>
-        )}
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }

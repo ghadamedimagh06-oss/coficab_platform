@@ -84,22 +84,22 @@ export function getClientPosition(destination, index = 0) {
 }
 
 export const trucks = [
-  { id: 'Camion001', plate_number: '2282TU131', type: 'Poids lourd', capacity: 10200, max_pallets: 14, assigned_driver: 'Chauf001' },
-  { id: 'Camion002', plate_number: '9524TU238', type: 'Poids lourd', capacity: 10230, max_pallets: 14, assigned_driver: 'Chauf002' },
-  { id: 'Camion003', plate_number: '5735TU217', type: 'Poids lourd', capacity: 9227, max_pallets: 14, assigned_driver: 'Chauf003' },
-  { id: 'Camion004', plate_number: '4331TU175', type: 'Poids lourd', capacity: 9200, max_pallets: 14, assigned_driver: 'Chauf004' },
-  { id: 'Camion005', plate_number: 'REM107627', type: 'Semi remorque', capacity: 24950, max_pallets: 24, assigned_driver: 'Chauf005' },
-  { id: 'Camion006', plate_number: '626TU203', type: 'Tourisme', capacity: 7650, max_pallets: 14, assigned_driver: 'Chauf006' },
-  { id: 'Camion007', plate_number: '7797TU218', type: 'Poids lourd', capacity: 925, max_pallets: 4, assigned_driver: 'Chauf007' },
-  { id: 'Camion008', plate_number: '6502TU247', type: 'Poids lourd', capacity: 8500, max_pallets: 14, assigned_driver: null },
+  { id: 'Camion001', plate_number: '2282TU131', type: 'Poids lourd', capacity: 10200, max_pallets: 14, assigned_driver: 'Chauf001', status: 'En route' },
+  { id: 'Camion002', plate_number: '9524TU238', type: 'Poids lourd', capacity: 10230, max_pallets: 14, assigned_driver: 'Chauf002', status: 'En route' },
+  { id: 'Camion003', plate_number: '5735TU217', type: 'Poids lourd', capacity: 9227, max_pallets: 14, assigned_driver: 'Chauf003', status: 'En route' },
+  { id: 'Camion004', plate_number: '4331TU175', type: 'Poids lourd', capacity: 9200, max_pallets: 14, assigned_driver: 'Chauf004', status: 'En route' },
+  { id: 'Camion005', plate_number: 'REM107627', type: 'Semi remorque', capacity: 24950, max_pallets: 24, assigned_driver: 'Chauf005', status: 'En route' },
+  { id: 'Camion006', plate_number: '626TU203', type: 'Tourisme', capacity: 7650, max_pallets: 14, assigned_driver: 'Chauf006', status: 'Disponible' },
+  { id: 'Camion007', plate_number: '7797TU218', type: 'Poids lourd', capacity: 925, max_pallets: 4, assigned_driver: 'Chauf007', status: 'En maintenance' },
+  { id: 'Camion008', plate_number: '6502TU247', type: 'Poids lourd', capacity: 8500, max_pallets: 14, assigned_driver: null, status: 'En panne' },
 ];
 
 export const drivers = [
-  { id: 'Chauf001', full_name: 'Ala', phone: '+216 20 000 001', license_number: 'A001', license_type: 'C', hire_date: '2023-11-01', status: 'Active', assigned_truck: 'Camion001' },
-  { id: 'Chauf002', full_name: 'Bilel', phone: '+216 20 000 002', license_number: 'A002', license_type: 'C', hire_date: '2023-10-10', status: 'Active', assigned_truck: 'Camion002' },
-  { id: 'Chauf003', full_name: 'Hbib', phone: '+216 20 000 003', license_number: 'A003', license_type: 'C', hire_date: '2023-09-20', status: 'Active', assigned_truck: 'Camion003' },
-  { id: 'Chauf004', full_name: 'Houssem', phone: '+216 20 000 004', license_number: 'A004', license_type: 'C', hire_date: '2023-08-15', status: 'Active', assigned_truck: 'Camion004' },
-  { id: 'Chauf005', full_name: 'Karim', phone: '+216 20 000 005', license_number: 'A005', license_type: 'C', hire_date: '2023-12-05', status: 'Active', assigned_truck: 'Camion005' },
-  { id: 'Chauf006', full_name: 'Mehrez', phone: '+216 20 000 006', license_number: 'A006', license_type: 'C', hire_date: '2024-01-10', status: 'Active', assigned_truck: 'Camion006' },
-  { id: 'Chauf007', full_name: 'Ridha', phone: '+216 20 000 007', license_number: 'A007', license_type: 'C', hire_date: '2024-02-18', status: 'Active', assigned_truck: 'Camion007' },
+  { id: 'Chauf001', full_name: 'Ala', phone: '+216 20 000 001', license_number: 'A001', license_type: 'C', hire_date: '2023-11-01', status: 'Active', shift: 'Jour', assigned_truck: 'Camion001' },
+  { id: 'Chauf002', full_name: 'Bilel', phone: '+216 20 000 002', license_number: 'A002', license_type: 'C', hire_date: '2023-10-10', status: 'Active', shift: 'Jour', assigned_truck: 'Camion002' },
+  { id: 'Chauf003', full_name: 'Hbib', phone: '+216 20 000 003', license_number: 'A003', license_type: 'C', hire_date: '2023-09-20', status: 'Active', shift: 'Nuit', assigned_truck: 'Camion003' },
+  { id: 'Chauf004', full_name: 'Houssem', phone: '+216 20 000 004', license_number: 'A004', license_type: 'C', hire_date: '2023-08-15', status: 'Active', shift: 'Jour', assigned_truck: 'Camion004' },
+  { id: 'Chauf005', full_name: 'Karim', phone: '+216 20 000 005', license_number: 'A005', license_type: 'C', hire_date: '2023-12-05', status: 'Active', shift: 'Jour', assigned_truck: 'Camion005' },
+  { id: 'Chauf006', full_name: 'Mehrez', phone: '+216 20 000 006', license_number: 'A006', license_type: 'C', hire_date: '2024-01-10', status: 'Active', shift: 'Nuit', assigned_truck: 'Camion006' },
+  { id: 'Chauf007', full_name: 'Ridha', phone: '+216 20 000 007', license_number: 'A007', license_type: 'C', hire_date: '2024-02-18', status: 'Active', shift: 'Jour', assigned_truck: 'Camion007' },
 ];

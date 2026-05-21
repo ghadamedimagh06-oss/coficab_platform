@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001';
 const debugAPI = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
 const api = axios.create({
@@ -57,6 +57,11 @@ export async function getTransports() {
 
 export async function getDailyPlanning(day: string) {
   const response = await api.get('/api/data/transports', { params: { day, limit: 200, force_file: true } });
+  return response.data.transports || response.data;
+}
+
+export async function getDailyPlanningFromFile() {
+  const response = await api.get('/api/data/transports', { params: { limit: 1000, force_file: true } });
   return response.data.transports || response.data;
 }
 
