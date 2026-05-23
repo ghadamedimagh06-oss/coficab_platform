@@ -16,7 +16,8 @@ import {
 const mainNavItems = [
   { icon: Home, label: 'Dashboard', href: '/dashboard' },
   { icon: CalendarDays, label: 'Planning', href: '/planning' },
-  { icon: FileText, label: 'Daily Planning', href: '/daily-planning' },
+  { icon: FileText, label: 'Daily Deliveries', href: '/daily-planning' },
+  { icon: FileText, label: 'Generated Planning', href: '/generated-planning' },
   { icon: BookOpen, label: 'Ressources', href: '/ressources' },
   { icon: Compass, label: 'Map', href: '/map' },
 ];

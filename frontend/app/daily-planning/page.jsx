@@ -273,7 +273,7 @@ export default function DailyPlanningPage() {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b border-[#e8e5df] bg-[#f8f7f3]">
-                        {['#', 'Client', 'Driver', 'Vehicle', 'Comments', 'ETD', 'ETA', 'Dist (km)', 'Qty', 'Status', 'Priority'].map(
+                        {['#', 'Client', 'Position', 'Comments', 'ETD', 'ETA', 'Dist (km)', 'Status', 'Priority'].map(
                           (col) => (
                             <th
                               key={col}
@@ -297,8 +297,7 @@ export default function DailyPlanningPage() {
                                 {d.client || d.end_location || '—'}
                               </span>
                             </td>
-                            <td className="px-5 py-4 whitespace-nowrap text-[#1a1a2e]">{d.driver}</td>
-                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.vehicle}</td>
+                            <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e] font-semibold">{d.quantity ?? '—'}</td>
                             <td className="px-5 py-4 max-w-[260px] overflow-hidden text-[#1a1a2e]">
                               <span className="block truncate" title={d.comments || d.note || d.end_location || '—'}>
                                 {d.comments || d.note || d.end_location || '—'}
@@ -307,7 +306,6 @@ export default function DailyPlanningPage() {
                             <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.etd ?? '—'}</td>
                             <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-[#1a1a2e]">{d.eta ?? '—'}</td>
                             <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">{d.distance_km != null ? d.distance_km.toFixed(1) : '—'}</td>
-                            <td className="px-5 py-4 whitespace-nowrap text-right text-[#1a1a2e]">{d.quantity ?? '—'}</td>
                             <td className="px-5 py-4 whitespace-nowrap">
                               <span className={`rounded-full px-3 py-1 text-xs font-medium ${s.cls}`}>{s.label}</span>
                             </td>

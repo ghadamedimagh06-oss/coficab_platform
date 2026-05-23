@@ -70,6 +70,11 @@ export async function proposeOptimization(payload: any) {
   return response.data;
 }
 
+export async function generatePlanning(payload: any) {
+  const response = await api.post('/api/optimization/planning/generate', payload);
+  return response.data;
+}
+
 export async function triggerIngestion(filePath: string) {
   const response = await api.post('/api/ingestion/trigger', {
     file_path: filePath,

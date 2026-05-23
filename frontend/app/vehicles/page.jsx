@@ -1,25 +1,43 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Truck, CheckCircle, BarChart3 } from 'lucide-react';
-import { trucks } from '../../data/coficabData';
+import { trucks as initialTrucks } from '../../data/coficabData';
 
 const statsAnimation = {
   hidden: { opacity: 0, y: 16 },
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
+const statusOptions = ['Disponible', 'En route', 'En panne', 'En maintenance'];
+
+const statusStyles = {
+  Disponible: 'bg-[#ecfdf5] text-[#15803d]',
+  'En route': 'bg-[#eff6ff] text-[#2563eb]',
+  'En panne': 'bg-[#fee2e2] text-[#dc2626]',
+  'En maintenance': 'bg-[#fef3c7] text-[#b45309]',
+};
+
 export default function VehiclesPage() {
+  const [trucks, setTrucks] = useState(initialTrucks);
+
+  const handleStatusChange = (truckId, status) => {
+    setTrucks((prev) => prev.map((truck) => (truck.id === truckId ? { ...truck, status } : truck)));
+  };
+
   const summary = useMemo(
     () => ({
       total: trucks.length,
       active: trucks.filter((truck) => truck.status === 'En route').length,
       available: trucks.filter((truck) => truck.status === 'Disponible').length,
     }),
-    []
+    [trucks]
   );
-
+  const sortedTrucks = useMemo(
+    () => [...trucks].sort((a, b) => b.capacity - a.capacity),
+    [trucks]
+  );
   return (
     <div className="p-8 min-h-screen bg-[#f8f7f3]">
       <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm mb-8">
@@ -64,9 +82,12 @@ export default function VehiclesPage() {
       </div>
 
       <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] bg-white border border-[#e8e5eb] shadow-sm overflow-hidden">
-        <div className="bg-[#f8f7f3] px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">Vehicle details</div>
+        <div className="flex items-center justify-between bg-[#f8f7f3] px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">
+          <span>Vehicle details</span>
+          <span className="rounded-full bg-[#eff6ff] px-3 py-1 text-[11px] font-semibold text-[#2563eb]">{summary.total} trucks</span>
+        </div>
         <div className="divide-y divide-[#e8e5df] bg-white">
-          {trucks.map((truck) => (
+          {sortedTrucks.map((truck) => (
             <div key={truck.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-4 px-6 py-4 text-sm text-[#1a1a2e] items-center hover:bg-[#faf8f5] transition">
               <div>
                 <p className="font-semibold">{truck.id}</p>
@@ -74,7 +95,17 @@ export default function VehiclesPage() {
               </div>
               <div className="text-[#6b7280]">{truck.type}</div>
               <div className="text-[#111827] font-semibold">{truck.capacity} kg</div>
-              <div className="rounded-full bg-[#eef2ff] px-3 py-1 text-xs font-semibold text-[#4338ca]">{truck.status}</div>
+              <div>
+                <select
+                  value={truck.status}
+                  onChange={(event) => handleStatusChange(truck.id, event.target.value)}
+                  className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold ${statusStyles[truck.status] || 'bg-white text-[#1a1a2e]'}`}
+                >
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           ))}
         </div>

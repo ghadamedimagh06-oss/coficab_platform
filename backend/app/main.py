@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import datetime
 
-from app.routes import metrics, tracking, ingestion, optimization, data, auth, tasks, planning_governance
+from app.routes import metrics, tracking, ingestion, optimization, data, auth, tasks, planning_governance, delivery_split
 from app.database import engine, Base
 from app.services.excel_watcher import ExcelWatcherService
 import app.models
@@ -81,6 +81,7 @@ app.include_router(data.router, prefix="/api/data", tags=["data"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(planning_governance.router, prefix="/api/planning", tags=["planning"])
+app.include_router(delivery_split.router, prefix="/api", tags=["delivery-split"])
 
 
 @app.get("/")
