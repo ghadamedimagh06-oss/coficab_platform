@@ -1,197 +1,188 @@
 # CofICab Platform
 
-A multi-agent intelligent logistics platform designed to automate planning, monitor operations in real time, and reduce manual errors in transport management.
+A multi-agent intelligent logistics platform that automates planning, monitors operations in real time, and reduces manual errors in transport management.
 
-## 🎯 Project Objective
+---
 
-The goal of this platform is to transform a manual, reactive logistics process into a:
+## Quick Start (Windows PowerShell)
 
-- ⚡ Real-time monitored system
-- 🤖 Automated decision pipeline
-- 📊 Data-driven control dashboard
+### Prerequisites
 
-## 🧠 Problem Statement
+| Tool | Version | Check |
+|------|---------|-------|
+| Python | 3.10+ | `python --version` |
+| Node.js | 18+ | `node --version` |
+| PostgreSQL | 15+ | optional — backend runs without it |
+| Redis | 7+ | optional — agents degrade gracefully |
 
-The current system suffers from:
+### 1. Install Python dependencies
 
-- ⏱️ Heavy manual planning (15–21 min per plan)
-- 🐌 Delayed issue detection (~4 hours latency)
-- ⚠️ High data error rate (12–18%)
-
-## 🚀 Proposed Solution
-
-A multi-agent system integrated with a 5-layer architecture, enabling:
-
-- Real-time data ingestion
-- Automated scheduling
-- Intelligent alerting
-- Continuous tracking (ETA, delays)
-
-## 🏗️ System Architecture
-
-```
-coficab-platform/
-│
-├── frontend/        # React + Next.js Dashboard
-├── backend/         # FastAPI Application
-├── agents/          # Multi-Agent System
-│   ├── agent1_watchdog/      # File/System monitoring
-│   ├── agent2_scheduler/     # Task scheduling
-│   ├── agent3_alert/         # Alert management
-│   └── agent4_tracker/       # Data tracking
-├── database/        # PostgreSQL schema
-├── docs/            # PFE documentation
-└── README.md
+```powershell
+cd backend
+pip install -r requirements.txt
 ```
 
-## 🤖 Multi-Agent System (Core of the Platform)
+### 2. Install frontend dependencies
 
-The system is driven by 4 specialized agents, each responsible for a critical part of the pipeline.
+```powershell
+cd frontend
+npm install
+```
 
-### 🟢 Agent 1 — Watchdog (Ingestion Trigger)
+### 3. Start everything (open 6 separate PowerShell terminals)
 
-- Monitors shared folder in real time
-- Detects new Excel planning files (< 1 second)
-- Triggers ingestion pipeline
+**Terminal 1 — Backend API**
+```powershell
+cd "coficab_platform\backend"
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-**Role**: Entry point of the system
+**Terminal 2 — Frontend**
+```powershell
+cd "coficab_platform\frontend"
+npm run dev
+```
 
-### 🔵 Agent 2 — Scheduler (Automation Engine)
+**Terminal 3 — Agent 1 (Watchdog)**
+```powershell
+cd "coficab_platform\agents\agent1_watchdog"
+python main.py
+```
 
-- Executes scheduled tasks (daily planning, processing)
-- Manages time-based workflows using APScheduler
+**Terminal 4 — Agent 2 (Scheduler)**
+```powershell
+cd "coficab_platform\agents\agent2_scheduler"
+python main.py
+```
 
-**Role**: System orchestrator
+**Terminal 5 — Agent 3 (Alert Monitor)**
+```powershell
+cd "coficab_platform\agents\agent3_alert"
+python main.py
+```
 
-### 🟠 Agent 3 — Alert Monitor (Decision Layer)
+**Terminal 6 — Agent 4 (TFM Tracker)**
+```powershell
+cd "coficab_platform\agents\agent4_tracker"
+python main.py
+```
 
-- Monitors KPIs and thresholds
-- Detects anomalies (delays, inconsistencies)
-- Uses Redis for fast alert handling
+### Access
 
-**Role**: Intelligence & alert system
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| Backend API | http://localhost:8000 |
+| API Docs (Swagger) | http://localhost:8000/docs |
 
-### 🟣 Agent 4 — TFM Tracker (Real-Time Tracking)
+---
 
-- Polls TFM system every 5 minutes
-- Calculates ETA and transport status
-- Updates real-time data
+## Environment Variables
 
-**Role**: Live tracking & visibility
+A `.env` file is already configured at the project root. Copy it to the backend folder if needed:
 
-## 🧱 Platform Layers
+```powershell
+copy .env backend\.env
+```
 
-The system follows a 5-layer architecture:
+Key variables:
 
-- 🟩 **Layer 1 — Ingestion**: File detection (watchdog), Data processing (pandas), Scheduling triggers
-- 🟦 **Layer 2 — Optimization & AI**: Route optimization (OR-Tools), Data matching (rapidfuzz)
-- 🟪 **Layer 3 — Storage**: PostgreSQL (structured data), Redis (real-time processing)
-- 🟥 **Layer 4 — Backend API**: FastAPI, Business logic, Authentication (JWT)
-- 🟨 **Layer 5 — Interfaces**: React dashboard, KPI visualization, Driver mobile interface
+```env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/coficab_db
+NEXT_PUBLIC_API_URL=http://localhost:8000
+JWT_SECRET=change_this_secret_in_production
+```
 
-## 📊 Expected Impact
+---
+
+## Database Setup (PostgreSQL)
+
+If PostgreSQL is installed and running:
+
+```powershell
+psql -U postgres -c "CREATE DATABASE coficab_db;"
+psql -U postgres -d coficab_db -f database\schema.sql
+```
+
+The backend creates tables automatically on startup via SQLAlchemy. Without a database it runs in offline mode — most endpoints still respond with mock data.
+
+---
+
+## Dependency Notes
+
+- `uvicorn` must be run as `python -m uvicorn` (not `uvicorn` directly) on Windows unless the Python Scripts folder is in PATH
+- `ortools` is required for route optimization. If missing: `pip install ortools==9.15.6755`
+- `redis` is optional. Agent 3 logs a warning but continues without it
+- Frontend uses Next.js 13. Do not upgrade to 14+ without reviewing breaking changes in the app/ directory
+
+---
+
+## System Architecture
+
+```
+coficab_platform/
+├── frontend/               # Next.js 13 + Tailwind CSS dashboard
+├── backend/                # FastAPI + SQLAlchemy REST API
+│   ├── app/
+│   │   ├── main.py         # App entry point, lifespan, CORS
+│   │   ├── database.py     # SQLAlchemy engine + session
+│   │   ├── models/         # ORM models
+│   │   ├── routes/         # API routers (metrics, tracking, auth, ...)
+│   │   └── services/       # Business logic, Excel watcher, VRPTW
+│   └── requirements.txt
+├── agents/
+│   ├── agent1_watchdog/    # Watches shared_folder for new Excel files
+│   ├── agent2_scheduler/   # APScheduler-based task runner
+│   ├── agent3_alert/       # KPI monitoring + Redis alerting
+│   └── agent4_tracker/     # TFM polling + ETA calculation
+├── database/               # PostgreSQL schema SQL
+├── .env                    # Local environment config (do not commit)
+└── docker-compose.yml      # Full stack via Docker (requires Docker Desktop)
+```
+
+---
+
+## Docker (alternative)
+
+If Docker Desktop is installed, this starts everything in one command:
+
+```powershell
+cd coficab_platform
+docker-compose up --build
+```
+
+---
+
+## Multi-Agent Workflow
+
+1. Drop an Excel planning file into `shared_folder/`
+2. Agent 1 detects it in < 1 second and triggers ingestion
+3. Backend processes and stores data in PostgreSQL
+4. Agent 2 schedules downstream tasks
+5. Agent 4 polls for transport updates every 5 minutes
+6. Agent 3 monitors KPIs and fires alerts via Redis
+7. Dashboard at `localhost:3000` displays live data
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 13, React 18, TypeScript, Tailwind CSS |
+| Backend | Python 3.10, FastAPI, SQLAlchemy, Pydantic v2 |
+| Agents | watchdog, APScheduler, redis-py, pandas |
+| Database | PostgreSQL 15 |
+| Cache | Redis 7 |
+| Optimization | OR-Tools 9.15 |
+| Auth | JWT (python-jose + passlib + bcrypt) |
+
+---
+
+## Expected Impact
 
 | Metric | Before | After |
 |--------|--------|-------|
 | Planning Time | 15–21 min | < 3 min |
 | Detection Latency | ~4 hours | < 30 sec |
-| Data Errors | 12–18% | ~0% |
-
-## ⚙️ Technology Stack
-
-### Frontend
-- React (Next.js)
-- TypeScript
-- Tailwind CSS
-
-### Backend
-- Python
-- FastAPI
-- SQLAlchemy
-
-### Multi-Agent System
-- Python
-- watchdog
-- APScheduler
-- Redis
-
-### Database
-- PostgreSQL
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- Python 3.9+
-- PostgreSQL
-- Redis
-
-### Setup Instructions
-
-#### 1. Frontend
-```bash
-cd frontend
-npx create-next-app@latest .
-npm install
-npm run dev
-```
-
-#### 2. Backend
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install fastapi uvicorn sqlalchemy psycopg2-binary
-uvicorn app.main:app --reload
-```
-
-#### 3. Agents
-```bash
-cd agents
-pip install watchdog apscheduler redis pandas
-```
-
-#### 4. Database
-```bash
-psql -U postgres -d coficab_db -f database/schema.sql
-```
-
-## 🔄 System Workflow (VERY IMPORTANT FOR JURY)
-
-1. Excel file is uploaded to shared folder
-2. Agent 1 detects it instantly
-3. Data is processed and stored
-4. Agent 2 schedules tasks
-5. Agent 4 updates real-time tracking
-6. Agent 3 monitors KPIs and triggers alerts
-7. Dashboard displays live data
-
-## 🧪 Development Strategy
-
-Components are decoupled:
-
-- **Frontend** → UI & visualization
-- **Backend** → API & logic
-- **Agents** → automation & intelligence
-
-Each can run independently.
-
-## 📁 Documentation
-
-See `/docs` for:
-
-- Architecture diagrams
-- PFE chapters
-- Requirements
-- Agent specifications
-
-## 🎯 Project Status
-
-🚧 In Development (Agile Sprint Execution)
-
----
-
-**Project**: CofICab Platform
-**Status**: In Development
-"# coficab_platform" 
+| Data Error Rate | 12–18% | ~0% |
