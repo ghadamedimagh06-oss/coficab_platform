@@ -13,10 +13,12 @@ import {
   Users,
   Settings,
   ChevronDown,
+  Cpu,
 } from 'lucide-react';
 
 const mainNavItems = [
   { icon: Home, label: 'Dashboard', href: '/dashboard' },
+  { icon: Cpu, label: 'AI Monitor', href: '/ai-monitor' },
   { icon: CalendarDays, label: 'Planning', href: '/planning' },
   { icon: FileText, label: 'Daily Planning', href: '/daily-planning' },
   { icon: Compass, label: 'Map', href: '/map' },

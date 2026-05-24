@@ -42,6 +42,19 @@ def test_tracking_live_endpoint_returns_200():
     assert "tracking_data" in data
 
 
+def test_agent_status_endpoint_returns_valid_schema():
+    r = client.get("/api/agents/status")
+    assert r.status_code == 200
+    data = r.json()
+    assert "agents" in data
+    assert "recent_events" in data
+    assert "pipeline_status" in data
+    assert "collector" in data["agents"]
+    assert "optimizer" in data["agents"]
+    assert "notifier" in data["agents"]
+    assert "monitor" in data["agents"]
+
+
 def test_tracking_sync_persists():
     body = {"items": [{"id": "t1", "status": "in_transit", "location": {"lat":36.5, "lng":10.1}, "eta_hours":2.0}]}
     r = client.post("/api/tracking/sync", json=body)
