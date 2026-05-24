@@ -1,10 +1,8 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: coficab_postgres
+    image: postgres:17
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,10 +19,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: coficab_redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -35,15 +31,14 @@ services:
     volumes:
       - redis_data:/data
 
-  # Backend API (FastAPI)
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: coficab_backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/coficab_db
-      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       BACKEND_API_URL: http://backend:8000
     ports:
       - "8000:8000"
@@ -54,87 +49,112 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Frontend (Next.js) ✅ FIXED
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: coficab_frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
       - backend
 
-  # Agent 1
-  agent1_watchdog:
+  orchestrator:
     build:
-      context: ./agents/agent1_watchdog
+      context: ./orchestrator
       dockerfile: Dockerfile
-    container_name: coficab_agent1
     environment:
-      BACKEND_API_URL: http://backend:8000
-      WATCH_DIRECTORY: /shared_folder
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
     depends_on:
-      - backend
-    volumes:
-      - ./shared_folder:/shared_folder
-      - ./agents/agent1_watchdog:/app
-    command: python main.py
-    restart: on-failure
-
-  # Agent 2
-  agent2_scheduler:
-    build:
-      context: ./agents/agent2_scheduler
-      dockerfile: Dockerfile
-    container_name: coficab_agent2
-    environment:
-      BACKEND_API_URL: http://backend:8000
-    depends_on:
-      - backend
-    volumes:
-      - ./agents/agent2_scheduler:/app
-    command: python main.py
-    restart: on-failure
-
-  # Agent 3
-  agent3_alert:
-    build:
-      context: ./agents/agent3_alert
-      dockerfile: Dockerfile
-    container_name: coficab_agent3
-    environment:
-      BACKEND_API_URL: http://backend:8000
-      REDIS_URL: redis://redis:6379
-      MONITOR_INTERVAL: 10
-    depends_on:
-      - backend
       - redis
-    volumes:
-      - ./agents/agent3_alert:/app
-    command: python main.py
-    restart: on-failure
-
-  # Agent 4
-  agent4_tracker:
-    build:
-      context: ./agents/agent4_tracker
-      dockerfile: Dockerfile
-    container_name: coficab_agent4
-    environment:
-      BACKEND_API_URL: http://backend:8000
-      TFM_API_URL: http://tfm-api:8080
-      POLL_INTERVAL: 300
-    depends_on:
       - backend
-    volumes:
-      - ./agents/agent4_tracker:/app
-    command: python main.py
-    restart: on-failure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/orchestrator/status || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  agent1_collector:
+    build:
+      context: ./agents/agent1_collector
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  agent2_optimizer:
+    build:
+      context: ./agents/agent2_optimizer
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  agent3_notifier:
+    build:
+      context: ./agents/agent3_notifier
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8003/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  agent4_monitor:
+    build:
+      context: ./agents/agent4_monitor
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8004/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data:

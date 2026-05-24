@@ -5,5 +5,6 @@ from .ingestion_log import IngestionLog
 from .planning_version import PlanningVersion
 from .planning_change_log import PlanningChangeLog
 from .planning_diff import PlanningDiff
+from .transport_tracking import TransportTracking
 
-__all__ = ["Livraison", "IngestionLog", "PlanningVersion", "PlanningChangeLog", "PlanningDiff"]
+__all__ = ["Livraison", "IngestionLog", "PlanningVersion", "PlanningChangeLog", "PlanningDiff", "TransportTracking"]

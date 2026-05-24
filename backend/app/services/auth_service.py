@@ -53,3 +53,16 @@ class AuthService:
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
+
+    def decode_access_token(self, token: str) -> Optional[dict]:
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            return payload
+        except JWTError:
+            return None
+
+    def get_current_username(self, token: str) -> Optional[str]:
+        payload = self.decode_access_token(token)
+        if not payload:
+            return None
+        return payload.get("sub")

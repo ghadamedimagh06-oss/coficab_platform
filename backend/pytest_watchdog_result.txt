@@ -1,0 +1,2782 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.12, pytest-9.0.3, pluggy-1.6.0 -- c:\Users\USER\OneDrive\Desktop\coficab-platform\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: c:\Users\USER\OneDrive\Desktop\coficab-platform\backend
+plugins: anyio-3.7.1, cov-7.1.0
+collecting ... Database connection failed: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  database "coficab_db" does not exist
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+Running in offline mode - database operations will fail
+collected 5 items
+
+tests/test_api_endpoints.py::test_get_kpis_unauthenticated PASSED
+tests/test_api_endpoints.py::test_get_kpis_authenticated FAILED
+tests/test_api_endpoints.py::test_planning_generate_returns_routes PASSED
+tests/test_api_endpoints.py::test_tracking_live_endpoint_returns_200 FAILED
+tests/test_api_endpoints.py::test_tracking_sync_persists FAILED
+
+================================== FAILURES ===================================
+_________________________ test_get_kpis_authenticated _________________________
+
+    def test_get_kpis_authenticated():
+>       db = SessionLocal()
+             ^^^^^^^^^^^^^^
+E       TypeError: 'NoneType' object is not callable
+
+tests\test_api_endpoints.py:16: TypeError
+___________________ test_tracking_live_endpoint_returns_200 ___________________
+
+    def test_tracking_live_endpoint_returns_200():
+>       r = client.get("/api/tracking/live")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_api_endpoints.py:39: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+url = '/api/tracking/live'
+
+    def get(  # type: ignore[override]
+        self,
+        url: httpx._types.URLTypes,
+        *,
+        params: httpx._types.QueryParamTypes | None = None,
+        headers: httpx._types.HeaderTypes | None = None,
+        cookies: httpx._types.CookieTypes | None = None,
+        auth: httpx._types.AuthTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        follow_redirects: bool | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        timeout: httpx._types.TimeoutTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        extensions: dict[str, typing.Any] | None = None,
+    ) -> httpx.Response:
+>       return super().get(
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\starlette\testclient.py:465: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+url = '/api/tracking/live'
+
+    def get(
+        self,
+        url: URL | str,
+        *,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> Response:
+        """
+        Send a `GET` request.
+    
+        **Parameters**: See `httpx.request`.
+        """
+>       return self.request(
+            "GET",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\httpx\_client.py:1053: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+method = 'GET', url = URL('http://testserver/api/tracking/live')
+
+    def request(  # type: ignore[override]
+        self,
+        method: str,
+        url: httpx._types.URLTypes,
+        *,
+        content: httpx._types.RequestContent | None = None,
+        data: _RequestData | None = None,
+        files: httpx._types.RequestFiles | None = None,
+        json: typing.Any = None,
+        params: httpx._types.QueryParamTypes | None = None,
+        headers: httpx._types.HeaderTypes | None = None,
+        cookies: httpx._types.CookieTypes | None = None,
+        auth: httpx._types.AuthTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        follow_redirects: bool | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        timeout: httpx._types.TimeoutTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        extensions: dict[str, typing.Any] | None = None,
+    ) -> httpx.Response:
+        if timeout is not httpx.USE_CLIENT_DEFAULT:
+            warnings.warn(
+                "You should not use the 'timeout' argument with the TestClient. "
+                "See https://github.com/encode/starlette/issues/1108 for more information.",
+                DeprecationWarning,
+            )
+        url = self._merge_url(url)
+>       return super().request(
+            method,
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\starlette\testclient.py:437: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+method = 'GET', url = URL('http://testserver/api/tracking/live')
+
+    def request(
+        self,
+        method: str,
+        url: URL | str,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: typing.Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> Response:
+        """
+        Build and send a request.
+    
+        Equivalent to:
+    
+        ```python
+        request = client.build_request(...)
+        response = client.send(request, ...)
+        ```
+    
+        See `Client.build_request()`, `Client.send()` and
+        [Merging of configuration][0] for how the various parameters
+        are merged with client-level configuration.
+    
+        [0]: /advanced/clients/#merging-of-configuration
+        """
+        if cookies is not None:
+            message = (
+                "Setting per-request cookies=<...> is being deprecated, because "
+                "the expected behaviour on cookie persistence is ambiguous. Set "
+                "cookies directly on the client instance instead."
+            )
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+    
+        request = self.build_request(
+            method=method,
+            url=url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+        )
+>       return self.send(request, auth=auth, follow_redirects=follow_redirects)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:825: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+
+    def send(
+        self,
+        request: Request,
+        *,
+        stream: bool = False,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+    ) -> Response:
+        """
+        Send a request.
+    
+        The request is sent as-is, unmodified.
+    
+        Typically you'll want to build one with `Client.build_request()`
+        so that any client-level configuration is merged into the request,
+        but passing an explicit `httpx.Request()` is supported as well.
+    
+        See also: [Request instances][0]
+    
+        [0]: /advanced/clients/#request-instances
+        """
+        if self._state == ClientState.CLOSED:
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+    
+        self._state = ClientState.OPENED
+        follow_redirects = (
+            self.follow_redirects
+            if isinstance(follow_redirects, UseClientDefault)
+            else follow_redirects
+        )
+    
+        self._set_timeout(request)
+    
+        auth = self._build_request_auth(request, auth)
+    
+>       response = self._send_handling_auth(
+            request,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            history=[],
+        )
+
+..\.venv\Lib\site-packages\httpx\_client.py:914: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+auth = <httpx.Auth object at 0x000002170F4BAFD0>, follow_redirects = True
+history = []
+
+    def _send_handling_auth(
+        self,
+        request: Request,
+        auth: Auth,
+        follow_redirects: bool,
+        history: list[Response],
+    ) -> Response:
+        auth_flow = auth.sync_auth_flow(request)
+        try:
+            request = next(auth_flow)
+    
+            while True:
+>               response = self._send_handling_redirects(
+                    request,
+                    follow_redirects=follow_redirects,
+                    history=history,
+                )
+
+..\.venv\Lib\site-packages\httpx\_client.py:942: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+follow_redirects = True, history = []
+
+    def _send_handling_redirects(
+        self,
+        request: Request,
+        follow_redirects: bool,
+        history: list[Response],
+    ) -> Response:
+        while True:
+            if len(history) > self.max_redirects:
+                raise TooManyRedirects(
+                    "Exceeded maximum allowed redirects.", request=request
+                )
+    
+            for hook in self._event_hooks["request"]:
+                hook(request)
+    
+>           response = self._send_single_request(request)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:979: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+
+    def _send_single_request(self, request: Request) -> Response:
+        """
+        Sends a single request, without handling any redirections.
+        """
+        transport = self._transport_for_url(request.url)
+        start = time.perf_counter()
+    
+        if not isinstance(request.stream, SyncByteStream):
+            raise RuntimeError(
+                "Attempted to send an async request with a sync Client instance."
+            )
+    
+        with request_context(request=request):
+>           response = transport.handle_request(request)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:1014: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient._TestClientTransport object at 0x000002170F3AA3C0>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        scheme = request.url.scheme
+        netloc = request.url.netloc.decode(encoding="ascii")
+        path = request.url.path
+        raw_path = request.url.raw_path
+        query = request.url.query.decode(encoding="ascii")
+    
+        default_port = {"http": 80, "ws": 80, "https": 443, "wss": 443}[scheme]
+    
+        if ":" in netloc:
+            host, port_string = netloc.split(":", 1)
+            port = int(port_string)
+        else:
+            host = netloc
+            port = default_port
+    
+        # Include the 'host' header.
+        if "host" in request.headers:
+            headers: list[tuple[bytes, bytes]] = []
+        elif port == default_port:  # pragma: no cover
+            headers = [(b"host", host.encode())]
+        else:  # pragma: no cover
+            headers = [(b"host", (f"{host}:{port}").encode())]
+    
+        # Include other request headers.
+        headers += [(key.lower().encode(), value.encode()) for key, value in request.headers.multi_items()]
+    
+        scope: dict[str, typing.Any]
+    
+        if scheme in {"ws", "wss"}:
+            subprotocol = request.headers.get("sec-websocket-protocol", None)
+            if subprotocol is None:
+                subprotocols: typing.Sequence[str] = []
+            else:
+                subprotocols = [value.strip() for value in subprotocol.split(",")]
+            scope = {
+                "type": "websocket",
+                "path": unquote(path),
+                "raw_path": raw_path.split(b"?", 1)[0],
+                "root_path": self.root_path,
+                "scheme": scheme,
+                "query_string": query.encode(),
+                "headers": headers,
+                "client": self.client,
+                "server": [host, port],
+                "subprotocols": subprotocols,
+                "state": self.app_state.copy(),
+                "extensions": {"websocket.http.response": {}},
+            }
+            session = WebSocketTestSession(self.app, scope, self.portal_factory)
+            raise _Upgrade(session)
+    
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": request.method,
+            "path": unquote(path),
+            "raw_path": raw_path.split(b"?", 1)[0],
+            "root_path": self.root_path,
+            "scheme": scheme,
+            "query_string": query.encode(),
+            "headers": headers,
+            "client": self.client,
+            "server": [host, port],
+            "extensions": {"http.response.debug": {}},
+            "state": self.app_state.copy(),
+        }
+    
+        request_complete = False
+        response_started = False
+        response_complete: anyio.Event
+        raw_kwargs: dict[str, typing.Any] = {"stream": io.BytesIO()}
+        template = None
+        context = None
+    
+        async def receive() -> Message:
+            nonlocal request_complete
+    
+            if request_complete:
+                if not response_complete.is_set():
+                    await response_complete.wait()
+                return {"type": "http.disconnect"}
+    
+            body = request.read()
+            if isinstance(body, str):
+                body_bytes: bytes = body.encode("utf-8")  # pragma: no cover
+            elif body is None:
+                body_bytes = b""  # pragma: no cover
+            elif isinstance(body, GeneratorType):
+                try:  # pragma: no cover
+                    chunk = body.send(None)
+                    if isinstance(chunk, str):
+                        chunk = chunk.encode("utf-8")
+                    return {"type": "http.request", "body": chunk, "more_body": True}
+                except StopIteration:  # pragma: no cover
+                    request_complete = True
+                    return {"type": "http.request", "body": b""}
+            else:
+                body_bytes = body
+    
+            request_complete = True
+            return {"type": "http.request", "body": body_bytes}
+    
+        async def send(message: Message) -> None:
+            nonlocal raw_kwargs, response_started, template, context
+    
+            if message["type"] == "http.response.start":
+                assert not response_started, 'Received multiple "http.response.start" messages.'
+                raw_kwargs["status_code"] = message["status"]
+                raw_kwargs["headers"] = [(key.decode(), value.decode()) for key, value in message.get("headers", [])]
+                response_started = True
+            elif message["type"] == "http.response.body":
+                assert response_started, 'Received "http.response.body" without "http.response.start".'
+                assert not response_complete.is_set(), 'Received "http.response.body" after response completed.'
+                body = message.get("body", b"")
+                more_body = message.get("more_body", False)
+                if request.method != "HEAD":
+                    raw_kwargs["stream"].write(body)
+                if not more_body:
+                    raw_kwargs["stream"].seek(0)
+                    response_complete.set()
+            elif message["type"] == "http.response.debug":
+                template = message["info"]["template"]
+                context = message["info"]["context"]
+    
+        try:
+            with self.portal_factory() as portal:
+                response_complete = portal.call(anyio.Event)
+                portal.call(self.app, scope, receive, send)
+        except BaseException as exc:
+            if self.raise_server_exceptions:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\testclient.py:340: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient._TestClientTransport object at 0x000002170F3AA3C0>
+request = <Request('GET', 'http://testserver/api/tracking/live')>
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        scheme = request.url.scheme
+        netloc = request.url.netloc.decode(encoding="ascii")
+        path = request.url.path
+        raw_path = request.url.raw_path
+        query = request.url.query.decode(encoding="ascii")
+    
+        default_port = {"http": 80, "ws": 80, "https": 443, "wss": 443}[scheme]
+    
+        if ":" in netloc:
+            host, port_string = netloc.split(":", 1)
+            port = int(port_string)
+        else:
+            host = netloc
+            port = default_port
+    
+        # Include the 'host' header.
+        if "host" in request.headers:
+            headers: list[tuple[bytes, bytes]] = []
+        elif port == default_port:  # pragma: no cover
+            headers = [(b"host", host.encode())]
+        else:  # pragma: no cover
+            headers = [(b"host", (f"{host}:{port}").encode())]
+    
+        # Include other request headers.
+        headers += [(key.lower().encode(), value.encode()) for key, value in request.headers.multi_items()]
+    
+        scope: dict[str, typing.Any]
+    
+        if scheme in {"ws", "wss"}:
+            subprotocol = request.headers.get("sec-websocket-protocol", None)
+            if subprotocol is None:
+                subprotocols: typing.Sequence[str] = []
+            else:
+                subprotocols = [value.strip() for value in subprotocol.split(",")]
+            scope = {
+                "type": "websocket",
+                "path": unquote(path),
+                "raw_path": raw_path.split(b"?", 1)[0],
+                "root_path": self.root_path,
+                "scheme": scheme,
+                "query_string": query.encode(),
+                "headers": headers,
+                "client": self.client,
+                "server": [host, port],
+                "subprotocols": subprotocols,
+                "state": self.app_state.copy(),
+                "extensions": {"websocket.http.response": {}},
+            }
+            session = WebSocketTestSession(self.app, scope, self.portal_factory)
+            raise _Upgrade(session)
+    
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": request.method,
+            "path": unquote(path),
+            "raw_path": raw_path.split(b"?", 1)[0],
+            "root_path": self.root_path,
+            "scheme": scheme,
+            "query_string": query.encode(),
+            "headers": headers,
+            "client": self.client,
+            "server": [host, port],
+            "extensions": {"http.response.debug": {}},
+            "state": self.app_state.copy(),
+        }
+    
+        request_complete = False
+        response_started = False
+        response_complete: anyio.Event
+        raw_kwargs: dict[str, typing.Any] = {"stream": io.BytesIO()}
+        template = None
+        context = None
+    
+        async def receive() -> Message:
+            nonlocal request_complete
+    
+            if request_complete:
+                if not response_complete.is_set():
+                    await response_complete.wait()
+                return {"type": "http.disconnect"}
+    
+            body = request.read()
+            if isinstance(body, str):
+                body_bytes: bytes = body.encode("utf-8")  # pragma: no cover
+            elif body is None:
+                body_bytes = b""  # pragma: no cover
+            elif isinstance(body, GeneratorType):
+                try:  # pragma: no cover
+                    chunk = body.send(None)
+                    if isinstance(chunk, str):
+                        chunk = chunk.encode("utf-8")
+                    return {"type": "http.request", "body": chunk, "more_body": True}
+                except StopIteration:  # pragma: no cover
+                    request_complete = True
+                    return {"type": "http.request", "body": b""}
+            else:
+                body_bytes = body
+    
+            request_complete = True
+            return {"type": "http.request", "body": body_bytes}
+    
+        async def send(message: Message) -> None:
+            nonlocal raw_kwargs, response_started, template, context
+    
+            if message["type"] == "http.response.start":
+                assert not response_started, 'Received multiple "http.response.start" messages.'
+                raw_kwargs["status_code"] = message["status"]
+                raw_kwargs["headers"] = [(key.decode(), value.decode()) for key, value in message.get("headers", [])]
+                response_started = True
+            elif message["type"] == "http.response.body":
+                assert response_started, 'Received "http.response.body" without "http.response.start".'
+                assert not response_complete.is_set(), 'Received "http.response.body" after response completed.'
+                body = message.get("body", b"")
+                more_body = message.get("more_body", False)
+                if request.method != "HEAD":
+                    raw_kwargs["stream"].write(body)
+                if not more_body:
+                    raw_kwargs["stream"].seek(0)
+                    response_complete.set()
+            elif message["type"] == "http.response.debug":
+                template = message["info"]["template"]
+                context = message["info"]["context"]
+    
+        try:
+            with self.portal_factory() as portal:
+                response_complete = portal.call(anyio.Event)
+>               portal.call(self.app, scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\testclient.py:337: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <anyio._backends._asyncio.BlockingPortal object at 0x000002170F529090>
+func = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+args = ({'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <fu...ls>.receive at 0x000002170F598FE0>, <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>)
+
+    def call(
+        self, func: Callable[..., Awaitable[T_Retval] | T_Retval], *args: object
+    ) -> T_Retval:
+        """
+        Call the given function in the event loop thread.
+    
+        If the callable returns a coroutine object, it is awaited on.
+    
+        :param func: any callable
+        :raises RuntimeError: if the portal is not running or if this method is called from within
+            the event loop thread
+    
+        """
+>       return cast(T_Retval, self.start_task_soon(func, *args).result())
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\from_thread.py:277: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = None, timeout = None
+
+    def result(self, timeout=None):
+        """Return the result of the call that the future represents.
+    
+        Args:
+            timeout: The number of seconds to wait for the result if the future
+                isn't done. If None, then there is no limit on the wait time.
+    
+        Returns:
+            The result of the call that the future represents.
+    
+        Raises:
+            CancelledError: If the future was cancelled.
+            TimeoutError: If the future didn't finish executing before the given
+                timeout.
+            Exception: If the call raised then that exception will be raised.
+        """
+        try:
+            with self._condition:
+                if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
+                    raise CancelledError()
+                elif self._state == FINISHED:
+                    return self.__get_result()
+    
+                self._condition.wait(timeout)
+    
+                if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
+                    raise CancelledError()
+                elif self._state == FINISHED:
+>                   return self.__get_result()
+                           ^^^^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:456: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = None
+
+    def __get_result(self):
+        if self._exception is not None:
+            try:
+>               raise self._exception
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:401: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <anyio._backends._asyncio.BlockingPortal object at 0x000002170F529090>
+func = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+args = ({'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <fu...ls>.receive at 0x000002170F598FE0>, <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>)
+kwargs = {}, future = <Future at 0x2170f599090 state=finished raised Exception>
+
+    async def _call_func(
+        self, func: Callable, args: tuple, kwargs: dict[str, Any], future: Future
+    ) -> None:
+        def callback(f: Future) -> None:
+            if f.cancelled() and self._event_loop_thread_id not in (
+                None,
+                threading.get_ident(),
+            ):
+                self.call(scope.cancel)
+    
+        try:
+            retval = func(*args, **kwargs)
+            if iscoroutine(retval):
+                with CancelScope() as scope:
+                    if future.cancelled():
+                        scope.cancel()
+                    else:
+                        future.add_done_callback(callback)
+    
+>                   retval = await retval
+                             ^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\from_thread.py:217: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.root_path:
+            scope["root_path"] = self.root_path
+>       await super().__call__(scope, receive, send)
+
+..\.venv\Lib\site-packages\fastapi\applications.py:1054: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope["app"] = self
+        if self.middleware_stack is None:
+            self.middleware_stack = self.build_middleware_stack()
+>       await self.middleware_stack(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\applications.py:112: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.errors.ServerErrorMiddleware object at 0x000002170F520830>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+    
+        response_started = False
+    
+        async def _send(message: Message) -> None:
+            nonlocal response_started, send
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await self.app(scope, receive, _send)
+        except Exception as exc:
+            request = Request(scope)
+            if self.debug:
+                # In debug mode, return traceback responses.
+                response = self.debug_response(request, exc)
+            elif self.handler is None:
+                # Use our default 500 error handler.
+                response = self.error_response(request, exc)
+            else:
+                # Use an installed 500 error handler.
+                if is_async_callable(self.handler):
+                    response = await self.handler(request, exc)
+                else:
+                    response = await run_in_threadpool(self.handler, request, exc)
+    
+            if not response_started:
+                await response(scope, receive, send)
+    
+            # We always continue to raise the exception.
+            # This allows servers to log the error, or allows test clients
+            # to optionally raise the error within the test case.
+>           raise exc
+
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.errors.ServerErrorMiddleware object at 0x000002170F520830>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F598B80>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+    
+        response_started = False
+    
+        async def _send(message: Message) -> None:
+            nonlocal response_started, send
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await self.app(scope, receive, _send)
+
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.cors.CORSMiddleware object at 0x000002170F5206E0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170F5993A0>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":  # pragma: no cover
+            await self.app(scope, receive, send)
+            return
+    
+        method = scope["method"]
+        headers = Headers(scope=scope)
+        origin = headers.get("origin")
+    
+        if origin is None:
+>           await self.app(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\middleware\cors.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.exceptions.ExceptionMiddleware object at 0x000002170F3AB770>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170F5993A0>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+    
+        scope["starlette.exception_handlers"] = (
+            self._exception_handlers,
+            self._status_handlers,
+        )
+    
+        conn: Request | WebSocket
+        if scope["type"] == "http":
+            conn = Request(scope, receive, send)
+        else:
+            conn = WebSocket(scope, receive, send)
+    
+>       await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\middleware\exceptions.py:62: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170F5993A0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await app(scope, receive, sender)
+        except Exception as exc:
+            handler = None
+    
+            if isinstance(exc, HTTPException):
+                handler = status_handlers.get(exc.status_code)
+    
+            if handler is None:
+                handler = _lookup_exception_handler(exception_handlers, exc)
+    
+            if handler is None:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170F5993A0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await app(scope, receive, sender)
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.routing.APIRouter object at 0x000002170F3DAA50>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """
+        The main entry point to the Router class.
+        """
+>       await self.middleware_stack(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:714: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.routing.APIRouter object at 0x000002170F3DAA50>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def app(self, scope: Scope, receive: Receive, send: Send) -> None:
+        assert scope["type"] in ("http", "websocket", "lifespan")
+    
+        if "router" not in scope:
+            scope["router"] = self
+    
+        if scope["type"] == "lifespan":
+            await self.lifespan(scope, receive, send)
+            return
+    
+        partial = None
+    
+        for route in self.routes:
+            # Determine if any route matches the incoming scope,
+            # and hand over to the matching route if found.
+            match, child_scope = route.matches(scope)
+            if match == Match.FULL:
+                scope.update(child_scope)
+>               await route.handle(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:734: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = APIRoute(path='/api/tracking/live', name='get_live_tracking', methods=['GET'])
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.methods and scope["method"] not in self.methods:
+            headers = {"Allow": ", ".join(self.methods)}
+            if "app" in scope:
+                raise HTTPException(status_code=405, headers=headers)
+            else:
+                response = PlainTextResponse("Method Not Allowed", status_code=405, headers=headers)
+            await response(scope, receive, send)
+        else:
+>           await self.app(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:288: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        request = Request(scope, receive, send)
+    
+        async def app(scope: Scope, receive: Receive, send: Send) -> None:
+            response = await f(request)
+            await response(scope, receive, send)
+    
+>       await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await app(scope, receive, sender)
+        except Exception as exc:
+            handler = None
+    
+            if isinstance(exc, HTTPException):
+                handler = status_handlers.get(exc.status_code)
+    
+            if handler is None:
+                handler = _lookup_exception_handler(exception_handlers, exc)
+    
+            if handler is None:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F5994E0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await app(scope, receive, sender)
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function get_live_tracking at 0x000002176F351120>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F598FE0>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170F599800>
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+>       response = await f(request)
+                   ^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\starlette\routing.py:73: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+request = <starlette.requests.Request object at 0x000002170F4ECA70>
+
+    async def app(request: Request) -> Response:
+        response: Union[Response, None] = None
+        async with AsyncExitStack() as file_stack:
+            try:
+                body: Any = None
+                if body_field:
+                    if is_body_form:
+                        body = await request.form()
+                        file_stack.push_async_callback(body.close)
+                    else:
+                        body_bytes = await request.body()
+                        if body_bytes:
+                            json_body: Any = Undefined
+                            content_type_value = request.headers.get("content-type")
+                            if not content_type_value:
+                                json_body = await request.json()
+                            else:
+                                message = email.message.Message()
+                                message["content-type"] = content_type_value
+                                if message.get_content_maintype() == "application":
+                                    subtype = message.get_content_subtype()
+                                    if subtype == "json" or subtype.endswith("+json"):
+                                        json_body = await request.json()
+                            if json_body != Undefined:
+                                body = json_body
+                            else:
+                                body = body_bytes
+            except json.JSONDecodeError as e:
+                validation_error = RequestValidationError(
+                    [
+                        {
+                            "type": "json_invalid",
+                            "loc": ("body", e.pos),
+                            "msg": "JSON decode error",
+                            "input": {},
+                            "ctx": {"error": e.msg},
+                        }
+                    ],
+                    body=e.doc,
+                )
+                raise validation_error from e
+            except HTTPException:
+                # If a middleware raises an HTTPException, it should be raised again
+                raise
+            except Exception as e:
+                http_error = HTTPException(
+                    status_code=400, detail="There was an error parsing the body"
+                )
+                raise http_error from e
+            errors: List[Any] = []
+            async with AsyncExitStack() as async_exit_stack:
+>               solved_result = await solve_dependencies(
+                    request=request,
+                    dependant=dependant,
+                    body=body,
+                    dependency_overrides_provider=dependency_overrides_provider,
+                    async_exit_stack=async_exit_stack,
+                    embed_body_fields=embed_body_fields,
+                )
+
+..\.venv\Lib\site-packages\fastapi\routing.py:291: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def solve_dependencies(
+        *,
+        request: Union[Request, WebSocket],
+        dependant: Dependant,
+        body: Optional[Union[Dict[str, Any], FormData]] = None,
+        background_tasks: Optional[StarletteBackgroundTasks] = None,
+        response: Optional[Response] = None,
+        dependency_overrides_provider: Optional[Any] = None,
+        dependency_cache: Optional[Dict[Tuple[Callable[..., Any], Tuple[str]], Any]] = None,
+        async_exit_stack: AsyncExitStack,
+        embed_body_fields: bool,
+    ) -> SolvedDependency:
+        values: Dict[str, Any] = {}
+        errors: List[Any] = []
+        if response is None:
+            response = Response()
+            del response.headers["content-length"]
+            response.status_code = None  # type: ignore
+        dependency_cache = dependency_cache or {}
+        sub_dependant: Dependant
+        for sub_dependant in dependant.dependencies:
+            sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
+            sub_dependant.cache_key = cast(
+                Tuple[Callable[..., Any], Tuple[str]], sub_dependant.cache_key
+            )
+            call = sub_dependant.call
+            use_sub_dependant = sub_dependant
+            if (
+                dependency_overrides_provider
+                and dependency_overrides_provider.dependency_overrides
+            ):
+                original_call = sub_dependant.call
+                call = getattr(
+                    dependency_overrides_provider, "dependency_overrides", {}
+                ).get(original_call, original_call)
+                use_path: str = sub_dependant.path  # type: ignore
+                use_sub_dependant = get_dependant(
+                    path=use_path,
+                    call=call,
+                    name=sub_dependant.name,
+                    security_scopes=sub_dependant.security_scopes,
+                )
+    
+            solved_result = await solve_dependencies(
+                request=request,
+                dependant=use_sub_dependant,
+                body=body,
+                background_tasks=background_tasks,
+                response=response,
+                dependency_overrides_provider=dependency_overrides_provider,
+                dependency_cache=dependency_cache,
+                async_exit_stack=async_exit_stack,
+                embed_body_fields=embed_body_fields,
+            )
+            background_tasks = solved_result.background_tasks
+            dependency_cache.update(solved_result.dependency_cache)
+            if solved_result.errors:
+                errors.extend(solved_result.errors)
+                continue
+            if sub_dependant.use_cache and sub_dependant.cache_key in dependency_cache:
+                solved = dependency_cache[sub_dependant.cache_key]
+            elif is_gen_callable(call) or is_async_gen_callable(call):
+>               solved = await solve_generator(
+                    call=call, stack=async_exit_stack, sub_values=solved_result.values
+
+..\.venv\Lib\site-packages\fastapi\dependencies\utils.py:634: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def solve_generator(
+        *, call: Callable[..., Any], stack: AsyncExitStack, sub_values: Dict[str, Any]
+    ) -> Any:
+        if is_gen_callable(call):
+            cm = contextmanager_in_threadpool(contextmanager(call)(**sub_values))
+        elif is_async_gen_callable(call):
+            cm = asynccontextmanager(call)(**sub_values)
+>       return await stack.enter_async_context(cm)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\fastapi\dependencies\utils.py:560: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib.AsyncExitStack object at 0x000002170F4EC710>
+cm = <contextlib._AsyncGeneratorContextManager object at 0x000002170F3AAF90>
+
+    async def enter_async_context(self, cm):
+        """Enters the supplied async context manager.
+    
+        If successful, also pushes its __aexit__ method as a callback and
+        returns the result of the __aenter__ method.
+        """
+        cls = type(cm)
+        try:
+            _enter = cls.__aenter__
+            _exit = cls.__aexit__
+        except AttributeError:
+            raise TypeError(f"'{cls.__module__}.{cls.__qualname__}' object does "
+                            f"not support the asynchronous context manager protocol"
+                           ) from None
+>       result = await _enter(cm)
+                 ^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:668: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._AsyncGeneratorContextManager object at 0x000002170F3AAF90>
+
+    async def __aenter__(self):
+        # do not keep args and kwds alive unnecessarily
+        # they are only needed for recreation, which is not possible anymore
+        del self.args, self.kwds, self.func
+        try:
+>           return await anext(self.gen)
+                   ^^^^^^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:214: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cm = <contextlib._GeneratorContextManager object at 0x000002170F55AB30>
+
+    @asynccontextmanager
+    async def contextmanager_in_threadpool(
+        cm: ContextManager[_T],
+    ) -> AsyncGenerator[_T, None]:
+        # blocking __exit__ from running waiting on a free thread
+        # can create race conditions/deadlocks if the context manager itself
+        # has its own internal pool (e.g. a database connection pool)
+        # to avoid this we let __exit__ run without a capacity limit
+        # since we're creating a new limiter for each call, any non-zero limit
+        # works (1 is arbitrary)
+        exit_limiter = CapacityLimiter(1)
+        try:
+            yield await run_in_threadpool(cm.__enter__)
+        except Exception as e:
+            ok = bool(
+                await anyio.to_thread.run_sync(
+                    cm.__exit__, type(e), e, e.__traceback__, limiter=exit_limiter
+                )
+            )
+            if not ok:
+>               raise e
+
+..\.venv\Lib\site-packages\fastapi\concurrency.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cm = <contextlib._GeneratorContextManager object at 0x000002170F55AB30>
+
+    @asynccontextmanager
+    async def contextmanager_in_threadpool(
+        cm: ContextManager[_T],
+    ) -> AsyncGenerator[_T, None]:
+        # blocking __exit__ from running waiting on a free thread
+        # can create race conditions/deadlocks if the context manager itself
+        # has its own internal pool (e.g. a database connection pool)
+        # to avoid this we let __exit__ run without a capacity limit
+        # since we're creating a new limiter for each call, any non-zero limit
+        # works (1 is arbitrary)
+        exit_limiter = CapacityLimiter(1)
+        try:
+>           yield await run_in_threadpool(cm.__enter__)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\fastapi\concurrency.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x000002170F55AB30>>)
+args = (), kwargs = {}
+
+    async def run_in_threadpool(func: typing.Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        func = functools.partial(func, *args, **kwargs)
+>       return await anyio.to_thread.run_sync(func)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\starlette\concurrency.py:37: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x000002170F55AB30>>)
+cancellable = False, limiter = None, args = ()
+
+    async def run_sync(
+        func: Callable[..., T_Retval],
+        *args: object,
+        cancellable: bool = False,
+        limiter: CapacityLimiter | None = None,
+    ) -> T_Retval:
+        """
+        Call the given function with the given arguments in a worker thread.
+    
+        If the ``cancellable`` option is enabled and the task waiting for its completion is cancelled,
+        the thread will still run its course but its return value (or any raised exception) will be
+        ignored.
+    
+        :param func: a callable
+        :param args: positional arguments for the callable
+        :param cancellable: ``True`` to allow cancellation of the operation
+        :param limiter: capacity limiter to use to limit the total amount of threads running
+            (if omitted, the default limiter is used)
+        :return: an awaitable that yields the return value of the function.
+    
+        """
+>       return await get_asynclib().run_sync_in_worker_thread(
+            func, *args, cancellable=cancellable, limiter=limiter
+        )
+
+..\.venv\Lib\site-packages\anyio\to_thread.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x000002170F55AB30>>)
+cancellable = False, limiter = None, args = (), idle_workers = deque([])
+
+    async def run_sync_in_worker_thread(
+        func: Callable[..., T_Retval],
+        *args: object,
+        cancellable: bool = False,
+        limiter: CapacityLimiter | None = None,
+    ) -> T_Retval:
+        await checkpoint()
+    
+        # If this is the first run in this event loop thread, set up the necessary variables
+        try:
+            idle_workers = _threadpool_idle_workers.get()
+            workers = _threadpool_workers.get()
+        except LookupError:
+            idle_workers = deque()
+            workers = set()
+            _threadpool_idle_workers.set(idle_workers)
+            _threadpool_workers.set(workers)
+    
+        async with (limiter or current_default_thread_limiter()):
+            with CancelScope(shield=not cancellable):
+                future: asyncio.Future = asyncio.Future()
+                root_task = find_root_task()
+                if not idle_workers:
+                    worker = WorkerThread(root_task, workers, idle_workers)
+                    worker.start()
+                    workers.add(worker)
+                    root_task.add_done_callback(worker.stop)
+                else:
+                    worker = idle_workers.pop()
+    
+                    # Prune any other workers that have been idle for MAX_IDLE_TIME seconds or longer
+                    now = current_time()
+                    while idle_workers:
+                        if now - idle_workers[0].idle_since < WorkerThread.MAX_IDLE_TIME:
+                            break
+    
+                        expired_worker = idle_workers.popleft()
+                        expired_worker.root_task.remove_done_callback(expired_worker.stop)
+                        expired_worker.stop()
+    
+                context = copy_context()
+                context.run(sniffio.current_async_library_cvar.set, None)
+                worker.queue.put_nowait((context, func, args, future))
+>               return await future
+                       ^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:877: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <WorkerThread(AnyIO worker thread, stopped 16688)>
+
+    def run(self) -> None:
+        with claim_worker_thread("asyncio"):
+            threadlocals.loop = self.loop
+            while True:
+                item = self.queue.get()
+                if item is None:
+                    # Shutdown command received
+                    return
+    
+                context, func, args, future = item
+                if not future.cancelled():
+                    result = None
+                    exception: BaseException | None = None
+                    try:
+>                       result = context.run(func, *args)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:807: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._GeneratorContextManager object at 0x000002170F55AB30>
+
+    def __enter__(self):
+        # do not keep args and kwds alive unnecessarily
+        # they are only needed for recreation, which is not possible anymore
+        del self.args, self.kwds, self.func
+        try:
+>           return next(self.gen)
+                   ^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def get_db():
+        if not SessionLocal:
+>           raise Exception("Database not available - check DATABASE_URL and PostgreSQL connection")
+E           Exception: Database not available - check DATABASE_URL and PostgreSQL connection
+
+app\database.py:37: Exception
+_________________________ test_tracking_sync_persists _________________________
+
+    def test_tracking_sync_persists():
+        body = {"items": [{"id": "t1", "status": "in_transit", "location": {"lat":36.5, "lng":10.1}, "eta_hours":2.0}]}
+>       r = client.post("/api/tracking/sync", json=body)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_api_endpoints.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+url = '/api/tracking/sync'
+
+    def post(  # type: ignore[override]
+        self,
+        url: httpx._types.URLTypes,
+        *,
+        content: httpx._types.RequestContent | None = None,
+        data: _RequestData | None = None,
+        files: httpx._types.RequestFiles | None = None,
+        json: typing.Any = None,
+        params: httpx._types.QueryParamTypes | None = None,
+        headers: httpx._types.HeaderTypes | None = None,
+        cookies: httpx._types.CookieTypes | None = None,
+        auth: httpx._types.AuthTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        follow_redirects: bool | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        timeout: httpx._types.TimeoutTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        extensions: dict[str, typing.Any] | None = None,
+    ) -> httpx.Response:
+>       return super().post(
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\starlette\testclient.py:538: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+url = '/api/tracking/sync'
+
+    def post(
+        self,
+        url: URL | str,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: typing.Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> Response:
+        """
+        Send a `POST` request.
+    
+        **Parameters**: See `httpx.request`.
+        """
+>       return self.request(
+            "POST",
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\httpx\_client.py:1144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+method = 'POST', url = URL('http://testserver/api/tracking/sync')
+
+    def request(  # type: ignore[override]
+        self,
+        method: str,
+        url: httpx._types.URLTypes,
+        *,
+        content: httpx._types.RequestContent | None = None,
+        data: _RequestData | None = None,
+        files: httpx._types.RequestFiles | None = None,
+        json: typing.Any = None,
+        params: httpx._types.QueryParamTypes | None = None,
+        headers: httpx._types.HeaderTypes | None = None,
+        cookies: httpx._types.CookieTypes | None = None,
+        auth: httpx._types.AuthTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        follow_redirects: bool | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        timeout: httpx._types.TimeoutTypes | httpx._client.UseClientDefault = httpx._client.USE_CLIENT_DEFAULT,
+        extensions: dict[str, typing.Any] | None = None,
+    ) -> httpx.Response:
+        if timeout is not httpx.USE_CLIENT_DEFAULT:
+            warnings.warn(
+                "You should not use the 'timeout' argument with the TestClient. "
+                "See https://github.com/encode/starlette/issues/1108 for more information.",
+                DeprecationWarning,
+            )
+        url = self._merge_url(url)
+>       return super().request(
+            method,
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+..\.venv\Lib\site-packages\starlette\testclient.py:437: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+method = 'POST', url = URL('http://testserver/api/tracking/sync')
+
+    def request(
+        self,
+        method: str,
+        url: URL | str,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: typing.Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> Response:
+        """
+        Build and send a request.
+    
+        Equivalent to:
+    
+        ```python
+        request = client.build_request(...)
+        response = client.send(request, ...)
+        ```
+    
+        See `Client.build_request()`, `Client.send()` and
+        [Merging of configuration][0] for how the various parameters
+        are merged with client-level configuration.
+    
+        [0]: /advanced/clients/#merging-of-configuration
+        """
+        if cookies is not None:
+            message = (
+                "Setting per-request cookies=<...> is being deprecated, because "
+                "the expected behaviour on cookie persistence is ambiguous. Set "
+                "cookies directly on the client instance instead."
+            )
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+    
+        request = self.build_request(
+            method=method,
+            url=url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+        )
+>       return self.send(request, auth=auth, follow_redirects=follow_redirects)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:825: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+
+    def send(
+        self,
+        request: Request,
+        *,
+        stream: bool = False,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+    ) -> Response:
+        """
+        Send a request.
+    
+        The request is sent as-is, unmodified.
+    
+        Typically you'll want to build one with `Client.build_request()`
+        so that any client-level configuration is merged into the request,
+        but passing an explicit `httpx.Request()` is supported as well.
+    
+        See also: [Request instances][0]
+    
+        [0]: /advanced/clients/#request-instances
+        """
+        if self._state == ClientState.CLOSED:
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+    
+        self._state = ClientState.OPENED
+        follow_redirects = (
+            self.follow_redirects
+            if isinstance(follow_redirects, UseClientDefault)
+            else follow_redirects
+        )
+    
+        self._set_timeout(request)
+    
+        auth = self._build_request_auth(request, auth)
+    
+>       response = self._send_handling_auth(
+            request,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            history=[],
+        )
+
+..\.venv\Lib\site-packages\httpx\_client.py:914: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+auth = <httpx.Auth object at 0x000002170F42FE10>, follow_redirects = True
+history = []
+
+    def _send_handling_auth(
+        self,
+        request: Request,
+        auth: Auth,
+        follow_redirects: bool,
+        history: list[Response],
+    ) -> Response:
+        auth_flow = auth.sync_auth_flow(request)
+        try:
+            request = next(auth_flow)
+    
+            while True:
+>               response = self._send_handling_redirects(
+                    request,
+                    follow_redirects=follow_redirects,
+                    history=history,
+                )
+
+..\.venv\Lib\site-packages\httpx\_client.py:942: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+follow_redirects = True, history = []
+
+    def _send_handling_redirects(
+        self,
+        request: Request,
+        follow_redirects: bool,
+        history: list[Response],
+    ) -> Response:
+        while True:
+            if len(history) > self.max_redirects:
+                raise TooManyRedirects(
+                    "Exceeded maximum allowed redirects.", request=request
+                )
+    
+            for hook in self._event_hooks["request"]:
+                hook(request)
+    
+>           response = self._send_single_request(request)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:979: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient.TestClient object at 0x000002170F3AA270>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+
+    def _send_single_request(self, request: Request) -> Response:
+        """
+        Sends a single request, without handling any redirections.
+        """
+        transport = self._transport_for_url(request.url)
+        start = time.perf_counter()
+    
+        if not isinstance(request.stream, SyncByteStream):
+            raise RuntimeError(
+                "Attempted to send an async request with a sync Client instance."
+            )
+    
+        with request_context(request=request):
+>           response = transport.handle_request(request)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\httpx\_client.py:1014: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient._TestClientTransport object at 0x000002170F3AA3C0>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        scheme = request.url.scheme
+        netloc = request.url.netloc.decode(encoding="ascii")
+        path = request.url.path
+        raw_path = request.url.raw_path
+        query = request.url.query.decode(encoding="ascii")
+    
+        default_port = {"http": 80, "ws": 80, "https": 443, "wss": 443}[scheme]
+    
+        if ":" in netloc:
+            host, port_string = netloc.split(":", 1)
+            port = int(port_string)
+        else:
+            host = netloc
+            port = default_port
+    
+        # Include the 'host' header.
+        if "host" in request.headers:
+            headers: list[tuple[bytes, bytes]] = []
+        elif port == default_port:  # pragma: no cover
+            headers = [(b"host", host.encode())]
+        else:  # pragma: no cover
+            headers = [(b"host", (f"{host}:{port}").encode())]
+    
+        # Include other request headers.
+        headers += [(key.lower().encode(), value.encode()) for key, value in request.headers.multi_items()]
+    
+        scope: dict[str, typing.Any]
+    
+        if scheme in {"ws", "wss"}:
+            subprotocol = request.headers.get("sec-websocket-protocol", None)
+            if subprotocol is None:
+                subprotocols: typing.Sequence[str] = []
+            else:
+                subprotocols = [value.strip() for value in subprotocol.split(",")]
+            scope = {
+                "type": "websocket",
+                "path": unquote(path),
+                "raw_path": raw_path.split(b"?", 1)[0],
+                "root_path": self.root_path,
+                "scheme": scheme,
+                "query_string": query.encode(),
+                "headers": headers,
+                "client": self.client,
+                "server": [host, port],
+                "subprotocols": subprotocols,
+                "state": self.app_state.copy(),
+                "extensions": {"websocket.http.response": {}},
+            }
+            session = WebSocketTestSession(self.app, scope, self.portal_factory)
+            raise _Upgrade(session)
+    
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": request.method,
+            "path": unquote(path),
+            "raw_path": raw_path.split(b"?", 1)[0],
+            "root_path": self.root_path,
+            "scheme": scheme,
+            "query_string": query.encode(),
+            "headers": headers,
+            "client": self.client,
+            "server": [host, port],
+            "extensions": {"http.response.debug": {}},
+            "state": self.app_state.copy(),
+        }
+    
+        request_complete = False
+        response_started = False
+        response_complete: anyio.Event
+        raw_kwargs: dict[str, typing.Any] = {"stream": io.BytesIO()}
+        template = None
+        context = None
+    
+        async def receive() -> Message:
+            nonlocal request_complete
+    
+            if request_complete:
+                if not response_complete.is_set():
+                    await response_complete.wait()
+                return {"type": "http.disconnect"}
+    
+            body = request.read()
+            if isinstance(body, str):
+                body_bytes: bytes = body.encode("utf-8")  # pragma: no cover
+            elif body is None:
+                body_bytes = b""  # pragma: no cover
+            elif isinstance(body, GeneratorType):
+                try:  # pragma: no cover
+                    chunk = body.send(None)
+                    if isinstance(chunk, str):
+                        chunk = chunk.encode("utf-8")
+                    return {"type": "http.request", "body": chunk, "more_body": True}
+                except StopIteration:  # pragma: no cover
+                    request_complete = True
+                    return {"type": "http.request", "body": b""}
+            else:
+                body_bytes = body
+    
+            request_complete = True
+            return {"type": "http.request", "body": body_bytes}
+    
+        async def send(message: Message) -> None:
+            nonlocal raw_kwargs, response_started, template, context
+    
+            if message["type"] == "http.response.start":
+                assert not response_started, 'Received multiple "http.response.start" messages.'
+                raw_kwargs["status_code"] = message["status"]
+                raw_kwargs["headers"] = [(key.decode(), value.decode()) for key, value in message.get("headers", [])]
+                response_started = True
+            elif message["type"] == "http.response.body":
+                assert response_started, 'Received "http.response.body" without "http.response.start".'
+                assert not response_complete.is_set(), 'Received "http.response.body" after response completed.'
+                body = message.get("body", b"")
+                more_body = message.get("more_body", False)
+                if request.method != "HEAD":
+                    raw_kwargs["stream"].write(body)
+                if not more_body:
+                    raw_kwargs["stream"].seek(0)
+                    response_complete.set()
+            elif message["type"] == "http.response.debug":
+                template = message["info"]["template"]
+                context = message["info"]["context"]
+    
+        try:
+            with self.portal_factory() as portal:
+                response_complete = portal.call(anyio.Event)
+                portal.call(self.app, scope, receive, send)
+        except BaseException as exc:
+            if self.raise_server_exceptions:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\testclient.py:340: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.testclient._TestClientTransport object at 0x000002170F3AA3C0>
+request = <Request('POST', 'http://testserver/api/tracking/sync')>
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        scheme = request.url.scheme
+        netloc = request.url.netloc.decode(encoding="ascii")
+        path = request.url.path
+        raw_path = request.url.raw_path
+        query = request.url.query.decode(encoding="ascii")
+    
+        default_port = {"http": 80, "ws": 80, "https": 443, "wss": 443}[scheme]
+    
+        if ":" in netloc:
+            host, port_string = netloc.split(":", 1)
+            port = int(port_string)
+        else:
+            host = netloc
+            port = default_port
+    
+        # Include the 'host' header.
+        if "host" in request.headers:
+            headers: list[tuple[bytes, bytes]] = []
+        elif port == default_port:  # pragma: no cover
+            headers = [(b"host", host.encode())]
+        else:  # pragma: no cover
+            headers = [(b"host", (f"{host}:{port}").encode())]
+    
+        # Include other request headers.
+        headers += [(key.lower().encode(), value.encode()) for key, value in request.headers.multi_items()]
+    
+        scope: dict[str, typing.Any]
+    
+        if scheme in {"ws", "wss"}:
+            subprotocol = request.headers.get("sec-websocket-protocol", None)
+            if subprotocol is None:
+                subprotocols: typing.Sequence[str] = []
+            else:
+                subprotocols = [value.strip() for value in subprotocol.split(",")]
+            scope = {
+                "type": "websocket",
+                "path": unquote(path),
+                "raw_path": raw_path.split(b"?", 1)[0],
+                "root_path": self.root_path,
+                "scheme": scheme,
+                "query_string": query.encode(),
+                "headers": headers,
+                "client": self.client,
+                "server": [host, port],
+                "subprotocols": subprotocols,
+                "state": self.app_state.copy(),
+                "extensions": {"websocket.http.response": {}},
+            }
+            session = WebSocketTestSession(self.app, scope, self.portal_factory)
+            raise _Upgrade(session)
+    
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": request.method,
+            "path": unquote(path),
+            "raw_path": raw_path.split(b"?", 1)[0],
+            "root_path": self.root_path,
+            "scheme": scheme,
+            "query_string": query.encode(),
+            "headers": headers,
+            "client": self.client,
+            "server": [host, port],
+            "extensions": {"http.response.debug": {}},
+            "state": self.app_state.copy(),
+        }
+    
+        request_complete = False
+        response_started = False
+        response_complete: anyio.Event
+        raw_kwargs: dict[str, typing.Any] = {"stream": io.BytesIO()}
+        template = None
+        context = None
+    
+        async def receive() -> Message:
+            nonlocal request_complete
+    
+            if request_complete:
+                if not response_complete.is_set():
+                    await response_complete.wait()
+                return {"type": "http.disconnect"}
+    
+            body = request.read()
+            if isinstance(body, str):
+                body_bytes: bytes = body.encode("utf-8")  # pragma: no cover
+            elif body is None:
+                body_bytes = b""  # pragma: no cover
+            elif isinstance(body, GeneratorType):
+                try:  # pragma: no cover
+                    chunk = body.send(None)
+                    if isinstance(chunk, str):
+                        chunk = chunk.encode("utf-8")
+                    return {"type": "http.request", "body": chunk, "more_body": True}
+                except StopIteration:  # pragma: no cover
+                    request_complete = True
+                    return {"type": "http.request", "body": b""}
+            else:
+                body_bytes = body
+    
+            request_complete = True
+            return {"type": "http.request", "body": body_bytes}
+    
+        async def send(message: Message) -> None:
+            nonlocal raw_kwargs, response_started, template, context
+    
+            if message["type"] == "http.response.start":
+                assert not response_started, 'Received multiple "http.response.start" messages.'
+                raw_kwargs["status_code"] = message["status"]
+                raw_kwargs["headers"] = [(key.decode(), value.decode()) for key, value in message.get("headers", [])]
+                response_started = True
+            elif message["type"] == "http.response.body":
+                assert response_started, 'Received "http.response.body" without "http.response.start".'
+                assert not response_complete.is_set(), 'Received "http.response.body" after response completed.'
+                body = message.get("body", b"")
+                more_body = message.get("more_body", False)
+                if request.method != "HEAD":
+                    raw_kwargs["stream"].write(body)
+                if not more_body:
+                    raw_kwargs["stream"].seek(0)
+                    response_complete.set()
+            elif message["type"] == "http.response.debug":
+                template = message["info"]["template"]
+                context = message["info"]["context"]
+    
+        try:
+            with self.portal_factory() as portal:
+                response_complete = portal.call(anyio.Event)
+>               portal.call(self.app, scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\testclient.py:337: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <anyio._backends._asyncio.BlockingPortal object at 0x000002170F5BC640>
+func = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+args = ({'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <fu...ls>.receive at 0x000002170F59A980>, <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>)
+
+    def call(
+        self, func: Callable[..., Awaitable[T_Retval] | T_Retval], *args: object
+    ) -> T_Retval:
+        """
+        Call the given function in the event loop thread.
+    
+        If the callable returns a coroutine object, it is awaited on.
+    
+        :param func: any callable
+        :raises RuntimeError: if the portal is not running or if this method is called from within
+            the event loop thread
+    
+        """
+>       return cast(T_Retval, self.start_task_soon(func, *args).result())
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\from_thread.py:277: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = None, timeout = None
+
+    def result(self, timeout=None):
+        """Return the result of the call that the future represents.
+    
+        Args:
+            timeout: The number of seconds to wait for the result if the future
+                isn't done. If None, then there is no limit on the wait time.
+    
+        Returns:
+            The result of the call that the future represents.
+    
+        Raises:
+            CancelledError: If the future was cancelled.
+            TimeoutError: If the future didn't finish executing before the given
+                timeout.
+            Exception: If the call raised then that exception will be raised.
+        """
+        try:
+            with self._condition:
+                if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
+                    raise CancelledError()
+                elif self._state == FINISHED:
+                    return self.__get_result()
+    
+                self._condition.wait(timeout)
+    
+                if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]:
+                    raise CancelledError()
+                elif self._state == FINISHED:
+>                   return self.__get_result()
+                           ^^^^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:456: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = None
+
+    def __get_result(self):
+        if self._exception is not None:
+            try:
+>               raise self._exception
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\_base.py:401: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <anyio._backends._asyncio.BlockingPortal object at 0x000002170F5BC640>
+func = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+args = ({'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <fu...ls>.receive at 0x000002170F59A980>, <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>)
+kwargs = {}, future = <Future at 0x2171034a250 state=finished raised Exception>
+
+    async def _call_func(
+        self, func: Callable, args: tuple, kwargs: dict[str, Any], future: Future
+    ) -> None:
+        def callback(f: Future) -> None:
+            if f.cancelled() and self._event_loop_thread_id not in (
+                None,
+                threading.get_ident(),
+            ):
+                self.call(scope.cancel)
+    
+        try:
+            retval = func(*args, **kwargs)
+            if iscoroutine(retval):
+                with CancelScope() as scope:
+                    if future.cancelled():
+                        scope.cancel()
+                    else:
+                        future.add_done_callback(callback)
+    
+>                   retval = await retval
+                             ^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\from_thread.py:217: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.root_path:
+            scope["root_path"] = self.root_path
+>       await super().__call__(scope, receive, send)
+
+..\.venv\Lib\site-packages\fastapi\applications.py:1054: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.applications.FastAPI object at 0x000002170F3A82F0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope["app"] = self
+        if self.middleware_stack is None:
+            self.middleware_stack = self.build_middleware_stack()
+>       await self.middleware_stack(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\applications.py:112: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.errors.ServerErrorMiddleware object at 0x000002170F520830>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+    
+        response_started = False
+    
+        async def _send(message: Message) -> None:
+            nonlocal response_started, send
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await self.app(scope, receive, _send)
+        except Exception as exc:
+            request = Request(scope)
+            if self.debug:
+                # In debug mode, return traceback responses.
+                response = self.debug_response(request, exc)
+            elif self.handler is None:
+                # Use our default 500 error handler.
+                response = self.error_response(request, exc)
+            else:
+                # Use an installed 500 error handler.
+                if is_async_callable(self.handler):
+                    response = await self.handler(request, exc)
+                else:
+                    response = await run_in_threadpool(self.handler, request, exc)
+    
+            if not response_started:
+                await response(scope, receive, send)
+    
+            # We always continue to raise the exception.
+            # This allows servers to log the error, or allows test clients
+            # to optionally raise the error within the test case.
+>           raise exc
+
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.errors.ServerErrorMiddleware object at 0x000002170F520830>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function _TestClientTransport.handle_request.<locals>.send at 0x000002170F59A520>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+    
+        response_started = False
+    
+        async def _send(message: Message) -> None:
+            nonlocal response_started, send
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await self.app(scope, receive, _send)
+
+..\.venv\Lib\site-packages\starlette\middleware\errors.py:165: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.cors.CORSMiddleware object at 0x000002170F5206E0>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170FACF7E0>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":  # pragma: no cover
+            await self.app(scope, receive, send)
+            return
+    
+        method = scope["method"]
+        headers = Headers(scope=scope)
+        origin = headers.get("origin")
+    
+        if origin is None:
+>           await self.app(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\middleware\cors.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <starlette.middleware.exceptions.ExceptionMiddleware object at 0x000002170F3AB770>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170FACF7E0>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+    
+        scope["starlette.exception_handlers"] = (
+            self._exception_handlers,
+            self._status_handlers,
+        )
+    
+        conn: Request | WebSocket
+        if scope["type"] == "http":
+            conn = Request(scope, receive, send)
+        else:
+            conn = WebSocket(scope, receive, send)
+    
+>       await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\middleware\exceptions.py:62: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170FACF7E0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await app(scope, receive, sender)
+        except Exception as exc:
+            handler = None
+    
+            if isinstance(exc, HTTPException):
+                handler = status_handlers.get(exc.status_code)
+    
+            if handler is None:
+                handler = _lookup_exception_handler(exception_handlers, exc)
+    
+            if handler is None:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function ServerErrorMiddleware.__call__.<locals>._send at 0x000002170FACF7E0>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await app(scope, receive, sender)
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.routing.APIRouter object at 0x000002170F3DAA50>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """
+        The main entry point to the Router class.
+        """
+>       await self.middleware_stack(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:714: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <fastapi.routing.APIRouter object at 0x000002170F3DAA50>
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def app(self, scope: Scope, receive: Receive, send: Send) -> None:
+        assert scope["type"] in ("http", "websocket", "lifespan")
+    
+        if "router" not in scope:
+            scope["router"] = self
+    
+        if scope["type"] == "lifespan":
+            await self.lifespan(scope, receive, send)
+            return
+    
+        partial = None
+    
+        for route in self.routes:
+            # Determine if any route matches the incoming scope,
+            # and hand over to the matching route if found.
+            match, child_scope = route.matches(scope)
+            if match == Match.FULL:
+                scope.update(child_scope)
+>               await route.handle(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:734: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = APIRoute(path='/api/tracking/sync', name='sync_tracking', methods=['POST'])
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.methods and scope["method"] not in self.methods:
+            headers = {"Allow": ", ".join(self.methods)}
+            if "app" in scope:
+                raise HTTPException(status_code=405, headers=headers)
+            else:
+                response = PlainTextResponse("Method Not Allowed", status_code=405, headers=headers)
+            await response(scope, receive, send)
+        else:
+>           await self.app(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:288: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        request = Request(scope, receive, send)
+    
+        async def app(scope: Scope, receive: Receive, send: Send) -> None:
+            response = await f(request)
+            await response(scope, receive, send)
+    
+>       await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+
+..\.venv\Lib\site-packages\starlette\routing.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+            await app(scope, receive, sender)
+        except Exception as exc:
+            handler = None
+    
+            if isinstance(exc, HTTPException):
+                handler = status_handlers.get(exc.status_code)
+    
+            if handler is None:
+                handler = _lookup_exception_handler(exception_handlers, exc)
+    
+            if handler is None:
+>               raise exc
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACF920>
+
+    async def wrapped_app(scope: Scope, receive: Receive, send: Send) -> None:
+        response_started = False
+    
+        async def sender(message: Message) -> None:
+            nonlocal response_started
+    
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+    
+        try:
+>           await app(scope, receive, sender)
+
+..\.venv\Lib\site-packages\starlette\_exception_handler.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+scope = {'app': <fastapi.applications.FastAPI object at 0x000002170F3A82F0>, 'client': ('testclient', 50000), 'endpoint': <function sync_tracking at 0x000002176F351300>, 'extensions': {'http.response.debug': {}}, ...}
+receive = <function _TestClientTransport.handle_request.<locals>.receive at 0x000002170F59A980>
+send = <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x000002170FACFB00>
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+>       response = await f(request)
+                   ^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\starlette\routing.py:73: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+request = <starlette.requests.Request object at 0x000002170F511E50>
+
+    async def app(request: Request) -> Response:
+        response: Union[Response, None] = None
+        async with AsyncExitStack() as file_stack:
+            try:
+                body: Any = None
+                if body_field:
+                    if is_body_form:
+                        body = await request.form()
+                        file_stack.push_async_callback(body.close)
+                    else:
+                        body_bytes = await request.body()
+                        if body_bytes:
+                            json_body: Any = Undefined
+                            content_type_value = request.headers.get("content-type")
+                            if not content_type_value:
+                                json_body = await request.json()
+                            else:
+                                message = email.message.Message()
+                                message["content-type"] = content_type_value
+                                if message.get_content_maintype() == "application":
+                                    subtype = message.get_content_subtype()
+                                    if subtype == "json" or subtype.endswith("+json"):
+                                        json_body = await request.json()
+                            if json_body != Undefined:
+                                body = json_body
+                            else:
+                                body = body_bytes
+            except json.JSONDecodeError as e:
+                validation_error = RequestValidationError(
+                    [
+                        {
+                            "type": "json_invalid",
+                            "loc": ("body", e.pos),
+                            "msg": "JSON decode error",
+                            "input": {},
+                            "ctx": {"error": e.msg},
+                        }
+                    ],
+                    body=e.doc,
+                )
+                raise validation_error from e
+            except HTTPException:
+                # If a middleware raises an HTTPException, it should be raised again
+                raise
+            except Exception as e:
+                http_error = HTTPException(
+                    status_code=400, detail="There was an error parsing the body"
+                )
+                raise http_error from e
+            errors: List[Any] = []
+            async with AsyncExitStack() as async_exit_stack:
+>               solved_result = await solve_dependencies(
+                    request=request,
+                    dependant=dependant,
+                    body=body,
+                    dependency_overrides_provider=dependency_overrides_provider,
+                    async_exit_stack=async_exit_stack,
+                    embed_body_fields=embed_body_fields,
+                )
+
+..\.venv\Lib\site-packages\fastapi\routing.py:291: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def solve_dependencies(
+        *,
+        request: Union[Request, WebSocket],
+        dependant: Dependant,
+        body: Optional[Union[Dict[str, Any], FormData]] = None,
+        background_tasks: Optional[StarletteBackgroundTasks] = None,
+        response: Optional[Response] = None,
+        dependency_overrides_provider: Optional[Any] = None,
+        dependency_cache: Optional[Dict[Tuple[Callable[..., Any], Tuple[str]], Any]] = None,
+        async_exit_stack: AsyncExitStack,
+        embed_body_fields: bool,
+    ) -> SolvedDependency:
+        values: Dict[str, Any] = {}
+        errors: List[Any] = []
+        if response is None:
+            response = Response()
+            del response.headers["content-length"]
+            response.status_code = None  # type: ignore
+        dependency_cache = dependency_cache or {}
+        sub_dependant: Dependant
+        for sub_dependant in dependant.dependencies:
+            sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
+            sub_dependant.cache_key = cast(
+                Tuple[Callable[..., Any], Tuple[str]], sub_dependant.cache_key
+            )
+            call = sub_dependant.call
+            use_sub_dependant = sub_dependant
+            if (
+                dependency_overrides_provider
+                and dependency_overrides_provider.dependency_overrides
+            ):
+                original_call = sub_dependant.call
+                call = getattr(
+                    dependency_overrides_provider, "dependency_overrides", {}
+                ).get(original_call, original_call)
+                use_path: str = sub_dependant.path  # type: ignore
+                use_sub_dependant = get_dependant(
+                    path=use_path,
+                    call=call,
+                    name=sub_dependant.name,
+                    security_scopes=sub_dependant.security_scopes,
+                )
+    
+            solved_result = await solve_dependencies(
+                request=request,
+                dependant=use_sub_dependant,
+                body=body,
+                background_tasks=background_tasks,
+                response=response,
+                dependency_overrides_provider=dependency_overrides_provider,
+                dependency_cache=dependency_cache,
+                async_exit_stack=async_exit_stack,
+                embed_body_fields=embed_body_fields,
+            )
+            background_tasks = solved_result.background_tasks
+            dependency_cache.update(solved_result.dependency_cache)
+            if solved_result.errors:
+                errors.extend(solved_result.errors)
+                continue
+            if sub_dependant.use_cache and sub_dependant.cache_key in dependency_cache:
+                solved = dependency_cache[sub_dependant.cache_key]
+            elif is_gen_callable(call) or is_async_gen_callable(call):
+>               solved = await solve_generator(
+                    call=call, stack=async_exit_stack, sub_values=solved_result.values
+
+..\.venv\Lib\site-packages\fastapi\dependencies\utils.py:634: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def solve_generator(
+        *, call: Callable[..., Any], stack: AsyncExitStack, sub_values: Dict[str, Any]
+    ) -> Any:
+        if is_gen_callable(call):
+            cm = contextmanager_in_threadpool(contextmanager(call)(**sub_values))
+        elif is_async_gen_callable(call):
+            cm = asynccontextmanager(call)(**sub_values)
+>       return await stack.enter_async_context(cm)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\fastapi\dependencies\utils.py:560: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib.AsyncExitStack object at 0x000002170F7DC490>
+cm = <contextlib._AsyncGeneratorContextManager object at 0x000002170F4BB390>
+
+    async def enter_async_context(self, cm):
+        """Enters the supplied async context manager.
+    
+        If successful, also pushes its __aexit__ method as a callback and
+        returns the result of the __aenter__ method.
+        """
+        cls = type(cm)
+        try:
+            _enter = cls.__aenter__
+            _exit = cls.__aexit__
+        except AttributeError:
+            raise TypeError(f"'{cls.__module__}.{cls.__qualname__}' object does "
+                            f"not support the asynchronous context manager protocol"
+                           ) from None
+>       result = await _enter(cm)
+                 ^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:668: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._AsyncGeneratorContextManager object at 0x000002170F4BB390>
+
+    async def __aenter__(self):
+        # do not keep args and kwds alive unnecessarily
+        # they are only needed for recreation, which is not possible anymore
+        del self.args, self.kwds, self.func
+        try:
+>           return await anext(self.gen)
+                   ^^^^^^^^^^^^^^^^^^^^^
+
+..\..\..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:214: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cm = <contextlib._GeneratorContextManager object at 0x0000021710384050>
+
+    @asynccontextmanager
+    async def contextmanager_in_threadpool(
+        cm: ContextManager[_T],
+    ) -> AsyncGenerator[_T, None]:
+        # blocking __exit__ from running waiting on a free thread
+        # can create race conditions/deadlocks if the context manager itself
+        # has its own internal pool (e.g. a database connection pool)
+        # to avoid this we let __exit__ run without a capacity limit
+        # since we're creating a new limiter for each call, any non-zero limit
+        # works (1 is arbitrary)
+        exit_limiter = CapacityLimiter(1)
+        try:
+            yield await run_in_threadpool(cm.__enter__)
+        except Exception as e:
+            ok = bool(
+                await anyio.to_thread.run_sync(
+                    cm.__exit__, type(e), e, e.__traceback__, limiter=exit_limiter
+                )
+            )
+            if not ok:
+>               raise e
+
+..\.venv\Lib\site-packages\fastapi\concurrency.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cm = <contextlib._GeneratorContextManager object at 0x0000021710384050>
+
+    @asynccontextmanager
+    async def contextmanager_in_threadpool(
+        cm: ContextManager[_T],
+    ) -> AsyncGenerator[_T, None]:
+        # blocking __exit__ from running waiting on a free thread
+        # can create race conditions/deadlocks if the context manager itself
+        # has its own internal pool (e.g. a database connection pool)
+        # to avoid this we let __exit__ run without a capacity limit
+        # since we're creating a new limiter for each call, any non-zero limit
+        # works (1 is arbitrary)
+        exit_limiter = CapacityLimiter(1)
+        try:
+>           yield await run_in_threadpool(cm.__enter__)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\fastapi\concurrency.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x0000021710384050>>)
+args = (), kwargs = {}
+
+    async def run_in_threadpool(func: typing.Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        func = functools.partial(func, *args, **kwargs)
+>       return await anyio.to_thread.run_sync(func)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\starlette\concurrency.py:37: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x0000021710384050>>)
+cancellable = False, limiter = None, args = ()
+
+    async def run_sync(
+        func: Callable[..., T_Retval],
+        *args: object,
+        cancellable: bool = False,
+        limiter: CapacityLimiter | None = None,
+    ) -> T_Retval:
+        """
+        Call the given function with the given arguments in a worker thread.
+    
+        If the ``cancellable`` option is enabled and the task waiting for its completion is cancelled,
+        the thread will still run its course but its return value (or any raised exception) will be
+        ignored.
+    
+        :param func: a callable
+        :param args: positional arguments for the callable
+        :param cancellable: ``True`` to allow cancellation of the operation
+        :param limiter: capacity limiter to use to limit the total amount of threads running
+            (if omitted, the default limiter is used)
+        :return: an awaitable that yields the return value of the function.
+    
+        """
+>       return await get_asynclib().run_sync_in_worker_thread(
+            func, *args, cancellable=cancellable, limiter=limiter
+        )
+
+..\.venv\Lib\site-packages\anyio\to_thread.py:33: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+func = functools.partial(<bound method _GeneratorContextManager.__enter__ of <contextlib._GeneratorContextManager object at 0x0000021710384050>>)
+cancellable = False, limiter = None, args = (), idle_workers = deque([])
+
+    async def run_sync_in_worker_thread(
+        func: Callable[..., T_Retval],
+        *args: object,
+        cancellable: bool = False,
+        limiter: CapacityLimiter | None = None,
+    ) -> T_Retval:
+        await checkpoint()
+    
+        # If this is the first run in this event loop thread, set up the necessary variables
+        try:
+            idle_workers = _threadpool_idle_workers.get()
+            workers = _threadpool_workers.get()
+        except LookupError:
+            idle_workers = deque()
+            workers = set()
+            _threadpool_idle_workers.set(idle_workers)
+            _threadpool_workers.set(workers)
+    
+        async with (limiter or current_default_thread_limiter()):
+            with CancelScope(shield=not cancellable):
+                future: asyncio.Future = asyncio.Future()
+                root_task = find_root_task()
+                if not idle_workers:
+                    worker = WorkerThread(root_task, workers, idle_workers)
+                    worker.start()
+                    workers.add(worker)
+                    root_task.add_done_callback(worker.stop)
+                else:
+                    worker = idle_workers.pop()
+    
+                    # Prune any other workers that have been idle for MAX_IDLE_TIME seconds or longer
+                    now = current_time()
+                    while idle_workers:
+                        if now - idle_workers[0].idle_since < WorkerThread.MAX_IDLE_TIME:
+                            break
+    
+                        expired_worker = idle_workers.popleft()
+                        expired_worker.root_task.remove_done_callback(expired_worker.stop)
+                        expired_worker.stop()
+    
+                context = copy_context()
+                context.run(sniffio.current_async_library_cvar.set, None)
+                worker.queue.put_nowait((context, func, args, future))
+>               return await future
+                       ^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:877: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <WorkerThread(AnyIO worker thread, stopped 23624)>
+
+    def run(self) -> None:
+        with claim_worker_thread("asyncio"):
+            threadlocals.loop = self.loop
+            while True:
+                item = self.queue.get()
+                if item is None:
+                    # Shutdown command received
+                    return
+    
+                context, func, args, future = item
+                if not future.cancelled():
+                    result = None
+                    exception: BaseException | None = None
+                    try:
+>                       result = context.run(func, *args)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+..\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:807: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <contextlib._GeneratorContextManager object at 0x0000021710384050>
+
+    def __enter__(self):
+        # do not keep args and kwds alive unnecessarily
+        # they are only needed for recreation, which is not possible anymore
+        del self.args, self.kwds, self.funcDatabase not available - running in offline mode

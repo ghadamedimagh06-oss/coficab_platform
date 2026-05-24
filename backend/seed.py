@@ -26,9 +26,7 @@ def seed_database():
             print(f"Created user: {user.username}")
         except Exception as e:
             print(f"User already exists or error: {e}")
-
         print("Database seeded successfully!")
-
     finally:
         db.close()
 
