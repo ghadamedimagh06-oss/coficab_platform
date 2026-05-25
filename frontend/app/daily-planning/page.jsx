@@ -52,14 +52,21 @@ export default function DailyPlanningPage() {
   const [dayCounts, setDayCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [now, setNow] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState('');
+  const [currentDate, setCurrentDate] = useState('');
+  const [todayName, setTodayName] = useState('');
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
 
-  const todayName = DAYS[now.getDay()];
-
-  // Live clock — ticks every second
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
+    const updateClock = () => {
+      const now = new Date();
+      setCurrentTime(formatTime(now));
+      setCurrentDate(formatDate(now));
+      setTodayName(DAYS[now.getDay()]);
+    };
+
+    updateClock();
+    const id = setInterval(updateClock, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -148,13 +155,13 @@ export default function DailyPlanningPage() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
+              <div suppressHydrationWarning={true} className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
                 <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Current time</p>
-                <p className="mt-3 text-2xl font-semibold text-[#1a1a2e]">{formatTime(now)}</p>
+                <p className="mt-3 text-2xl font-semibold text-[#1a1a2e]">{currentTime || 'Loading…'}</p>
               </div>
-              <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
+              <div suppressHydrationWarning={true} className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
                 <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Date</p>
-                <p className="mt-3 text-lg font-semibold text-[#1a1a2e]">{formatDate(now)}</p>
+                <p className="mt-3 text-lg font-semibold text-[#1a1a2e]">{currentDate || 'Loading…'}</p>
               </div>
               <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white px-6 py-5 text-center shadow-sm">
                 <p className="text-[11px] uppercase tracking-[0.32em] text-[#6b6b7b]">Status</p>

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 import {
   Home,
   CalendarDays,
@@ -11,22 +12,24 @@ import {
   Truck,
   Users,
   Settings,
+  ChevronDown,
+  Cpu,
+  Wand2,
 } from 'lucide-react';
 
 const mainNavItems = [
   { icon: Home, label: 'Dashboard', href: '/dashboard' },
+  { icon: Cpu, label: 'AI Monitor', href: '/ai-monitor' },
   { icon: CalendarDays, label: 'Planning', href: '/planning' },
-  { icon: FileText, label: 'Daily Deliveries', href: '/daily-planning' },
-  { icon: FileText, label: 'Generated Planning', href: '/generated-planning' },
+  { icon: FileText, label: 'Daily Planning', href: '/daily-planning' },
+  { icon: Wand2, label: 'Generated Planning', href: '/generated-daily-planning' },
   { icon: BookOpen, label: 'Ressources', href: '/ressources' },
   { icon: Compass, label: 'Map', href: '/map' },
 ];
 
 const fleetNavItems = [
-  { icon: BarChart3, label: 'Analytics', href: '/analytics' },
-  { icon: Truck, label: 'Vehicles', href: '/vehicles' },
-  { icon: Users, label: 'Drivers', href: '/drivers' },
   { icon: Users, label: 'Clients', href: '/clients' },
+  { icon: Truck, label: 'Ressources', href: '/ressources' },
   { icon: Settings, label: 'Admin', href: '/admin' },
 ];
 
@@ -50,6 +53,9 @@ function NavLink({ icon: Icon, label, href, active }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [expanded, setExpanded] = useState({});
+
+  const toggle = (label) => setExpanded((s) => ({ ...s, [label]: !s[label] }));
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-72 bg-gradient-to-b from-[#7c3aed] via-[#6d28d9] to-[#5b21b6] text-white shadow-2xl shadow-slate-900/25">
@@ -83,13 +89,45 @@ export default function Sidebar() {
           <p className="text-[11px] uppercase tracking-[0.28em] text-white/70 mb-3">Fleet</p>
           <div className="space-y-2">
             {fleetNavItems.map((item) => (
-              <NavLink
-                key={item.href}
-                icon={item.icon}
-                label={item.label}
-                href={item.href}
-                active={pathname === item.href}
-              />
+              item.children ? (
+                <div key={item.href}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(item.label)}
+                    className={`group flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all duration-200 text-white/80 hover:bg-white/10 hover:text-white`}
+                  >
+                    <span className="rounded-2xl bg-white/10 p-2 text-white transition-colors duration-200 group-hover:bg-white/20">
+                      <item.icon size={18} />
+                    </span>
+                    <span className="flex-1 text-left">{item.label}</span>
+                    <span className="text-white/60">
+                      <ChevronDown size={16} />
+                    </span>
+                  </button>
+
+                  {expanded[item.label] && (
+                    <div className="mt-2 space-y-1 pl-6">
+                      {item.children.map((child) => (
+                        <NavLink
+                          key={child.href}
+                          icon={child.icon}
+                          label={child.label}
+                          href={child.href}
+                          active={pathname === child.href}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <NavLink
+                  key={item.href}
+                  icon={item.icon}
+                  label={item.label}
+                  href={item.href}
+                  active={pathname === item.href}
+                />
+              )
             ))}
           </div>
         </div>

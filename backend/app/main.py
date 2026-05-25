@@ -9,8 +9,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import datetime
 
-from app.routes import metrics, tracking, ingestion, optimization, data, auth, tasks, planning_governance, delivery_split
+from app.routes import (
+    metrics,
+    tracking,
+    ingestion,
+    optimization,
+    data,
+    auth,
+    tasks,
+    planning_governance,
+    delivery_split,
+    agents,
+)
 from app.database import engine, Base
+from app.agents.scheduler import start_scheduler
 from app.services.excel_watcher import ExcelWatcherService
 import app.models
 
@@ -19,6 +31,7 @@ _default_archive = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 WATCH_PATH = os.getenv("WATCH_PATH", _default_watch)
 ARCHIVE_PATH = os.getenv("ARCHIVE_PATH", _default_archive)
 WATCHER_ENABLED = os.getenv("WATCHER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # Create database tables if database is available
 if engine:
@@ -34,6 +47,7 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.watcher_service = None
+    app.state.scheduler = None
 
     if WATCHER_ENABLED:
         print(f"[WATCHDOG] WATCHER_ENABLED=true, starting watcher for {WATCH_PATH}")
@@ -43,12 +57,21 @@ async def lifespan(app: FastAPI):
     else:
         print("[WATCHDOG] WATCHER_ENABLED=false, watcher will not start")
 
+    if SCHEDULER_ENABLED:
+        print("[SCHEDULER] SCHEDULER_ENABLED=true, starting backend jobs")
+        app.state.scheduler = start_scheduler()
+    else:
+        print("[SCHEDULER] SCHEDULER_ENABLED=false, backend jobs will not start")
+
     try:
         yield
     finally:
         watcher_service = getattr(app.state, "watcher_service", None)
         if watcher_service is not None:
             watcher_service.stop()
+        scheduler = getattr(app.state, "scheduler", None)
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -81,7 +104,9 @@ app.include_router(data.router, prefix="/api/data", tags=["data"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(planning_governance.router, prefix="/api/planning", tags=["planning"])
+app.include_router(optimization.daily_router, prefix="/api/planning", tags=["daily-planning"])
 app.include_router(delivery_split.router, prefix="/api", tags=["delivery-split"])
+app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 
 
 @app.get("/")

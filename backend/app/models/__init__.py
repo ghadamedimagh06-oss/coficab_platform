@@ -6,6 +6,7 @@ from .planning_version import PlanningVersion
 from .planning_change_log import PlanningChangeLog
 from .planning_diff import PlanningDiff
 from .delivery_split import DeliverySplit, DeliverySplitAudit, OversizedDeliveryState
+from .transport_tracking import TransportTracking
 
 __all__ = [
     "Livraison",
@@ -15,5 +16,6 @@ __all__ = [
     "PlanningDiff",
     "DeliverySplit",
     "DeliverySplitAudit",
-    "OversizedDeliveryState"
+    "OversizedDeliveryState",
+    "TransportTracking",
 ]
