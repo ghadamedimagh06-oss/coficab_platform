@@ -6,6 +6,7 @@ J+1 change detection, review operations, and audit history tracking.
 
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+import unicodedata
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -78,6 +79,140 @@ AUDIT_TYPE_REVALIDATION = "REVALIDATION"
 class PlanningService:
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def parse_constraints(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract Skill 14 delivery constraints from a parsed Excel row."""
+        constraints: Dict[str, Any] = {}
+
+        etd = PlanningService._constraint_time(row.get("etd"))
+        eta = PlanningService._constraint_time(row.get("eta"))
+        if etd and eta:
+            constraints["time_window"] = [etd, eta]
+
+        vehicle = str(row.get("vehicle") or "").strip()
+        if vehicle:
+            digits = "".join(ch for ch in vehicle if ch.isdigit())
+            if digits:
+                constraints["required_truck_id"] = int(digits)
+            constraints["required_vehicle"] = vehicle
+
+        driver = str(row.get("driver") or "").strip()
+        if driver:
+            constraints["required_driver"] = driver
+
+        delivery_date = row.get("delivery_date")
+        if delivery_date is not None and not pd.isna(delivery_date):
+            try:
+                if hasattr(delivery_date, "date"):
+                    constraints["required_date"] = delivery_date.date().isoformat()
+                else:
+                    constraints["required_date"] = pd.to_datetime(delivery_date).date().isoformat()
+            except Exception:
+                pass
+
+        notes = str(row.get("notes") or "").strip()
+        if notes:
+            constraints["notes"] = notes
+            constraints["comment_constraint"] = notes
+            lowered = PlanningService._strip_accents(notes.lower()).replace("’", "'")
+            if "apres-midi" in lowered or "apres midi" in lowered or "apresmidi" in lowered:
+                constraints["time_window"] = ["13:00", "17:00"]
+            client_hour = PlanningService._hour_from_comment(lowered, ("chez le client", "client"))
+            if client_hour:
+                constraints["time_window"] = [client_hour, PlanningService._add_minutes(client_hour, 60)]
+            approximate_hour = PlanningService._hour_from_comment(lowered, ("vers",))
+            if approximate_hour:
+                constraints["time_window"] = [approximate_hour, PlanningService._add_minutes(approximate_hour, 60)]
+            departure_hour = PlanningService._hour_from_comment(lowered, ("depart",))
+            if departure_hour:
+                constraints["required_departure"] = departure_hour
+            if "urgent" in lowered:
+                constraints["priority_hint"] = "urgent"
+
+        return constraints
+
+    @staticmethod
+    def _constraint_time(value: Any) -> Optional[str]:
+        if value is None or pd.isna(value):
+            return None
+        if hasattr(value, "hour") and hasattr(value, "minute"):
+            return f"{value.hour:02d}:{value.minute:02d}"
+        text = str(value).strip()
+        if not text:
+            return None
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                parsed = datetime.strptime(text, fmt)
+                return parsed.strftime("%H:%M")
+            except ValueError:
+                pass
+        try:
+            numeric = int(float(text))
+            if 0 <= numeric < 24:
+                return f"{numeric:02d}:00"
+            if 0 <= numeric < 2400:
+                return f"{numeric // 100:02d}:{numeric % 100:02d}"
+        except ValueError:
+            return None
+        return None
+
+    @staticmethod
+    def _strip_accents(value: str) -> str:
+        return "".join(
+            char for char in unicodedata.normalize("NFKD", value)
+            if not unicodedata.combining(char)
+        )
+
+    @staticmethod
+    def _hour_from_comment(text: str, keywords: Tuple[str, ...]) -> Optional[str]:
+        import re
+
+        if not any(keyword in text for keyword in keywords):
+            return None
+        match = re.search(r"\b([01]?\d|2[0-3])\s*h\s*([0-5]\d)?\b", text)
+        if not match:
+            return None
+        return f"{int(match.group(1)):02d}:{int(match.group(2) or 0):02d}"
+
+    @staticmethod
+    def _add_minutes(clock: str, minutes: int) -> str:
+        parsed = datetime.strptime(clock, "%H:%M")
+        shifted = parsed + timedelta(minutes=minutes)
+        return shifted.strftime("%H:%M")
+
+    @staticmethod
+    def _excel_time(value: Any) -> Optional[str]:
+        parsed = PlanningService._constraint_time(value)
+        if parsed:
+            return parsed
+        if value is None or pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _number(value: Any) -> Optional[float]:
+        if value is None or pd.isna(value) or str(value).strip() == "":
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _integer(value: Any) -> Optional[int]:
+        number = PlanningService._number(value)
+        if number is None:
+            return None
+        return int(number)
+
+    @staticmethod
+    def _text(value: Any) -> Optional[str]:
+        if value is None or pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text or None
 
     def _normalize_weekday(self, raw_value: Any) -> Optional[str]:
         if raw_value is None or pd.isna(raw_value):
@@ -166,6 +301,7 @@ class PlanningService:
             try:
                 df = pd.read_excel(file_path, **kwargs)
                 if not df.empty:
+                    df.attrs["header_row"] = int(kwargs.get("header", 0)) + 1
                     return df
             except Exception as exc:
                 last_error = exc
@@ -183,6 +319,7 @@ class PlanningService:
             "weekday": "delivery_day",
             "day": "delivery_day",
             "n°": "row_number",
+            "n": "row_number",
             "no": "row_number",
             "customer": "client",
             "client": "client",
@@ -212,9 +349,9 @@ class PlanningService:
             "pallets": "quantity",
             "pallet_count": "quantity",
             "pallet_number": "quantity",
-            "pallet_weight": "quantity",
-            "gross_weight": "quantity",
-            "total_gross_weight": "quantity",
+            "pallet_weight": "pallet_weight_kg",
+            "gross_weight": "gross_weight_kg",
+            "total_gross_weight": "total_gross_weight_kg",
         }
 
         rename_map = {}
@@ -247,29 +384,21 @@ class PlanningService:
                 except Exception:
                     row_number = int(index + 1)
 
-            client = str(row.get("client", "")).strip() if not pd.isna(row.get("client", "")) else None
-            driver = str(row.get("driver", "")).strip() if not pd.isna(row.get("driver", "")) else ""
-            vehicle = str(row.get("vehicle", "")).strip() if not pd.isna(row.get("vehicle", "")) else ""
-            start_location = str(row.get("start_location", "")).strip() if not pd.isna(row.get("start_location", "")) else ""
-            end_location = str(row.get("end_location", "")).strip() if not pd.isna(row.get("end_location", "")) else ""
+            client = self._text(row.get("client"))
+            driver = self._text(row.get("driver")) or ""
+            vehicle = self._text(row.get("vehicle")) or ""
+            start_location = self._text(row.get("start_location")) or ""
+            end_location = self._text(row.get("end_location")) or ""
             if not start_location:
                 start_location = "COFICAB Mégrine"
             if not end_location:
                 end_location = client or "Unknown destination"
 
-            distance_value = row.get("distance_km", row.get("distance", 0))
-            distance_km = 0.0
-            if not pd.isna(distance_value) and str(distance_value).strip() != "":
-                try:
-                    distance_km = float(distance_value)
-                except Exception:
-                    distance_km = 0.0
+            distance_km = self._number(row.get("distance_km", row.get("distance", 0))) or 0.0
 
-            etd = str(row.get("etd", "")).strip() if not pd.isna(row.get("etd", "")) else None
-            eta = str(row.get("eta", "")).strip() if not pd.isna(row.get("eta", "")) else None
-            notes = str(row.get("notes", "")).strip() if not pd.isna(row.get("notes", "")) else None
-            if notes == "":
-                notes = None
+            etd = self._excel_time(row.get("etd"))
+            eta = self._excel_time(row.get("eta"))
+            notes = self._text(row.get("notes"))
 
             raw_status = str(row.get("status", "pending")).strip() if not pd.isna(row.get("status", "pending")) else "pending"
             status = raw_status.lower().strip()
@@ -288,18 +417,13 @@ class PlanningService:
             if priority not in {"urgent", "high", "normal", "low"}:
                 priority = "normal"
 
-            quantity_value = row.get("quantity", row.get("pallet_weight", row.get("gross_weight", row.get("total_gross_weight", None))))
-            quantity = None
-            if not pd.isna(quantity_value) and str(quantity_value).strip() != "":
-                try:
-                    quantity = int(quantity_value)
-                except Exception:
-                    try:
-                        quantity = int(float(quantity_value))
-                    except Exception:
-                        quantity = None
+            quantity = self._integer(row.get("quantity"))
+            pallet_weight_kg = self._number(row.get("pallet_weight_kg"))
+            gross_weight_kg = self._number(row.get("gross_weight_kg"))
+            total_gross_weight_kg = self._number(row.get("total_gross_weight_kg"))
 
             row_data = {
+                "excel_row_index": int(index) + int(df.attrs.get("header_row", 1)) + 1,
                 "row_number": row_number,
                 "delivery_day": delivery_day,
                 "driver": driver,
@@ -314,6 +438,10 @@ class PlanningService:
                 "etd": etd,
                 "eta": eta,
                 "quantity": quantity,
+                "position_count": quantity,
+                "pallet_weight_kg": pallet_weight_kg,
+                "gross_weight_kg": gross_weight_kg,
+                "total_gross_weight_kg": total_gross_weight_kg,
                 "delivery_date": None,
             }
 

@@ -1,124 +1,134 @@
-import axios from 'axios';
-
 const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8888';
 const debugAPI = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
-const api = axios.create({
-  baseURL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+export function apiUrl(path: string) {
+  if (!path) return baseURL;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${baseURL}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
-// Add request interceptor for debugging
-api.interceptors.request.use(
-  (config) => {
-    if (debugAPI) {
-      console.log(`🔵 API Request: ${config.method?.toUpperCase()} ${baseURL}${config.url}`);
-    }
-    return config;
-  },
-  (error) => {
-    console.error('❌ API Request Error:', error);
-    return Promise.reject(error);
+async function request(path: string, options: RequestInit = {}) {
+  if (debugAPI) {
+    console.log(`API Request: ${options.method || 'GET'} ${baseURL}${path}`);
   }
-);
 
-// Add response interceptor for debugging
-api.interceptors.response.use(
-  (response) => {
-    if (debugAPI) {
-      console.log(`✅ API Response: ${response.status} ${response.config.url}`, response.data);
-    }
-    return response;
-  },
-  (error) => {
-    if (debugAPI) {
-      console.error(`❌ API Error: ${error.response?.status || 'No response'} ${error.config?.url}`, error.message);
-    }
-    return Promise.reject(error);
+  const response = await fetch(`${baseURL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const error: any = new Error(data?.detail || response.statusText);
+    error.response = { status: response.status, data };
+    throw error;
   }
-);
+
+  if (debugAPI) {
+    console.log(`API Response: ${response.status} ${path}`, data);
+  }
+  return data;
+}
+
+function get(path: string) {
+  return request(path);
+}
+
+function post(path: string, payload: any) {
+  return request(path, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+function put(path: string, payload: any) {
+  return request(path, { method: 'PUT', body: JSON.stringify(payload) });
+}
 
 export async function getKpi() {
-  const response = await api.get('/api/metrics/kpi');
-  return response.data;
+  return get('/api/metrics/kpi');
 }
 
 export async function getLiveTracking() {
-  const response = await api.get('/api/tracking/live');
-  return response.data;
+  return get('/api/tracking/live');
 }
 
 export async function getTransports() {
-  const response = await api.get('/api/data/transports');
-  return response.data.transports || response.data;
+  const data = await get('/api/data/transports');
+  return data.transports || data;
 }
 
 export async function getDailyPlanning(day: string) {
-  const response = await api.get('/api/data/transports', { params: { day, limit: 200, force_file: true } });
-  return response.data.transports || response.data;
+  const data = await get(`/api/data/transports?day=${encodeURIComponent(day)}&limit=200&force_file=true`);
+  return data.transports || data;
 }
 
 export async function getDailyPlanningFromFile() {
-  const response = await api.get('/api/data/transports', { params: { limit: 1000, force_file: true } });
-  return response.data.transports || response.data;
+  const data = await get('/api/data/transports?limit=1000&force_file=true');
+  return data.transports || data;
+}
+
+export async function getDailyPlanningFileResponse() {
+  return get('/api/data/transports?limit=1000&force_file=true');
 }
 
 export async function getAgentStatus() {
-  const response = await api.get('/api/agents/status');
-  return response.data;
+  return get('/api/agents/status');
 }
 
 export async function generateOptimizationPlanning(payload: any = { deliveries: [], trucks: [], current_routes: [] }) {
-  const response = await api.post('/api/optimization/planning/generate', payload);
-  return response.data;
+  return post('/api/optimization/planning/generate', payload);
 }
 
 export async function proposeOptimization(payload: any) {
-  const response = await api.post('/api/optimization/route', payload);
-  return response.data;
+  return post('/api/optimization/route', payload);
 }
 
 export async function generatePlanning(payload: any) {
-  const response = await api.post('/api/optimization/planning/generate', payload);
-  return response.data;
+  return post('/api/optimization/planning/generate', payload);
+}
+
+export async function generateDailyPlan(day: string, sourceFile?: string) {
+  return post('/api/planning/daily/generate', {
+    day,
+    source_file: sourceFile,
+  });
+}
+
+export async function exportDailyPlan(payload: any) {
+  const result = await post('/api/planning/daily/export', payload);
+  return {
+    ...result,
+    download_url: result?.download_url ? apiUrl(result.download_url) : result?.download_url,
+  };
 }
 
 export async function triggerIngestion(filePath: string) {
-  const response = await api.post('/api/ingestion/trigger', {
+  return post('/api/ingestion/trigger', {
     file_path: filePath,
     timestamp: Date.now(),
   });
-  return response.data;
 }
 
 export async function syncDailyPlanning() {
-  const response = await api.post('/api/tasks/daily-planning', {});
-  return response.data;
+  return post('/api/tasks/daily-planning', {});
 }
 
 export async function processDataTask() {
-  const response = await api.post('/api/tasks/process-data', {});
-  return response.data;
+  return post('/api/tasks/process-data', {});
 }
 
 export async function getImpactPreview(planningId, field, newValue) {
-  const response = await api.get(`/api/planning/${planningId}/impact-preview`, {
-    params: { field, new_value: newValue },
-  });
-  return response.data;
+  return get(`/api/planning/${planningId}/impact-preview?field=${encodeURIComponent(field)}&new_value=${encodeURIComponent(newValue)}`);
 }
 
 export async function validatePlanning(planningId, userId) {
-  const response = await api.post('/api/planning/validate', {
+  return post('/api/planning/validate', {
     planning_id: planningId,
     user_id: userId,
   });
-  return response.data;
 }
 
 export async function updatePlanning(payload) {
-  const response = await api.put('/api/planning/update', payload);
-  return response.data;
+  return put('/api/planning/update', payload);
 }

@@ -32,50 +32,67 @@ else:
         WEEKLY_PLANNING_FILE = repo_default_file
 
 
+def _transport_from_row(row):
+    return {
+        "id": row.get("row_number"),
+        "excel_row_index": row.get("excel_row_index"),
+        "row_number": row.get("row_number"),
+        "delivery_day": row.get("delivery_day"),
+        "delivery_date": row.get("delivery_date").isoformat() if row.get("delivery_date") else None,
+        "client": row.get("client"),
+        "driver": row.get("driver"),
+        "vehicle": row.get("vehicle"),
+        "etd": row.get("etd"),
+        "eta": row.get("eta"),
+        "quantity": row.get("quantity"),
+        "position_count": row.get("position_count") or row.get("quantity"),
+        "pallet_weight_kg": row.get("pallet_weight_kg"),
+        "gross_weight_kg": row.get("gross_weight_kg"),
+        "total_gross_weight_kg": row.get("total_gross_weight_kg"),
+        "start_location": row.get("start_location"),
+        "end_location": row.get("end_location"),
+        "distance_km": row.get("distance_km"),
+        "status": row.get("status") or "pending",
+        "priority": row.get("priority") or "normal",
+        "notes": row.get("notes"),
+        "created_at": None,
+    }
+
+
 def _load_weekly_planning_transports(status: Optional[str] = None, day: Optional[str] = None, limit: int = 100, offset: int = 0):
+    meta = {
+        "source": "excel",
+        "source_file": str(WEEKLY_PLANNING_FILE),
+        "file_name": WEEKLY_PLANNING_FILE.name,
+        "used_mock": False,
+        "error": None,
+    }
     if WEEKLY_PLANNING_FILE.exists():
         try:
             service = PlanningService(db=None)
             plan_data = service.parse_weekly_planning(str(WEEKLY_PLANNING_FILE))
-            rows = plan_data["rows"]
+            rows = [row for row in plan_data["rows"] if row.get("client")]
             if status:
                 rows = [row for row in rows if (row.get("status") or "pending") == status]
             if day:
                 rows = [row for row in rows if row.get("delivery_day") == day]
             total = len(rows)
             paginated = rows[offset: offset + limit]
-            transports = []
-            for row in paginated:
-                transports.append({
-                    "id": row.get("row_number"),
-                    "row_number": row.get("row_number"),
-                    "delivery_day": row.get("delivery_day"),
-                    "delivery_date": row.get("delivery_date").isoformat() if row.get("delivery_date") else None,
-                    "client": row.get("client"),
-                    "driver": row.get("driver"),
-                    "vehicle": row.get("vehicle"),
-                    "etd": row.get("etd"),
-                    "eta": row.get("eta"),
-                    "quantity": row.get("quantity"),
-                    "start_location": row.get("start_location"),
-                    "end_location": row.get("end_location"),
-                    "distance_km": row.get("distance_km"),
-                    "status": row.get("status") or "pending",
-                    "priority": row.get("priority") or "normal",
-                    "notes": row.get("notes"),
-                    "created_at": None,
-                })
-            return transports, total
-        except Exception:
-            pass
+            return [_transport_from_row(row) for row in paginated], total, meta
+        except Exception as exc:
+            meta["error"] = f"Excel parsing failed: {exc}"
+    else:
+        meta["error"] = f"Excel file not found: {WEEKLY_PLANNING_FILE}"
 
     mock = MOCK_TRANSPORTS
+    meta["source"] = "mock"
+    meta["used_mock"] = True
     if status:
         mock = [t for t in mock if t.get("status") == status]
     if day:
         mock = [t for t in mock if t.get("delivery_day") == day]
     total = len(mock)
-    return mock[offset: offset + limit], total
+    return mock[offset: offset + limit], total, meta
 
 @router.get("/transports")
 async def get_transports(
@@ -90,8 +107,8 @@ async def get_transports(
     try:
         # If `force_file` requested, return parsed Excel/mock data regardless of DB
         if force_file:
-            transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
-            return {"transports": transports, "total": total}
+            transports, total, meta = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
+            return {"transports": transports, "total": total, **meta}
 
         # If database is available, fetch real data
         if db:
@@ -123,6 +140,10 @@ async def get_transports(
                     "etd": livraison.etd,
                     "eta": livraison.eta,
                     "quantity": livraison.quantity,
+                    "position_count": livraison.quantity,
+                    "pallet_weight_kg": None,
+                    "gross_weight_kg": None,
+                    "total_gross_weight_kg": None,
                     "start_location": livraison.start_location,
                     "end_location": livraison.end_location,
                     "distance_km": livraison.distance_km,
@@ -137,16 +158,17 @@ async def get_transports(
                 "total": total
             }
         else:
-            transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
-            return {"transports": transports, "total": total}
+            transports, total, meta = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
+            return {"transports": transports, "total": total, **meta}
 
     except Exception as e:
         # Return file-based or mock data on error
-        transports, total = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
+        transports, total, meta = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
         return {
             "transports": transports,
             "total": total,
-            "error": f"Database error: {str(e)}"
+            **meta,
+            "error": meta.get("error") or f"Database error: {str(e)}"
         }
 
 @router.get("/ingestion-history")

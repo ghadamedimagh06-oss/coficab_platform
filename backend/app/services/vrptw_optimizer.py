@@ -128,7 +128,16 @@ class VRPTWOptimizer:
 
     def _calculate_before_cost(self) -> float:
         if not self.current_routes:
-            return 0.0
+            total = 0.0
+            for delivery in self.deliveries:
+                lat = float(delivery.get("lat", DEPOT_LOCATION[0]))
+                lng = float(delivery.get("lng", DEPOT_LOCATION[1]))
+                round_trip = 2 * math.sqrt(
+                    ((lat - DEPOT_LOCATION[0]) * 111) ** 2 +
+                    ((lng - DEPOT_LOCATION[1]) * 111 * math.cos(math.radians((lat + DEPOT_LOCATION[0]) / 2))) ** 2
+                )
+                total += 50.0 + round_trip * 0.5
+            return total
 
         return sum(
             50.0 + float(route.get("total_distance", 0)) * 0.5
@@ -151,11 +160,19 @@ class VRPTWOptimizer:
 
         suggestions = []
         if not routes:
-            suggestions.append("Aucun trajet n'a pu être planifié avec les camions disponibles.")
+            suggestions.append({
+                "type": "EMPTY_PLAN",
+                "severity": "warning",
+                "message": "No route could be planned with the available trucks.",
+                "action": "Check delivery quantities, truck capacities, and time windows.",
+            })
         if unassigned:
-            suggestions.append(
-                "Certaines livraisons n'ont pas pu être assignées en raison de contraintes de capacité ou de fenêtres horaires."
-            )
+            suggestions.append({
+                "type": "UNASSIGNED",
+                "severity": "high",
+                "message": "Some deliveries could not be assigned because of capacity or time-window constraints.",
+                "action": "Split oversized deliveries, add a rented truck, or adjust the time window.",
+            })
 
         return {
             "routes": routes,
