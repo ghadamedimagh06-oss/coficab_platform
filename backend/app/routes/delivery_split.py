@@ -26,7 +26,7 @@ from app.models.delivery_split import (
     DeliverySplitAuditResponseSchema,
 )
 from app.models.livraison import Livraison
-from app.models.transport import User
+from app.models.user import User
 from app.services.split_strategy import SplitStrategy, DeliveryInfo, VehicleCapacity
 from app.routes.auth import get_current_user
 

@@ -8,6 +8,7 @@ coficab_platform/
 │   ├── app/
 │   │   ├── main.py            8 routers mounted (metrics, tracking, ingestion,
 │   │   │                      optimization, data, auth, tasks, planning, agents)
+
 │   │   ├── database.py        SQLAlchemy engine + pool, resilient to no-DB
 │   │   ├── models/            livraison, ingestion_log, planning_*, transport
 │   │   ├── routes/            one router per concern

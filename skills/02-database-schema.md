@@ -356,6 +356,28 @@ Use the same shape for `Chauffeur`, `Client`, `DemandeLocal`, `PlanVersion`, `Pl
 
 ---
 
+## Future schema changes (Alembic)
+
+`schema.sql` represents the **initial state** only. Any column or table change after the first deploy must go through an Alembic migration — never re-run or edit `schema.sql` on an existing database.
+
+```bash
+# One-time setup (run from backend/)
+pip install alembic
+alembic init alembic
+# In alembic/env.py: point target_metadata at Base.metadata from app.database
+# In alembic.ini: set sqlalchemy.url = postgresql://...
+```
+
+Then for every schema change:
+```bash
+alembic revision --autogenerate -m "describe the change"
+alembic upgrade head
+```
+
+See skill [13 — Rule 2](13-collaboration-and-merging.md): migrations are append-only. Never edit a committed migration file; write a follow-up migration instead.
+
+---
+
 ## Indexes worth their weight
 
 Every WHERE clause the KPI engine uses must hit an index. The schema above already covers:

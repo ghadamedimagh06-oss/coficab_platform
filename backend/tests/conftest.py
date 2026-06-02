@@ -2,12 +2,20 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 import os
 
-# Configuration de la base de données de test
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+os.environ.setdefault("WATCHER_ENABLED", "0")
+os.environ.setdefault("SCHEDULER_ENABLED", "0")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# Configuration de la base de données de test
+SQLALCHEMY_DATABASE_URL = "sqlite://"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -15,9 +23,11 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def setup_test_db():
     """Crée les tables de test"""
     from app.database import Base
-    Base.metadata.create_all(bind=engine)
+    import app.models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine, checkfirst=True)
     yield
-    Base.metadata.drop_all(bind=engine)
+    Base.metadata.drop_all(bind=engine, checkfirst=True)
 
 
 @pytest.fixture
@@ -38,12 +48,13 @@ def db():
 def client(db):
     """Fournit un client de test FastAPI"""
     from app.main import app
-    from app.database import get_db
+    from app.database import get_db, get_db_optional
 
     def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_db_optional] = override_get_db
 
     with TestClient(app) as test_client:
         yield test_client

@@ -73,6 +73,23 @@ function flattenStops(truck) {
   return (truck.trips || []).flatMap((trip) => trip.stops || []);
 }
 
+function clampMinute(value, min = 480, max = 1020) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function findDelivery(plan, deliveryId) {
+  for (const truck of plan?.trucks || []) {
+    for (const trip of truck.trips || []) {
+      for (const stop of trip.stops || []) {
+        if (String(stop.id) === String(deliveryId)) {
+          return { delivery: stop, truck };
+        }
+      }
+    }
+  }
+  return { delivery: null, truck: null };
+}
+
 function buildLaneTrip(truckId, stops) {
   if (stops.length === 0) return [];
   const sorted = [...stops].sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
@@ -166,7 +183,8 @@ export default function GeneratedDailyPlanningPage() {
     };
     if (!moved) return;
 
-    const normalizedTargetMinute = Math.max(480, Math.min(1020, targetMinute));
+    const duration = deliveryDuration(moved);
+    const normalizedTargetMinute = clampMinute(targetMinute, 480, 1020 - duration);
     const requiredTruck = moved.constraints?.required_truck_id;
     if (requiredTruck && String(requiredTruck) !== String(targetTruckId)) {
       setError(`${moved.client} is fixed to Truck ${requiredTruck}.`);
@@ -177,7 +195,7 @@ export default function GeneratedDailyPlanningPage() {
     if (timeWindow?.length === 2) {
       const windowStart = toMinutes(timeWindow[0]);
       const windowEnd = toMinutes(timeWindow[1]);
-      const movedEnd = normalizedTargetMinute + deliveryDuration(moved);
+      const movedEnd = normalizedTargetMinute + duration;
       if (normalizedTargetMinute < windowStart || movedEnd > windowEnd) {
         setError(`${moved.client} must stay between ${timeWindow[0]} and ${timeWindow[1]}.`);
         return;
@@ -190,17 +208,47 @@ export default function GeneratedDailyPlanningPage() {
       trucks: sourceCleared.trucks.map((truck) => {
         const stops = flattenStops(truck).sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
         if (String(truck.truck_id) !== String(targetTruckId)) {
-          const reflowed = reflowStops(stops, stops[0] ? toMinutes(stops[0].etd) : 480);
-          return { ...truck, trips: buildLaneTrip(truck.truck_id, reflowed) };
+          return { ...truck, trips: buildLaneTrip(truck.truck_id, stops) };
         }
 
-        const insertAt = stops.findIndex((stop) => normalizedTargetMinute <= toMinutes(stop.etd) + deliveryDuration(stop) / 2);
-        const nextStops = [...stops];
-        const movedWithTarget = { ...moved, etd: toClock(normalizedTargetMinute), eta: toClock(normalizedTargetMinute + deliveryDuration(moved)) };
-        if (insertAt === -1) nextStops.push(movedWithTarget);
-        else nextStops.splice(insertAt, 0, movedWithTarget);
-        const reflowed = reflowStops(nextStops, Math.min(normalizedTargetMinute, toMinutes(nextStops[0]?.etd)));
-        return { ...truck, trips: buildLaneTrip(truck.truck_id, reflowed) };
+        const movedWithTarget = { ...moved, etd: toClock(normalizedTargetMinute), eta: toClock(normalizedTargetMinute + duration) };
+        return { ...truck, trips: buildLaneTrip(truck.truck_id, [...stops, movedWithTarget]) };
+      }),
+    });
+  }
+
+  function resizeDelivery(deliveryId, nextEtd, nextEta) {
+    if (!deliveryId || !plan) return;
+    const { delivery } = findDelivery(plan, deliveryId);
+    if (!delivery) return;
+
+    let nextStart = clampMinute(toMinutes(nextEtd));
+    let nextEnd = clampMinute(toMinutes(nextEta));
+    if (nextEnd - nextStart < 30) {
+      nextEnd = clampMinute(nextStart + 30);
+      nextStart = clampMinute(nextEnd - 30);
+    }
+
+    const timeWindow = delivery.constraints?.time_window;
+    if (timeWindow?.length === 2) {
+      const windowStart = toMinutes(timeWindow[0]);
+      const windowEnd = toMinutes(timeWindow[1]);
+      if (nextStart < windowStart || nextEnd > windowEnd) {
+        setError(`${delivery.client} must stay between ${timeWindow[0]} and ${timeWindow[1]}.`);
+        return;
+      }
+    }
+
+    setError(null);
+    setPlan({
+      ...plan,
+      trucks: plan.trucks.map((truck) => {
+        const stops = flattenStops(truck).map((stop) => (
+          String(stop.id) === String(deliveryId)
+            ? { ...stop, etd: toClock(nextStart), eta: toClock(nextEnd) }
+            : stop
+        ));
+        return { ...truck, trips: buildLaneTrip(truck.truck_id, stops) };
       }),
     });
   }
@@ -369,7 +417,13 @@ export default function GeneratedDailyPlanningPage() {
               <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
             </div>
           ) : (
-            <GanttBoard plan={plan} onDropDelivery={moveDelivery} onCancel={cancelDelivery} onRestore={restoreDelivery} />
+            <GanttBoard
+              plan={plan}
+              onDropDelivery={moveDelivery}
+              onResizeDelivery={resizeDelivery}
+              onCancel={cancelDelivery}
+              onRestore={restoreDelivery}
+            />
           )}
           <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
         </div>

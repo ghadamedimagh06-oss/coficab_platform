@@ -1,21 +1,34 @@
-"""Database Models Package"""
+"""Database Models Package — Coficab ERD"""
 
-from .livraison import Livraison
+# Reference tables
+from .camion import Camion, CamionType, CamionStatus
+from .chauffeur import Chauffeur, PermisType, ChauffeurStatus
+from .client import Client
+
+# Operational tables
+from .demande import DemandeLocal, StatutDemande, Priorite
+from .plan import PlanVersion, PlanMission, MissionDemande, PlanningChangeLog
+from .plan import StatutPlan, StatutMission, ModeMission, Periode
+from .evenement import EvenementAlea, EvenementType
+
+# KPI tables
+from .kpi import KpiDefinition, KpiJournalier, KpiMensuel, KpiStatus, KpiDirection, KpiFrequence
+
+# Auth
+from .user import User
+
+# Legacy — kept so existing routes that import them don't break until migrated
 from .ingestion_log import IngestionLog
-from .planning_version import PlanningVersion
-from .planning_change_log import PlanningChangeLog
-from .planning_diff import PlanningDiff
-from .delivery_split import DeliverySplit, DeliverySplitAudit, OversizedDeliveryState
-from .transport_tracking import TransportTracking
 
 __all__ = [
-    "Livraison",
+    "Camion", "CamionType", "CamionStatus",
+    "Chauffeur", "PermisType", "ChauffeurStatus",
+    "Client",
+    "DemandeLocal", "StatutDemande", "Priorite",
+    "PlanVersion", "PlanMission", "MissionDemande", "PlanningChangeLog",
+    "StatutPlan", "StatutMission", "ModeMission", "Periode",
+    "EvenementAlea", "EvenementType",
+    "KpiDefinition", "KpiJournalier", "KpiMensuel", "KpiStatus", "KpiDirection", "KpiFrequence",
+    "User",
     "IngestionLog",
-    "PlanningVersion",
-    "PlanningChangeLog",
-    "PlanningDiff",
-    "DeliverySplit",
-    "DeliverySplitAudit",
-    "OversizedDeliveryState",
-    "TransportTracking",
 ]

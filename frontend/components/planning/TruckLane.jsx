@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import DeliveryBlock from './DeliveryBlock';
 import DepotMarker from './DepotMarker';
 
@@ -41,12 +43,38 @@ function packedStops(stops) {
     });
 }
 
-export default function TruckLane({ truck, onDropDelivery, onCancel, onRestore }) {
+export default function TruckLane({ truck, onResizeDelivery, onCancel, onRestore }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `truck-lane-${truck.truck_id}`,
+    data: { truckId: truck.truck_id },
+  });
+  const [laneNode, setLaneNode] = useState(null);
+  const [laneWidth, setLaneWidth] = useState(0);
+  const setTimelineRef = useCallback((node) => {
+    setNodeRef(node);
+    setLaneNode(node);
+  }, [setNodeRef]);
+
+  useEffect(() => {
+    if (!laneNode) return undefined;
+    const updateWidth = () => setLaneWidth(laneNode.getBoundingClientRect().width);
+    updateWidth();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(laneNode);
+    return () => observer.disconnect();
+  }, [laneNode]);
+
   const trips = truck.trips || [];
   const allStops = trips.flatMap((trip) => trip.stops || []);
   const packed = packedStops(allStops);
   const rowCount = Math.max(1, packed.reduce((max, stop) => Math.max(max, stop._row + 1), 1));
   const laneHeight = Math.max(118, rowCount * 94 + 24);
+  const minutesPerPixel = laneWidth ? 540 / laneWidth : 1;
+
   return (
     <div className="grid grid-cols-[10rem_1fr] border-b border-[#e8e5df] last:border-b-0" style={{ minHeight: laneHeight }}>
       <div className="flex items-center border-r border-[#e8e5df] bg-white px-4">
@@ -57,16 +85,9 @@ export default function TruckLane({ truck, onDropDelivery, onCancel, onRestore }
         </div>
       </div>
       <div
-        className="relative bg-[linear-gradient(to_right,#e8e5df_1px,transparent_1px)]"
+        ref={setTimelineRef}
+        className={`relative bg-[linear-gradient(to_right,#e8e5df_1px,transparent_1px)] transition-colors ${isOver ? 'bg-[#faf8f5]' : ''}`}
         style={{ backgroundSize: '11.111% 100%' }}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          const rect = event.currentTarget.getBoundingClientRect();
-          const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-          const targetMinute = 480 + Math.round((ratio * 540) / 15) * 15;
-          onDropDelivery(event.dataTransfer.getData('delivery-id'), truck.truck_id, targetMinute);
-        }}
       >
         {allStops.length > 0 && (
           <>
@@ -90,6 +111,8 @@ export default function TruckLane({ truck, onDropDelivery, onCancel, onRestore }
                   <DeliveryBlock
                     delivery={delivery}
                     compact={delivery._width < 13}
+                    minutesPerPixel={minutesPerPixel}
+                    onResize={onResizeDelivery}
                     onCancel={onCancel}
                     onRestore={onRestore}
                   />

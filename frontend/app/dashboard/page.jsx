@@ -36,8 +36,6 @@ import {
 } from 'recharts';
 import StatusBadge from '../../components/shared/StatusBadge';
 import {
-  kpiData,
-  weeklyData,
   efficiencySegments,
   fleetData,
   timelineEvents,
@@ -45,6 +43,40 @@ import {
   donutCenterText,
 } from '../../data/dashboardData';
 import { clients as initialClients, getClientPosition } from '../../data/coficabData';
+import { useKpi } from '../../hooks/useKpi';
+import { useWeeklyDeliveries } from '../../hooks/useWeeklyDeliveries';
+
+const KPI_CARD_MAP = {
+  'R4-06': { id: 'otif',  icon: 'truck',          iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed' },
+  'R4-02': { id: 'otd',   icon: 'route',           iconBg: 'rgba(59,130,246,0.1)', iconColor: '#3b82f6' },
+  'R4-13': { id: 'fuel',  icon: 'alert-triangle',  iconBg: 'rgba(249,115,22,0.1)', iconColor: '#f97316' },
+  'R4':    { id: 'load',  icon: 'bar-chart-3',     iconBg: 'rgba(20,184,166,0.1)', iconColor: '#14b8a6' },
+};
+
+function toCardShape(kpi) {
+  const meta = KPI_CARD_MAP[kpi.code] ?? { id: kpi.code, icon: 'bar-chart-3', iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed' };
+  const val = kpi.value !== null && kpi.value !== undefined
+    ? (kpi.unit === '%' ? `${kpi.value.toFixed(1)}%`
+      : kpi.unit === '€/T' ? `${kpi.value.toFixed(1)} €/T`
+      : kpi.unit === 'EUR' ? `${kpi.value.toFixed(0)} €`
+      : `${kpi.value}`)
+    : '—';
+  return {
+    id: meta.id,
+    label: kpi.label,
+    value: val,
+    icon: meta.icon,
+    iconBg: meta.iconBg,
+    iconColor: meta.iconColor,
+    trend: kpi.trend ?? 0,
+    trendLabel: 'vs last month',
+    sparklineData: [],
+  };
+}
+
+function toWeeklyShape(row) {
+  return { day: row.week, delivered: row.delivered, planned: row.total };
+}
 
 const TruckMapPreview = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
 
@@ -91,6 +123,33 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState('Week');
+  const { kpis, isLoading: kpiLoading } = useKpi();
+  const { weeks } = useWeeklyDeliveries(7);
+
+  // KPI stat cards — show only the 4 that have a card mapping
+  const kpiData = kpis
+    .filter((k) => k.code in KPI_CARD_MAP)
+    .map(toCardShape);
+  // Fall back to loading placeholders while fetching
+  const displayKpis = kpiData.length > 0 ? kpiData : [
+    { id: 'otif', label: 'OTIF', value: '—', icon: 'truck', iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', trend: 0, trendLabel: '…', sparklineData: [] },
+    { id: 'otd',  label: 'OTD',  value: '—', icon: 'route', iconBg: 'rgba(59,130,246,0.1)', iconColor: '#3b82f6', trend: 0, trendLabel: '…', sparklineData: [] },
+    { id: 'fuel', label: 'Fuel Efficiency', value: '—', icon: 'alert-triangle', iconBg: 'rgba(249,115,22,0.1)', iconColor: '#f97316', trend: 0, trendLabel: '…', sparklineData: [] },
+    { id: 'load', label: 'Load Efficiency', value: '—', icon: 'bar-chart-3', iconBg: 'rgba(20,184,166,0.1)', iconColor: '#14b8a6', trend: 0, trendLabel: '…', sparklineData: [] },
+  ];
+
+  // Weekly chart — fall back to empty mock shape while loading
+  const weeklyData = weeks.length > 0
+    ? weeks.map(toWeeklyShape)
+    : [
+        { day: 'Mon', delivered: 0, planned: 0 },
+        { day: 'Tue', delivered: 0, planned: 0 },
+        { day: 'Wed', delivered: 0, planned: 0 },
+        { day: 'Thu', delivered: 0, planned: 0 },
+        { day: 'Fri', delivered: 0, planned: 0 },
+        { day: 'Sat', delivered: 0, planned: 0 },
+        { day: 'Sun', delivered: 0, planned: 0 },
+      ];
 
   return (
     <div className="p-8 min-h-screen bg-[#f8f7f3]">
@@ -131,7 +190,7 @@ export default function DashboardPage() {
       </motion.div>
 
       <motion.div variants={container} initial="hidden" animate="show" className="grid gap-6 xl:grid-cols-4 mb-8">
-        {kpiData.map((kpi) => {
+        {displayKpis.map((kpi) => {
           const Icon = iconMap[kpi.icon] || BarChart3;
           const isPositive = kpi.trend >= 0;
           return (

@@ -2,6 +2,22 @@
 
 > Goal: let multiple collaborators (humans + AI agents) work on the platform in parallel without breaking the KPI scoring contract or the frozen UI. Define what can merge automatically, what needs a human, and how conflicts get resolved without information loss.
 
+---
+
+## Applicability by team size
+
+Not all sections of this skill apply at every stage. Use the table below to decide what to adopt:
+
+| Context | Adopt | Skip |
+|---|---|---|
+| Solo developer | §1 branching model, §4 PR template, §6 CI gates | §2–3 merge tiers, §5 CODEOWNERS |
+| Two humans | §1, §4, §6 + §3 conflict resolution rules | §2 autonomous-agent logic |
+| Human + AI agent committing code | All sections | — |
+
+**For a PFE project with one or two contributors:** start with §1 (branching), §4 (PR template), and §6 (CI gates). They cost almost nothing and prevent the most common mistakes (long-lived branches, missing KPI regression signal). Add §2–3 only when an autonomous agent is actively pushing commits.
+
+---
+
 ## KPI anchor
 Indirect, but the most important reason this skill exists:
 - The **scoring system** (skill 01) is the platform's contract. A bad merge that silently changes a formula or a color band corrupts every report from that day forward.

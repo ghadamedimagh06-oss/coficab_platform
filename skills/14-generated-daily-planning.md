@@ -13,6 +13,28 @@ This skill complements:
 
 ---
 
+## Current implementation status
+
+The Gantt page was partially shipped (commit `6955b47`). Use the table below to find where to pick up — do not re-implement completed rows.
+
+| Feature | Status | Notes |
+|---|---|---|
+| `/generated-daily-planning` route + page scaffold | ✅ done | |
+| Day picker UI | ✅ done | |
+| Gantt grid (trucks × time axis 08:00–17:00) | ✅ done | table UI needs polish per commit note |
+| Delivery blocks rendered per truck | ✅ done | |
+| "Regenerate" button → re-runs optimizer for selected day | ✅ done | |
+| Drag-and-drop block reassignment (truck row / time slot) | ⬜ pending | snapped to 15-min grid |
+| Resize handles (edit ETD/ETA of a block) | ⬜ pending | |
+| Right-click cancel + one-click re-add | ⬜ pending | mark `cancelled`, not deleted |
+| "Add delivery" panel (client, qty, window, priority) | ⬜ pending | |
+| Constraints sidebar (per-delivery hard constraints from Excel) | ⬜ pending | read-only |
+| Export to Excel (same column layout as source, new filename) | ⬜ pending | `Weekly Delivery planning W{week}_edited_{ts}.xlsx` |
+
+**Start from the first ⬜ row.** The ✅ rows must not regress — run the Gantt page in the browser and confirm it still renders before submitting any drag-and-drop work.
+
+---
+
 ## 1. What the page must do
 
 Per the dispatcher's sketch (one row per truck, x-axis = time 08:00 → 17:00,

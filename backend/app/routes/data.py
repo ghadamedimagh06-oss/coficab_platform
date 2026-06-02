@@ -3,7 +3,7 @@ Data Routes for CofICab Platform
 API endpoints for retrieving livraison and ingestion data
 """
 
-from fastapi import APIRouter, Query, Depends, HTTPException
+from fastapi import APIRouter, Query, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import os
@@ -15,6 +15,7 @@ from app.models.livraison import Livraison
 from app.models.ingestion_log import IngestionLog
 from app.services.ingestion_service import IngestionService
 from app.services.planning_service import PlanningService
+from app.services.auth_service import decode_token
 from app.data.synthetic_daily_planning import MOCK_TRANSPORTS
 
 router = APIRouter()
@@ -59,6 +60,14 @@ def _transport_from_row(row):
     }
 
 
+def _validate_optional_bearer(authorization: Optional[str]) -> None:
+    if not authorization:
+        return
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token or not decode_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 def _load_weekly_planning_transports(status: Optional[str] = None, day: Optional[str] = None, limit: int = 100, offset: int = 0):
     meta = {
         "source": "excel",
@@ -101,9 +110,11 @@ async def get_transports(
     limit: int = Query(100),
     offset: int = Query(0),
     force_file: Optional[bool] = Query(False),
+    authorization: Optional[str] = Header(None),
     db: Optional[Session] = Depends(get_db_optional)
 ):
     """Retrieve all livraisons/transports - public endpoint"""
+    _validate_optional_bearer(authorization)
     try:
         # If `force_file` requested, return parsed Excel/mock data regardless of DB
         if force_file:

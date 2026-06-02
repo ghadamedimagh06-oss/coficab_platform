@@ -4,15 +4,17 @@ from typing import List, Dict, Any
 import json
 from datetime import datetime
 
-from app.database import get_db
+from app.database import get_db_optional
 from app.models.transport_tracking import TransportTracking
 
 router = APIRouter()
 
 
 @router.get("/live")
-async def get_live_tracking(db: Session = Depends(get_db)):
+async def get_live_tracking(db: Session = Depends(get_db_optional)):
     """Return recent tracking records (last 100)."""
+    if not db:
+        return {"tracking_data": [], "count": 0, "source": "offline"}
     records = db.query(TransportTracking).order_by(TransportTracking.id.desc()).limit(100).all()
     result = []
     for r in records:
@@ -32,7 +34,7 @@ async def get_live_tracking(db: Session = Depends(get_db)):
 
 
 @router.post("/sync")
-async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db)):
+async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db_optional)):
     """Persist tracking sync payload into transport_tracking table.
 
     Expected payload: {"items": [{transport object}, ...], "source": "agent"}
@@ -41,6 +43,13 @@ async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db)):
     items = payload.get("items") or []
     if not isinstance(items, list):
         raise HTTPException(status_code=400, detail="Invalid payload: 'items' must be a list")
+    if not db:
+        return {
+            "status": "skipped",
+            "count": 0,
+            "persisted": False,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
     stored = 0
     for item in items:

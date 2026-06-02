@@ -1,14 +1,21 @@
+from datetime import date as _date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from app.database import get_db, get_db_optional
 from app.services.daily_plan_builder import DailyPlanBuilder
 from app.services.excel_exporter import export_plan_to_xlsx
-from app.services.vrptw_optimizer import VRPTWOptimizer
-
+from app.services.vrptw_optimizer import (
+    VRPTWOptimizer,
+    VrptwOptimizer,
+    OptimizerConfig,
+    OptimizerWeights,
+)
 
 router = APIRouter()
 daily_router = APIRouter(prefix="/daily")
@@ -17,6 +24,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEEKLY_DIR = PROJECT_ROOT / "weekly planning"
 EXPORT_DIR = WEEKLY_DIR / "exports"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Request / response models
+# ─────────────────────────────────────────────────────────────────────────────
 
 class PlanningGenerateRequest(BaseModel):
     deliveries: List[Dict[str, Any]]
@@ -40,6 +51,241 @@ class DailyExportRequest(BaseModel):
     plan: Dict[str, Any]
 
 
+class WeightsPayload(BaseModel):
+    alpha: float = 1.0
+    beta: float = 2.0
+    gamma: float = 1.5
+    delta: float = 3.0
+    epsilon: float = 1.0
+
+
+class RunRequest(BaseModel):
+    day: str                          # ISO date e.g. "2026-06-01"
+    depot_lat: float = 36.5
+    depot_lon: float = 10.1
+    time_limit_sec: int = 60
+    weights: Optional[WeightsPayload] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB-aware endpoints (new)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/run")
+def run_optimizer(request: RunRequest, db: Session = Depends(get_db)):
+    """
+    Trigger the DB-aware VRPTW optimizer for a given day.
+
+    Reads Camion(DISPONIBLE), Chauffeur(ACTIF), DemandeLocal(NOUVELLE, date=day)
+    from the database, partitions deliveries into geographic zones (one per truck),
+    solves each zone's route with OR-Tools, and materialises the result as a new
+    PlanVersion(DRAFT) with PlanMission + MissionDemande rows.
+
+    Zone isolation ensures no road segment is traversed by more than one truck.
+
+    Returns the new plan_version_id.
+    """
+    try:
+        plan_day = _date.fromisoformat(request.day)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid date format: {request.day!r}")
+
+    weights = None
+    if request.weights:
+        weights = OptimizerWeights(
+            alpha=request.weights.alpha,
+            beta=request.weights.beta,
+            gamma=request.weights.gamma,
+            delta=request.weights.delta,
+            epsilon=request.weights.epsilon,
+        )
+
+    cfg = OptimizerConfig(
+        depot_lat=request.depot_lat,
+        depot_lon=request.depot_lon,
+        time_limit_sec=request.time_limit_sec,
+    )
+
+    try:
+        optimizer = VrptwOptimizer(db=db, cfg=cfg)
+        version = optimizer.plan(day=plan_day, weights=weights)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Optimizer failed: {exc}")
+
+    return {
+        "plan_version_id": version.id,
+        "plan_id": version.plan_id,
+        "status": version.statut_plan,
+        "date": str(version.date_debut),
+        "commentaire": version.commentaire,
+    }
+
+
+@router.get("/plan/{plan_version_id}")
+def get_plan(plan_version_id: int, db: Session = Depends(get_db)):
+    """
+    Return a plan version with all its missions and stop sequences.
+    """
+    from app.models.plan import PlanVersion, PlanMission, MissionDemande
+
+    version = db.query(PlanVersion).filter(PlanVersion.id == plan_version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Plan version not found")
+
+    missions_out = []
+    for mission in version.missions:
+        stops = []
+        for md in sorted(mission.mission_demandes, key=lambda x: x.ordre_livraison):
+            d = md.demande
+            c = d.client if d else None
+            stops.append({
+                "ordre": md.ordre_livraison,
+                "demande_id": d.id if d else None,
+                "client_id": d.client_id if d else None,
+                "client_nom": c.nom if c else None,
+                "quantite_kg": float(d.quantite_kg) if d else None,
+                "date_livraison": str(d.date_livraison) if d else None,
+                "lat": float(c.latitude) if c and c.latitude else None,
+                "lon": float(c.longitude) if c and c.longitude else None,
+            })
+        missions_out.append({
+            "mission_id": mission.id,
+            "camion_id": mission.camion_id,
+            "chauffeur_id": mission.chauffeur_id,
+            "date_mission": str(mission.date_mission),
+            "statut": mission.statut,
+            "mode": mission.mode,
+            "km_parcourus": float(mission.km_parcourus or 0),
+            "charge_kg": float(mission.charge_kg or 0),
+            "load_eff_pct": float(mission.load_eff_pct or 0),
+            "fuel_consomme_l": float(mission.fuel_consomme_l or 0),
+            "cout_transport_eur": float(mission.cout_transport_eur or 0),
+            "stops": stops,
+        })
+
+    return {
+        "plan_version_id": version.id,
+        "plan_id": version.plan_id,
+        "version_number": version.version_number,
+        "periode": version.periode,
+        "date_debut": str(version.date_debut),
+        "date_fin": str(version.date_fin),
+        "statut_plan": version.statut_plan,
+        "commentaire": version.commentaire,
+        "missions": missions_out,
+    }
+
+
+@router.get("/plan/{plan_version_id}/kpis")
+def get_plan_kpi_preview(plan_version_id: int, db: Session = Depends(get_db)):
+    """
+    Preview the expected KPIs for a DRAFT plan without executing it.
+
+    Computes from materialised PlanMission rows:
+    - Load efficiency average (R4)
+    - Total km across all missions
+    - Total fuel estimate
+    - Total transport cost
+    - Premium freight count (mode=PREMIUM missions)
+    - Average utilisation %
+    """
+    from app.models.plan import PlanVersion, StatutMission, ModeMission
+
+    version = db.query(PlanVersion).filter(PlanVersion.id == plan_version_id).first()
+    if not version:
+        raise HTTPException(status_code=404, detail="Plan version not found")
+
+    missions = version.missions
+    if not missions:
+        return {
+            "plan_version_id": plan_version_id,
+            "mission_count": 0,
+            "kpis": [],
+        }
+
+    total_km = sum(float(m.km_parcourus or 0) for m in missions)
+    total_kg = sum(float(m.charge_kg or 0) for m in missions)
+    total_fuel = sum(float(m.fuel_consomme_l or 0) for m in missions)
+    total_cost = sum(float(m.cout_transport_eur or 0) for m in missions)
+    load_effs = [float(m.load_eff_pct or 0) for m in missions if m.load_eff_pct]
+    avg_load_eff = round(sum(load_effs) / len(load_effs), 2) if load_effs else 0.0
+    premium_count = sum(1 for m in missions if m.mode == ModeMission.PREMIUM)
+
+    # Fuel efficiency: mL per T·km  (mirroring KPI R4-13)
+    fuel_eff = None
+    if total_kg > 0 and total_km > 0:
+        fuel_eff = round((total_fuel * 1000) / ((total_kg / 1000) * total_km), 4)
+
+    # Logistics cost: €/T  (mirroring KPI R5-10)
+    logistics_cost = None
+    if total_kg > 0:
+        logistics_cost = round(total_cost / (total_kg / 1000), 2)
+
+    kpis = [
+        {
+            "code": "R4",
+            "label": "Load Efficiency",
+            "value": avg_load_eff,
+            "unit": "%",
+            "target": 85.0,
+        },
+        {
+            "code": "R4-13",
+            "label": "Fuel Efficiency",
+            "value": fuel_eff,
+            "unit": "mL/T.km",
+            "target": 0.16,
+        },
+        {
+            "code": "R5-10",
+            "label": "Logistics Cost",
+            "value": logistics_cost,
+            "unit": "€/T",
+            "target": 18.0,
+        },
+        {
+            "code": "R4-03",
+            "label": "Premium Freight Count",
+            "value": premium_count,
+            "unit": "Nb",
+            "target": 3,
+        },
+    ]
+
+    return {
+        "plan_version_id": plan_version_id,
+        "mission_count": len(missions),
+        "total_km": round(total_km, 2),
+        "total_kg": round(total_kg, 2),
+        "total_fuel_l": round(total_fuel, 2),
+        "total_cost_eur": round(total_cost, 2),
+        "kpis": kpis,
+    }
+
+
+@router.post("/weights")
+def update_weights(payload: WeightsPayload):
+    """
+    Update default optimiser weights (α/β/γ/δ/ε).
+    In the current implementation these are per-request; a future enhancement
+    can persist them in kpi_definition or a config table.
+    """
+    return {
+        "alpha": payload.alpha,
+        "beta": payload.beta,
+        "gamma": payload.gamma,
+        "delta": payload.delta,
+        "epsilon": payload.epsilon,
+        "note": "Weights accepted. Pass them in the next /api/optimization/run request.",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Legacy dict-based endpoints (kept for frontend planning UI)
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.post("/route")
 async def optimize_route(request: RouteOptimization):
     return {
@@ -54,12 +300,23 @@ async def optimize_route(request: RouteOptimization):
 
 @router.post("/planning/generate")
 async def generate_planning(request: PlanningGenerateRequest):
+    """
+    Dict-based VRPTW for the frontend planning UI.
+    Now uses geographic zone clustering so each truck covers a compact area
+    and no road segment is traversed by more than one vehicle.
+    """
     try:
-        optimizer = VRPTWOptimizer(request.deliveries, request.trucks, request.current_routes)
+        optimizer = VRPTWOptimizer(
+            request.deliveries, request.trucks, request.current_routes
+        )
         result = optimizer.optimize()
         return {
             "status": result["status"],
             "algorithm": result["algorithm"],
+            "plan": {
+                "routes": result["routes"],
+                "unassigned": result["unassigned"],
+            },
             "routes": result["routes"],
             "unassigned": result["unassigned"],
             "costs": result["costs"],
@@ -69,6 +326,10 @@ async def generate_planning(request: PlanningGenerateRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Optimization failed: {exc}") from exc
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Daily plan endpoints (unchanged)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @daily_router.post("/generate")
 async def generate_daily_plan(request: DailyGenerateRequest):
@@ -106,7 +367,5 @@ async def download_daily_plan(file_name: str):
     )
 
 
-def _parse_day(raw: str):
-    from datetime import date
-
-    return date.fromisoformat(raw)
+def _parse_day(raw: str) -> _date:
+    return _date.fromisoformat(raw)

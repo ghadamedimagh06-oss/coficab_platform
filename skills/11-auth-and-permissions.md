@@ -7,6 +7,50 @@ Indirect, but critical: **plan validation is the moment a KPI delta is committed
 
 ---
 
+## Build-order note — stub first, finish later
+
+The README build order says "skill 11 can be done anytime." That is true for **user management** (CRUD, role enforcement). It is **false** for the route dependency.
+
+The `require_role` FastAPI dependency must be imported and applied to every router's write endpoints **before skill 03 routes are written** — otherwise endpoints ship without guards and retrofitting always misses at least one.
+
+Two-line stub that unblocks all other skills during local development:
+
+```python
+# backend/app/services/auth_service.py  (dev stub — replace with full impl below)
+from fastapi import Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+_bearer = HTTPBearer(auto_error=False)
+
+def get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> dict:
+    # TODO: decode JWT when skill 11 is fully wired
+    # Returns a mock admin so every other skill can develop without blocking
+    return {"username": "dev", "role": "admin"}
+
+def require_role(*roles: str):
+    def _dep(user: dict = Depends(get_current_user)) -> dict:
+        if user["role"] not in roles:
+            from fastapi import HTTPException, status
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient role")
+        return user
+    return _dep
+```
+
+Apply it immediately on every route that mutates state:
+
+```python
+# any router file
+from app.services.auth_service import require_role
+
+@router.post("/demandes")
+def create_demande(..., _=Depends(require_role("planner", "admin"))):
+    ...
+```
+
+When skill 11 is fully implemented, replace the stub body in `auth_service.py` with real JWT decode. All call sites remain unchanged.
+
+---
+
 ## Roles
 
 | Role     | Can read | Can write | Can validate plans | Can manage users |

@@ -28,7 +28,20 @@ except Exception as e:
     print("Running in offline mode - database operations will fail")
     engine = None
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine else None
+class OfflineSession:
+    def close(self):
+        return None
+
+
+class OfflineSessionFactory:
+    def __call__(self):
+        return OfflineSession()
+
+    def __bool__(self):
+        return False
+
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine else OfflineSessionFactory()
 
 Base = declarative_base()
 

@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional
 import datetime
 import os
 from pathlib import Path
-from app.database import get_db
+from app.database import get_db, get_db_optional
 from app.services.ingestion_service import IngestionService
-from app.models.transport import User
-from app.services.auth_service import AuthService, oauth2_scheme
+from app.models.user import User
+from app.services.auth_service import AuthService, oauth2_scheme, require_role
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
@@ -44,6 +45,12 @@ class IngestionTrigger(BaseModel):
     file_path: str
     timestamp: int
 
+
+class IngestionDataRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    rows: List[Dict[str, Any]]
+
+
 def validate_file_path(file_path: str) -> str:
     """Validate and secure file path"""
     # Resolve the path to prevent directory traversal
@@ -65,6 +72,34 @@ def validate_file_path(file_path: str) -> str:
             raise HTTPException(status_code=400, detail="File size must be less than 5MB")
 
     return str(resolved_path)
+
+
+@router.post("/data")
+async def ingest_data_payload(
+    request: IngestionDataRequest,
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Optional[Session] = Depends(get_db_optional),
+):
+    """Validate direct JSON ingestion payloads.
+
+    Workbook ingestion remains the authoritative path for persistence. This
+    endpoint exists so clients get explicit validation errors instead of a 404
+    when they submit row payloads directly.
+    """
+    unsafe_chars = set('<>:"/\\|?*')
+    if any(char in unsafe_chars for char in request.filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not request.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx filenames are accepted")
+
+    return {
+        "status": "empty" if not request.rows else "validated",
+        "file_name": request.filename,
+        "total_rows": len(request.rows),
+        "inserted_rows": 0,
+        "persisted": False,
+        "message": "Use /api/ingestion/trigger with a workbook path to persist ingestion results.",
+    }
 
 @router.post("/trigger")
 async def trigger_ingestion(

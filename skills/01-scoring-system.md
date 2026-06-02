@@ -8,16 +8,18 @@ The Coficab monthly performance report tracks 8 official indicators. The platfor
 
 ## 1. The 8 official indicators
 
-| Code   | Indicator                                | Unit    | Target 2025 | Green band | Yellow band     | Red band |
-|--------|-------------------------------------------|---------|-------------|------------|-----------------|----------|
-| R4-06  | OTIF — On-Time In-Full                    | %       | 96%         | ≥ 94%      | 92% to 94%      | < 92%    |
-| R4-02  | OTD — On-Time Delivery                    | %       | 96%         | ≥ 94%      | 92% to 94%      | < 92%    |
-| R4-02  | Premium Freight cost (Extra Transport)    | EUR     | 1 500       | ≤ 2 500    | 2 500 to 3 500  | > 3 500  |
-| R4-03  | Number of Premium Freight occurrences     | Nb      | 1           | ≤ 3        | 3 to 5          | > 5      |
-| R4-13  | Fuel Consumption Efficiency               | mL/T.km | 0.14        | ≤ 0.16     | 0.16 to 0.18    | > 0.18   |
-| R5-10  | Logistics cost                            | €/T     | 16          | ≤ 18       | 18 to 20        | > 20     |
-| R4-12  | Customer logistics incidents per MKm sold | Nb      | 13          | ≤ 14       | 14 to 15        | > 15     |
-| R4     | Load Efficiency Rate                      | %       | (target tbd)| ≥ target   | between bands   | < min    |
+| Code       | Indicator                                | Unit    | Target 2025 | Green band | Yellow band     | Red band |
+|------------|-------------------------------------------|---------|-------------|------------|-----------------|----------|
+| R4-06      | OTIF — On-Time In-Full                    | %       | 96%         | ≥ 94%      | 92% to 94%      | < 92%    |
+| R4-02      | OTD — On-Time Delivery                    | %       | 96%         | ≥ 94%      | 92% to 94%      | < 92%    |
+| R4-02-PF ¹ | Premium Freight cost (Extra Transport)    | EUR     | 1 500       | ≤ 2 500    | 2 500 to 3 500  | > 3 500  |
+| R4-03      | Number of Premium Freight occurrences     | Nb      | 1           | ≤ 3        | 3 to 5          | > 5      |
+| R4-13      | Fuel Consumption Efficiency               | mL/T.km | 0.14        | ≤ 0.16     | 0.16 to 0.18    | > 0.18   |
+| R5-10      | Logistics cost                            | €/T     | 16          | ≤ 18       | 18 to 20        | > 20     |
+| R4-12      | Customer logistics incidents per MKm sold | Nb      | 13          | ≤ 14       | 14 to 15        | > 15     |
+| R4         | Load Efficiency Rate                      | %       | (target tbd)| ≥ target   | between bands   | < min    |
+
+> ¹ **R4-02-PF** is the platform's internal code for Premium Freight Cost. The Coficab monthly report labels it R4-02 in the printed column header, but since R4-02 already uniquely identifies OTD (a different unit and direction), using the same code in `kpi_definition` would corrupt the catalog. R4-02-PF is used everywhere in the codebase and seed SQL. Never conflate the two.
 
 The dashboard's "Follow-up" column shows the cell colored according to the band. The KPI engine must compute both the **value** and the **color** for every snapshot.
 
@@ -61,17 +63,27 @@ Where (35) = `km_a_vide` (kilometres run empty).
 ```
 Logistics Cost = ( (27) + (28) + (29) ) / (30)
 ```
-- (27) Logistics consumables (incl. Fuel Fenwick) — `cout_consommables_eur`
-- (28) Packaging — `cout_emballage_eur`
-- (29) Transportation costs = premium freight + reparation + fuel camion + déplacement — `cout_transport_eur`
-- (30) Vente en tonne — `vente_tonnes` (tonnes sold)
+- (27) Logistics consumables (incl. Fuel Fenwick) — `SUM(plan_mission.cout_consommables_eur)`
+- (28) Packaging — `SUM(plan_mission.cout_emballage_eur)`
+- (29) Transportation costs = premium freight + reparation + fuel camion + déplacement — `SUM(plan_mission.cout_transport_eur)`
+- (30) Vente en tonne — `SUM(plan_mission.charge_kg) / 1000` in tonnes
+
+> ⚠️ **v1 proxy.** The spec expects "tonnes sold" (a commercial volume figure from ERP/sales). Because no sales system is integrated in v1, the platform uses **transported tonnage** (`charge_kg / 1000`) as a proxy — directionally correct for internal benchmarking. If the business requires exact cost-per-tonne-sold, wire a monthly sales input via `POST /api/metrics/monthly-sales` and replace this field with the imported value.
 
 ### R4-12 — Customer Logistics Incidents / MKm sold
+
+> ⚠️ **Naming collision warning.** The spec report uses positional numbers (32), (33) for *multiple* KPIs — fuel and incidents reuse the same ordinals with different meanings. All formulas below use explicit field names instead to prevent implementation errors.
+
 ```
-Customer Logistics Incidents per MKm sold = (32) / (33) × 1 000 000
+Customer Logistics Incidents per MKm sold =
+    COUNT(evenement_alea WHERE type = 'CLIENT_COMPLAINT')
+    / SUM(plan_mission.km_parcourus)
+    × 1 000 000
 ```
-- (32) Number of customer issues due to logistics problems — `nb_incidents_clients`
-- (33) Total Km sold — `km_vendus`
+
+Fields:
+- `nb_incidents` = `COUNT(evenement_alea WHERE type = 'CLIENT_COMPLAINT')` for the period
+- `km_parcourus` = `SUM(plan_mission.km_parcourus)` for the period (total km operated = km sold proxy)
 
 ### R4 — Load Efficiency Rate
 The spec defines three sub-metrics; the headline R4 = `max(Load(Pallets %), Load(Kg %))`.
@@ -112,6 +124,10 @@ The **color** field is computed at write time, not at read time. This means the 
 ---
 
 ## 5. Reference implementation — `KpiService`
+
+> **This snippet is a design reference, not the source of truth.**
+> The authoritative implementation lives in `backend/app/services/kpi_service.py`.
+> If the file and this snippet disagree, **the file wins**. Update this section when the spec formula changes.
 
 `backend/app/services/kpi_service.py`:
 
@@ -215,7 +231,7 @@ class KpiService:
             EvenementAlea.date_evenement >= month,
             EvenementAlea.date_evenement < self._next_month(month),
         ).count()
-        # km_vendus comes from PlanMission close-outs in the period
+        # km_parcourus is used as proxy for "km sold" — see section 2 vente note
         km_sold = sum(
             (m.km_parcourus or 0) for m in self.db.query(PlanMission).filter(
                 PlanMission.date_mission >= month,
@@ -321,4 +337,4 @@ For each KPI:
 4. Round-trip: query `/api/metrics/kpi?code=R4-06&period=monthly` and confirm the JSON matches.
 5. Eyeball the dashboard cell: same value, same color.
 
-If any of those four match, you're done with this KPI. If not, the formula is wrong — fix `KpiService`, not the database row.
+If all five checks pass, you're done with this KPI. If any fails, the formula is wrong — fix `KpiService`, not the database row.

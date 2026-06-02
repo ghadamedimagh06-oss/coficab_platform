@@ -2,270 +2,142 @@
 
 > Goal: turn pending `demandes_local` rows into a **candidate** `plan_version` (status `DRAFT`) made of `plan_mission` + `mission_demande` rows. The transport manager approves it in skill 05.
 
-## KPI anchor
-The objective function is the place where every KPI weight lives:
+---
+
+## Core design principles
+
+### 1. Geographic zone clustering (K-means++)
+
+Before routing, all delivery points are partitioned into **k geographic zones** where k = number of available trucks.  Each zone is served by exactly one truck.
+
+```
+cluster_zones(latlons, k) → k lists of delivery indices
+```
+
+Implemented in `vrptw_optimizer.py::cluster_zones()` using **K-means++ initialisation** (spread initial centroids for better zone separation) followed by Lloyd's iterations (max 30).
+
+Why this matters:
+- Routes are **spatially compact** — no truck crosses the city to reach an isolated stop.
+- **No road segment is traversed by more than one truck**: since every arc (i→j) belongs to exactly one zone's route, it cannot appear in any other vehicle's route across the full plan.  This eliminates redundant road usage.
+- Cluster assignment is deterministic (seeded RNG) for reproducible plans.
+
+### 2. Capacity rebalancing after clustering
+
+If a zone's total weight exceeds its truck's capacity, the **heaviest overflowing node is moved to the least-loaded zone that still has room**.
+
+```
+_rebalance_for_capacity(clusters, kg_per_point, capacities_kg)
+    → (rebalanced_clusters, unassigned_positions)
+```
+
+Nodes that cannot fit any truck are logged as warnings and excluded from the plan.
+
+### 3. Per-zone single-vehicle VRPTW
+
+Each zone is solved independently as a **single-vehicle VRPTW** using OR-Tools `pywrapcp.RoutingModel` with one vehicle.  Single-vehicle subproblems are smaller and faster than the full multi-vehicle problem, and the zone isolation already handles the inter-vehicle constraint.
+
+Fallback: **nearest-neighbour greedy** when OR-Tools is unavailable.
+
+---
+
+## KPI anchor — objective function
+
+The per-zone arc cost (passed to OR-Tools) is:
+
+```
+cost(i→j) = α · km(i,j) · 100  +  ε · fuel_litres(i,j) · 10
+```
+
+The full plan objective (across all zones) maps to:
 
 ```
 minimize:
-   α · total_km                                    ← drives R5-10 (cost) and R4-13 (fuel)
- + β · expected_delay_penalty_minutes              ← drives R4-02 OTD and R4-06 OTIF
- + γ · (100 − load_efficiency_percent_average)     ← drives R4 Load Efficiency
- + δ · expected_premium_freight_eur                ← drives R4-02-PF and R4-03
- + ε · expected_fuel_litres_per_tkm                ← drives R4-13 directly
+   α · total_km                           ← drives R5-10 (cost) and R4-13 (fuel)
+ + β · expected_delay_penalty_minutes     ← drives R4-02 OTD and R4-06 OTIF
+ + γ · (100 − load_efficiency_avg)        ← drives R4 Load Efficiency
+ + δ · expected_premium_freight_eur       ← drives R4-02-PF and R4-03
+ + ε · expected_fuel_litres_per_tkm       ← drives R4-13 directly
 ```
 
 Defaults: `α=1.0, β=2.0, γ=1.5, δ=3.0, ε=1.0`. The admin UI exposes these sliders (skill 09).
 
 ---
 
-## Keep it boring
-
-Don't roll your own VRPTW. Use **Google OR-Tools `pywrapcp.RoutingModel`** — same path as your existing `vrptw_complete_optimizer.py`. Solver: PATH_CHEAPEST_ARC for initial, GUIDED_LOCAL_SEARCH for improvement. Time limit 60s for daily, 180s for weekly. That's enough.
-
-Don't introduce ML. The spec explicitly says reinforcement learning is out of scope for v1.
-
----
-
 ## Inputs
 
 From the DB at run time:
-- `camions` where `status = 'DISPONIBLE'` → vehicle pool (capacity_kg, max_palettes, default speed=60 km/h)
-- `chauffeurs` where `status = 'ACTIF'` and on shift that day → driver pool
-- `clients` for coordinates and time windows
-- `demandes_local` where `statut = 'NOUVELLE'` and `date_livraison BETWEEN plan_start AND plan_end`
-- `kpi_definition` (to read α/β/γ/δ/ε weights — see end of this file)
+- `camions` where `status = 'DISPONIBLE'` → vehicle pool (capacite_kg, max_palettes, consommation_base_l_100km)
+- `chauffeurs` where `status = 'ACTIF'` → driver pool (preferred driver from `camion.chauffeur_defaut_id`)
+- `clients` for coordinates (latitude, longitude) and time windows (fenetre_ouverture, fenetre_fermeture)
+- `demandes_local` where `statut = 'NOUVELLE'` and `date_livraison = plan_day`
 
 ---
 
-## Distance & time matrix
+## Distance matrix
 
-Two options, both acceptable:
+Haversine formula — implemented in `_haversine_km()`.  The matrix is built once per optimizer run and reused by the per-zone solvers and the materialize step.
 
-**Option A — Haversine** (zero cost, ~OK accuracy for daily planning):
-```python
-import math
-def haversine_km(a, b):
-    lat1, lon1 = map(math.radians, a); lat2, lon2 = map(math.radians, b)
-    dlat = lat2 - lat1; dlon = lon2 - lon1
-    h = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlon/2)**2
-    return 2 * 6371 * math.asin(math.sqrt(h))
-```
-
-**Option B — OSRM** (free, self-hostable). Recommended once the system runs in real conditions. Set up later, not now.
-
-For v1, ship Haversine. Cache the matrix in memory per optimizer run; rebuild if `clients` table changes.
+OSRM can replace haversine in production; change `_build_dist_matrix()` in `VrptwOptimizer`.
 
 ---
 
-## File: `backend/app/services/vrptw_optimizer.py`
+## Algorithm steps
 
-(Renamed from `vrptw_complete_optimizer.py`. Archive the existing file as `_archive/` if you want to preserve it.)
-
-```python
-import logging
-from datetime import date, datetime, timedelta
-from dataclasses import dataclass
-from typing import Optional
-
-from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-from sqlalchemy.orm import Session
-
-from app.models.camion import Camion, CamionStatus
-from app.models.chauffeur import Chauffeur, ChauffeurStatus
-from app.models.client import Client
-from app.models.demande import DemandeLocal, StatutDemande
-from app.models.plan import PlanVersion, PlanMission, MissionDemande, StatutPlan, StatutMission, ModeMission, Periode
-
-log = logging.getLogger(__name__)
-
-@dataclass
-class OptimizerWeights:
-    alpha: float = 1.0   # distance
-    beta: float = 2.0    # delay
-    gamma: float = 1.5   # underutilization
-    delta: float = 3.0   # premium freight
-    epsilon: float = 1.0 # fuel
-
-@dataclass
-class OptimizerConfig:
-    time_limit_sec: int = 60
-    speed_kmh: int = 60
-    service_time_min: int = 15           # unloading time at each stop
-    work_window_hours: int = 10          # max shift length
-    depot_lat: float
-    depot_lon: float
-    weights: OptimizerWeights = OptimizerWeights()
-
-class VrptwOptimizer:
-    def __init__(self, db: Session, cfg: OptimizerConfig):
-        self.db = db
-        self.cfg = cfg
-
-    def plan(self, day: date) -> PlanVersion:
-        trucks   = self._available_trucks()
-        drivers  = self._available_drivers(day)
-        demandes = self._pending_demandes(day)
-        if not demandes:
-            raise ValueError("no pending demandes for this day")
-
-        nodes, demande_index = self._build_nodes(demandes)
-        dist_m, time_m = self._build_matrices(nodes)
-
-        manager = pywrapcp.RoutingIndexManager(len(nodes), len(trucks), 0)
-        routing = pywrapcp.RoutingModel(manager)
-
-        # ----- cost = α·distance + ε·fuel
-        def cost_cb(from_idx, to_idx):
-            i = manager.IndexToNode(from_idx); j = manager.IndexToNode(to_idx)
-            km = dist_m[i][j]
-            fuel_l = km * 0.30                              # 30L/100km baseline
-            return int(self.cfg.weights.alpha * km * 100
-                     + self.cfg.weights.epsilon * fuel_l * 10)
-        cost_index = routing.RegisterTransitCallback(cost_cb)
-        routing.SetArcCostEvaluatorOfAllVehicles(cost_index)
-
-        # ----- capacity constraint (kg)
-        def demand_cb(idx):
-            node = manager.IndexToNode(idx)
-            return int(nodes[node]["kg"])
-        dem_index = routing.RegisterUnaryTransitCallback(demand_cb)
-        routing.AddDimensionWithVehicleCapacity(
-            dem_index, 0,
-            [int(t.capacite_kg) for t in trucks],
-            True, "Capacity"
-        )
-
-        # ----- time dimension with windows
-        def time_cb(from_idx, to_idx):
-            i = manager.IndexToNode(from_idx); j = manager.IndexToNode(to_idx)
-            travel = time_m[i][j]
-            service = 0 if j == 0 else self.cfg.service_time_min
-            return int(travel + service)
-        time_index = routing.RegisterTransitCallback(time_cb)
-        routing.AddDimension(time_index, 30, self.cfg.work_window_hours * 60, False, "Time")
-        time_dim = routing.GetDimensionOrDie("Time")
-        for node_idx, node in enumerate(nodes):
-            if node_idx == 0: continue
-            start_min, end_min = node["window"]
-            time_dim.CumulVar(manager.NodeToIndex(node_idx)).SetRange(start_min, end_min)
-
-        # ----- search
-        params = pywrapcp.DefaultRoutingSearchParameters()
-        params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-        params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-        params.time_limit.FromSeconds(self.cfg.time_limit_sec)
-
-        solution = routing.SolveWithParameters(params)
-        if solution is None:
-            raise RuntimeError("VRPTW solver returned no solution")
-
-        return self._materialize(day, trucks, drivers, demandes, manager, routing, solution, nodes, demande_index)
-
-    # ----------------------------------------------------------------
-    # Helpers
-    # ----------------------------------------------------------------
-    def _available_trucks(self) -> list[Camion]:
-        return self.db.query(Camion).filter(Camion.status == CamionStatus.DISPONIBLE).all()
-
-    def _available_drivers(self, day: date) -> list[Chauffeur]:
-        return self.db.query(Chauffeur).filter(Chauffeur.status == ChauffeurStatus.ACTIF).all()
-
-    def _pending_demandes(self, day: date) -> list[DemandeLocal]:
-        return (self.db.query(DemandeLocal)
-                       .filter(DemandeLocal.date_livraison == day,
-                               DemandeLocal.statut == StatutDemande.NOUVELLE)
-                       .all())
-
-    def _build_nodes(self, demandes):
-        # node 0 is the depot, nodes 1..N are demandes
-        nodes = [{"lat": self.cfg.depot_lat, "lon": self.cfg.depot_lon,
-                  "kg": 0, "window": (0, self.cfg.work_window_hours * 60)}]
-        demande_index = {}
-        for d in demandes:
-            c: Client = d.client
-            start = self._minutes(c.fenetre_ouverture) if c.fenetre_ouverture else 0
-            end   = self._minutes(c.fenetre_fermeture) if c.fenetre_fermeture else self.cfg.work_window_hours * 60
-            nodes.append({"lat": float(c.latitude or 0), "lon": float(c.longitude or 0),
-                          "kg": float(d.quantite_kg), "window": (start, end)})
-            demande_index[len(nodes) - 1] = d
-        return nodes, demande_index
-
-    def _build_matrices(self, nodes):
-        from math import radians, sin, cos, asin, sqrt
-        def km(a, b):
-            la1, lo1, la2, lo2 = map(radians, [a["lat"], a["lon"], b["lat"], b["lon"]])
-            dlat = la2 - la1; dlon = lo2 - lo1
-            h = sin(dlat/2)**2 + cos(la1)*cos(la2)*sin(dlon/2)**2
-            return 2 * 6371 * asin(sqrt(h))
-        N = len(nodes); dist = [[0]*N for _ in range(N)]; time = [[0]*N for _ in range(N)]
-        for i in range(N):
-            for j in range(N):
-                if i == j: continue
-                d = km(nodes[i], nodes[j])
-                dist[i][j] = d
-                time[i][j] = int(round(d / self.cfg.speed_kmh * 60))   # minutes
-        return dist, time
-
-    @staticmethod
-    def _minutes(t) -> int:
-        return t.hour * 60 + t.minute
-
-    # ----------------------------------------------------------------
-    # Materialize solution → DB rows (DRAFT)
-    # ----------------------------------------------------------------
-    def _materialize(self, day, trucks, drivers, demandes, manager, routing, solution, nodes, demande_index):
-        last_plan = self.db.query(PlanVersion).order_by(PlanVersion.plan_id.desc()).first()
-        plan_id = (last_plan.plan_id + 1) if last_plan else 1
-        version = PlanVersion(
-            plan_id=plan_id, version_number=1,
-            periode=Periode.JOUR, date_debut=day, date_fin=day,
-            statut_plan=StatutPlan.DRAFT,
-            commentaire="generated by VrptwOptimizer",
-        )
-        self.db.add(version); self.db.flush()
-
-        for vehicle_id, truck in enumerate(trucks):
-            index = routing.Start(vehicle_id)
-            stops, total_kg, total_km = [], 0, 0
-            while not routing.IsEnd(index):
-                node = manager.IndexToNode(index); next_index = solution.Value(routing.NextVar(index))
-                if node != 0:
-                    d = demande_index[node]
-                    stops.append((d, node))
-                    total_kg += float(d.quantite_kg)
-                if next_index != index:
-                    nn = manager.IndexToNode(next_index)
-                    total_km += self._build_matrices(nodes)[0][node][nn]
-                index = next_index
-            if not stops:
-                continue
-            driver = drivers[vehicle_id % len(drivers)]
-            mission = PlanMission(
-                plan_version_id=version.id,
-                camion_id=truck.id,
-                chauffeur_id=driver.id,
-                date_mission=day,
-                statut=StatutMission.PLANIFIEE,
-                mode=ModeMission.NORMAL,
-                km_parcourus=total_km,
-                charge_kg=total_kg,
-                load_eff_kg_pct=round(total_kg / float(truck.capacite_kg) * 100, 2),
-            )
-            self.db.add(mission); self.db.flush()
-            for order, (demande, _node) in enumerate(stops, start=1):
-                self.db.add(MissionDemande(
-                    mission_id=mission.id,
-                    demande_id=demande.id,
-                    ordre_livraison=order,
-                ))
-                demande.statut = StatutDemande.PLANIFIEE
-        self.db.commit()
-        return version
+```
+1. Load trucks, drivers, demandes from DB
+2. Build node list: node 0 = depot, nodes 1..N = demandes (with client lat/lon + time window)
+3. cluster_zones(latlons, k=len(trucks))
+4. _rebalance_for_capacity(clusters, kg_per_delivery, truck_capacities)
+5. Sort: assign heaviest zone → largest truck (by capacite_kg)
+6. For each (truck, zone):
+     a. _solve_zone(nodes, zone_indices, truck, dist_m)
+        → OR-Tools single-vehicle VRPTW, or greedy fallback
+     b. Compute total_km, total_kg, load_eff_pct, fuel_l, cout_transport_eur
+     c. INSERT PlanMission
+     d. INSERT MissionDemande for each stop (with ordre_livraison)
+     e. UPDATE demande.statut → PLANIFIEE
+7. COMMIT → PlanVersion(DRAFT) returned
 ```
 
-> Notes
-> - Computes Haversine matrix twice (once for solver, once for materialize). Cache it if your fleet is large; for ≤ 50 stops the cost is negligible.
-> - Driver assignment is round-robin — replace with default-truck assignment from `chauffeurs.camion_defaut_id` once data is reliable.
+---
+
+## Files
+
+| File | Role |
+|---|---|
+| `backend/app/services/vrptw_optimizer.py` | `VrptwOptimizer` (DB-aware) + `VRPTWOptimizer` (dict-based legacy) + `cluster_zones()` + `_rebalance_for_capacity()` |
+| `backend/app/routes/optimization.py` | API endpoints (see below) |
+| `backend/app/agents/optimizer.py` | APScheduler job wrapper — calls `VrptwOptimizer.plan()` at 06:00 |
+
+`VRPTWOptimizer` (dict-based) is kept for the frontend planning UI (`/api/optimization/planning/generate`).  It also uses `cluster_zones()` and enforces zone isolation via `routing.SetAllowedVehiclesForIndex()` in OR-Tools.
+
+---
+
+## API endpoints
+
+```
+POST /api/optimization/run
+  Body: { day: "2026-05-25", depot_lat?, depot_lon?, time_limit_sec?, weights?: {α,β,γ,δ,ε} }
+  Returns: { plan_version_id, plan_id, status, date, commentaire }
+
+GET  /api/optimization/plan/{plan_version_id}
+  Returns: plan_version + missions[] + stops[] per mission
+
+GET  /api/optimization/plan/{plan_version_id}/kpis
+  Returns: preview KPIs computed from DRAFT missions:
+    R4  load efficiency %
+    R4-13 fuel efficiency mL/T.km
+    R5-10 logistics cost €/T
+    R4-03 premium freight count
+
+POST /api/optimization/weights
+  Body: { alpha, beta, gamma, delta, epsilon }
+  Note: weights are per-request for now; pass them in the next /run call.
+
+POST /api/optimization/planning/generate    ← legacy frontend UI
+  Body: { deliveries, trucks, current_routes }
+  Returns: { routes, unassigned, costs, suggestions, metrics }
+```
 
 ---
 
@@ -273,36 +145,21 @@ class VrptwOptimizer:
 
 | Trigger | Frequency | Source |
 |---|---|---|
-| Excel file dropped for tomorrow | once on ingestion success | `IngestionService` callback |
-| Scheduled daily run | every day 06:00 local | APScheduler (skill 00) |
+| Excel file ingested for tomorrow | once on ingestion success | `IngestionService` callback |
+| Scheduled daily run | every day 06:00 local | APScheduler → `agents/optimizer.py::run()` |
 | Manual "Re-optimize" button | on demand | `POST /api/optimization/run` |
 
-The result is always a **new `plan_version` with `statut_plan = DRAFT`**. It never overwrites a validated plan; a new version is created.
+The result is always a **new `plan_version` with `statut_plan = DRAFT`**.  A validated plan is never overwritten; a new version is created.
 
 ---
 
-## API endpoints
+## Verification checklist
 
-```
-POST /api/optimization/run             { day: "2026-05-25", weights?: {...} }
-  → returns the new plan_version_id
-
-GET  /api/optimization/plan/{id}       → plan_version + missions + stops
-GET  /api/optimization/plan/{id}/kpis  → preview of expected KPIs for this plan
-                                        (load eff %, total km, premium count, …)
-POST /api/optimization/weights         (admin) update α/β/γ/δ/ε defaults
-```
-
-The KPI-preview endpoint is critical: skill 05's "real-time impact" needs it.
-
----
-
-## Verification
-
-Insert 5 demandes for 5 different clients with known coordinates. Run the optimizer with default weights. Check:
-
-1. A new `plan_version` row exists with `statut_plan='DRAFT'`.
-2. Sum of `mission_demande.ordre_livraison` across all missions covers all 5 demandes (no orphans).
-3. For each mission, `charge_kg ≤ camion.capacite_kg` (capacity respected).
-4. `load_eff_kg_pct ≥ 50%` on average for reasonable demand density.
-5. `/api/optimization/plan/{id}/kpis` returns expected R4-02, R4-13, R4 values close to historical baseline.
+1. Insert ≥ 5 demandes for clients in at least 2 distinct geographic zones.
+2. `POST /api/optimization/run { day: "..." }` → returns a `plan_version_id`.
+3. `GET /api/optimization/plan/{id}` → missions cover all 5 demandes (no orphans).
+4. For each mission, `charge_kg ≤ camion.capacite_kg` (capacity respected).
+5. No two missions share an arc: for every pair of missions, their stop sequences should not share the same (clientA → clientB) arc.
+6. `GET /api/optimization/plan/{id}/kpis` → `load_eff_pct ≥ 50%` average for reasonable demand density.
+7. Run with 1 truck → all stops in one route, full greedy order, no clustering errors.
+8. Run with more trucks than deliveries → some missions have 1 stop; no crash.

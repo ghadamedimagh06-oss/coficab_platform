@@ -11,6 +11,10 @@ This folder is the **implementation playbook** for finishing the Coficab AI Tran
 3. Pick the skill that matches the feature you're building. Each skill is self-contained: files to touch, code to write, KPI impact, verification steps.
 4. Use [`reference/`](reference/) for lookups (formulas, API contracts, ERD, UI rules).
 
+> **Code snippets in skill files are reference implementations, not the authoritative source.**
+> The canonical code lives in the repository. If a skill's snippet diverges from what's in the repo,
+> **trust the repo** and update the skill. Update the skill when the *spec* changes; update the code when the *implementation* changes.
+
 ---
 
 ## Skill catalog
@@ -31,7 +35,7 @@ This folder is the **implementation playbook** for finishing the Coficab AI Tran
 | 11 | [Auth & roles](11-auth-and-permissions.md) | (governance) | foundation |
 | 12 | [Testing & verification](12-testing-and-verification.md) | every KPI | quality |
 | 13 | [Collaboration & autonomous merging](13-collaboration-and-merging.md) | protects scoring + UI | governance |
-| 14 | [Generated daily planning (Gantt editor)](14-generated-daily-planning.md) | Load Eff, OTD (edit-time only) | presentation |
+| 14 | [Generated daily planning (Gantt editor)](14-generated-daily-planning.md) | Load Eff, OTD (edit-time only) | partial — Gantt renders; drag-and-drop / export pending |
 
 ---
 
@@ -45,7 +49,7 @@ This folder is the **implementation playbook** for finishing the Coficab AI Tran
 
 ---
 
-## Five rules that override everything else
+## Six rules that override everything else
 
 1. **Do not change the visual identity of the frontend.** Same purple `#7c3aed` brand gradient, same card layout, same Recharts components, same Lucide icons. Only swap mock data for real API calls.
 2. **Every backend write must feed a KPI.** A delivery completes → `kpi_journalier` updates OTD. A truck rolls → fuel & km feed R4-13. An incident is logged → R4-12 updates. If a feature touches data but doesn't move a KPI, it's incomplete.
@@ -74,5 +78,5 @@ If you're picking up this project fresh, follow this order:
                     → 12 (verify each KPI cell on the dashboard matches DB)
 ```
 
-Skill 11 (auth) can be done anytime but must be in place before deployment.
+Skill 11 (auth): wire the `get_current_user` FastAPI dependency stub to **all routers before implementing skill 03**. User management (CRUD, role enforcement) can be deferred, but auth retrofitting always misses endpoints — do the stub first. See skill 11 for the two-line stub that unblocks all other skills.
 Skill 13 (collaboration & merging) should be in place **before** the second collaborator joins — it defines the autonomous-merge rules and the protected surfaces.

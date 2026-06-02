@@ -94,7 +94,7 @@ Logistics Cost = ( (27) + (28) + (29) ) / (30)
 - (27) Logistics consumables (incl. Fuel Fenwick) — `SUM(plan_mission.cout_consommables_eur)`
 - (28) Packaging — `SUM(plan_mission.cout_emballage_eur)`
 - (29) Transportation (premium freight + reparation + fuel camion + déplacement) — `SUM(plan_mission.cout_transport_eur)`
-- (30) Vente en tonne — `SUM(plan_mission.charge_kg) / 1000`
+- (30) Vente en tonne — `SUM(plan_mission.charge_kg) / 1000` *(v1 proxy: transported tonnage; replace with sales volume if ERP integration is added)*
 
 Aggregated monthly.
 
@@ -106,11 +106,16 @@ Aggregated monthly.
 - **Target 2025:** 13
 - **Bands:** green ≤ 14 • yellow 14–15 • red > 15
 
+> ⚠️ The spec report reuses ordinal numbers (32), (33) across multiple KPIs. R4-13 and R4-12 both reference (32) and (33) with **different meanings**. Explicit field names are used here to prevent implementation errors.
+
 ```
-Customer Logistics Incidents / MKm = (32) / (33) × 1 000 000
+Customer Logistics Incidents / MKm =
+    COUNT(evenement_alea WHERE type = 'CLIENT_COMPLAINT')
+    / SUM(plan_mission.km_parcourus)
+    × 1 000 000
 ```
-- (32) = `COUNT(evenement_alea WHERE type = 'CLIENT_COMPLAINT')`
-- (33) = `SUM(plan_mission.km_parcourus)`  (total km sold in the period)
+- `nb_incidents` = `COUNT(evenement_alea WHERE type = 'CLIENT_COMPLAINT')` for the period
+- `km_parcourus` = `SUM(plan_mission.km_parcourus)` for the period (total km operated)
 
 ---
 
