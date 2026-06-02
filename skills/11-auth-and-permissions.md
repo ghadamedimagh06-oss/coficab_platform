@@ -2,6 +2,18 @@
 
 > Goal: keep auth boringly simple. Three roles, JWT, password hashing. No OAuth provider, no SSO for v1 — this is an internal tool with ≤ 50 named users.
 
+## Current implementation status
+
+Done:
+- `backend/app/services/auth_service.py` hashes passwords, issues/decodes JWTs, provides the dev role helper, and rejects inactive users during login.
+- `backend/app/routes/auth.py` exposes `POST /api/auth/login`, `POST /api/auth/register`, `GET /api/auth/me`, `GET /api/auth/users`, `POST /api/auth/users`, and `PATCH /api/auth/users/{id}`.
+- Admin user management supports create, list, role change, password reset, and deactivate/reactivate.
+- `backend/tests/test_auth_endpoints.py` covers `/me`, admin user management, viewer denial, and inactive-user behavior; `backend/tests/test_auth.py` still covers legacy login/security checks.
+
+Pending:
+- Full DB-backed route guards are still pending. Most routers use the shared `require_role` call site, but the helper still trusts token role claims in dev/offline mode instead of re-checking every request against `users`.
+- Frontend auth guard wiring remains pending.
+
 ## KPI anchor
 Indirect, but critical: **plan validation is the moment a KPI delta is committed**. Only `planner` and `admin` may validate. `viewer` reads but never writes. Without role enforcement, the audit trail (skill 05) is meaningless.
 

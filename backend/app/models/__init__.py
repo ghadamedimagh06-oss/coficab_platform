@@ -16,6 +16,7 @@ from .kpi import KpiDefinition, KpiJournalier, KpiMensuel, KpiStatus, KpiDirecti
 
 # Auth
 from .user import User
+from .notification import NotificationLog
 
 # Legacy — kept so existing routes that import them don't break until migrated
 from .ingestion_log import IngestionLog
@@ -30,5 +31,6 @@ __all__ = [
     "EvenementAlea", "EvenementType",
     "KpiDefinition", "KpiJournalier", "KpiMensuel", "KpiStatus", "KpiDirection", "KpiFrequence",
     "User",
+    "NotificationLog",
     "IngestionLog",
 ]

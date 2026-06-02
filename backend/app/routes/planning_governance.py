@@ -11,6 +11,8 @@ from app.models.planning_version import PlanningVersion
 from app.models.planning_diff import PlanningDiff
 from app.services.planning_service import PlanningService
 from app.services.excel_watcher import last_detection_summary
+from app.services.auth_service import get_current_user, require_role
+from app.services.plan_validation_service import PlanValidationService
 
 router = APIRouter()
 
@@ -40,6 +42,88 @@ class PlanningReviewRequest(BaseModel):
 class PlanningRevalidateRequest(BaseModel):
     planning_id: int
     user_id: int
+
+
+class PlanReassignRequest(BaseModel):
+    demande_id: int
+    target_mission_id: int
+    reason: str = "manual_edit"
+
+
+@router.get("/{plan_version_id}/impact")
+async def get_plan_version_impact(
+    plan_version_id: int,
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = PlanValidationService(db)
+    try:
+        return service.preview_impact(plan_version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{plan_version_id}/validate")
+async def validate_plan_version(
+    plan_version_id: int,
+    user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    service = PlanValidationService(db)
+    try:
+        return service.validate(plan_version_id, user.get("username", "planner"))
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@router.post("/{plan_version_id}/reassign")
+async def reassign_plan_demande(
+    plan_version_id: int,
+    payload: PlanReassignRequest,
+    user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    service = PlanValidationService(db)
+    try:
+        return service.reassign_demande(
+            plan_version_id,
+            payload.demande_id,
+            payload.target_mission_id,
+            payload.reason,
+            user.get("username", "planner"),
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@router.post("/{plan_version_id}/clone")
+async def clone_plan_version(
+    plan_version_id: int,
+    user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    service = PlanValidationService(db)
+    try:
+        return service.clone(plan_version_id, user.get("username", "planner"))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{plan_version_id}/changelog")
+async def get_plan_version_changelog(
+    plan_version_id: int,
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = PlanValidationService(db)
+    try:
+        return {"changelog": service.changelog(plan_version_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/validate")

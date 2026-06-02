@@ -15,23 +15,25 @@ This skill complements:
 
 ## Current implementation status
 
-The Gantt page was partially shipped (commit `6955b47`). Use the table below to find where to pick up — do not re-implement completed rows.
+Audited against the repository on 2026-06-02. The interactive Gantt and Excel
+round-trip are implemented; the next follow-up is integration with the main
+plan-validation/save-draft flow from skill 05.
 
 | Feature | Status | Notes |
 |---|---|---|
 | `/generated-daily-planning` route + page scaffold | ✅ done | |
 | Day picker UI | ✅ done | |
-| Gantt grid (trucks × time axis 08:00–17:00) | ✅ done | table UI needs polish per commit note |
+| Gantt grid (trucks × time axis 08:00–17:00) | ✅ done | `GanttBoard`, `TimeAxis`, and `TruckLane` |
 | Delivery blocks rendered per truck | ✅ done | |
 | "Regenerate" button → re-runs optimizer for selected day | ✅ done | |
-| Drag-and-drop block reassignment (truck row / time slot) | ⬜ pending | snapped to 15-min grid |
-| Resize handles (edit ETD/ETA of a block) | ⬜ pending | |
-| Right-click cancel + one-click re-add | ⬜ pending | mark `cancelled`, not deleted |
-| "Add delivery" panel (client, qty, window, priority) | ⬜ pending | |
-| Constraints sidebar (per-delivery hard constraints from Excel) | ⬜ pending | read-only |
-| Export to Excel (same column layout as source, new filename) | ⬜ pending | `Weekly Delivery planning W{week}_edited_{ts}.xlsx` |
+| Drag-and-drop block reassignment (truck row / time slot) | ✅ done | `@dnd-kit/core`, snapped to a 15-min grid |
+| Resize handles (edit ETD/ETA of a block) | ✅ done | start/end pointer handles with 30-min minimum duration |
+| Right-click cancel + one-click re-add | ✅ done | marks `cancelled`; restore available from block and constraints panel |
+| "Add delivery" panel (client, qty, window, priority) | ✅ done | `AddDeliveryModal` mutates client state |
+| Constraints sidebar (per-delivery hard constraints from Excel) | ✅ done | `ConstraintsPanel`; required truck/window checks enforced on edits |
+| Export to Excel (same column layout as source, new filename) | ✅ done | `/api/planning/daily/export` + `excel_exporter.py`; source-preservation test exists |
 
-**Start from the first ⬜ row.** The ✅ rows must not regress — run the Gantt page in the browser and confirm it still renders before submitting any drag-and-drop work.
+**Do not re-implement the rows above.** Keep them regression-free and continue from the save-draft / validation integration follow-up.
 
 ---
 
@@ -334,18 +336,18 @@ sidebar items move.
 
 ## 6. File-by-file checklist
 
-| Layer | File | Action |
-|---|---|---|
-| Backend | `backend/app/services/daily_plan_builder.py` | **new** — orchestrator + greedy fallback |
-| Backend | `backend/app/services/excel_exporter.py` | **new** — openpyxl round-trip writer |
-| Backend | `backend/app/routes/optimization.py` | edit — add `/daily/generate`, `/daily/export`, `/daily/download/{name}` |
-| Backend | `backend/app/services/planning_service.py` | edit — expose `parse_constraints(row)` helper |
-| Frontend | `app/generated-daily-planning/page.jsx` | **new** |
-| Frontend | `components/planning/GanttBoard.jsx` + siblings (§5.2) | **new** |
-| Frontend | `app/services/api.ts` | edit — add 2 functions (§5.4) |
-| Frontend | `components/layout/Sidebar.jsx` | edit — 1 line (§5.5) |
-| Frontend | `package.json` | edit — 3 deps (§5.3) |
-| Skills | `skills/README.md` | edit — add row 14 to the catalog |
+| Layer | File | Action | Status |
+|---|---|---|---|
+| Backend | `backend/app/services/daily_plan_builder.py` | **new** — orchestrator + greedy fallback | ✅ done |
+| Backend | `backend/app/services/excel_exporter.py` | **new** — openpyxl round-trip writer | ✅ done |
+| Backend | `backend/app/routes/optimization.py` | edit — add `/daily/generate`, `/daily/export`, `/daily/download/{name}` | ✅ done |
+| Backend | `backend/app/services/planning_service.py` | edit — expose `parse_constraints(row)` helper | ✅ done |
+| Frontend | `app/generated-daily-planning/page.jsx` | **new** | ✅ done |
+| Frontend | `components/planning/GanttBoard.jsx` + siblings (§5.2) | **new** | ✅ done |
+| Frontend | `app/services/api.ts` | edit — add 2 functions (§5.4) | ✅ done |
+| Frontend | `components/layout/Sidebar.jsx` | edit — 1 line (§5.5) | ✅ done |
+| Frontend | `package.json` | edit — 3 deps (§5.3) | ✅ done |
+| Skills | `skills/README.md` | edit — add row 14 to the catalog | ✅ done |
 
 ---
 

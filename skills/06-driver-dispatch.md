@@ -2,6 +2,16 @@
 
 > Goal: when a plan transitions to `VALIDE`, each assigned driver receives a structured mission brief. The dispatch service is the **only** thing allowed to send to drivers.
 
+## Current implementation status
+
+Audited and implemented on 2026-06-02:
+- ✅ `backend/app/models/notification.py` and `database/schema.sql` define `notification_log`.
+- ✅ `backend/app/providers/notification.py` provides the v1 mock notification provider.
+- ✅ `backend/app/services/dispatch_service.py` builds mission briefs, dispatches plans/missions, and logs every attempt.
+- ✅ `/api/dispatch/missions/{id}/brief`, `/api/dispatch/missions/{id}/resend`, `/api/dispatch/plans/{id}/send`, and `/api/dispatch/logs` are wired.
+- ✅ `backend/tests/test_dispatch.py` verifies brief generation, sent/skipped logs, and dispatch routes.
+- ✅ Automatic dispatch from the new `/api/planning/{plan_version_id}/validate` path is wired through skill 05.
+
 ## KPI anchor
 - **R4-02 OTD** — late dispatch = late start = late delivery. Dispatch must fire within seconds of validation.
 - **R4-06 OTIF** — clear stop sequence + window per stop reduces field errors.

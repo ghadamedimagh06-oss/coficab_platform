@@ -54,7 +54,7 @@ class PlanVersion(Base):
     commentaire = Column(Text)
 
     missions = relationship("PlanMission", back_populates="plan_version", cascade="all, delete-orphan")
-    change_logs = relationship("PlanningChangeLog", back_populates="plan_version", cascade="all, delete-orphan")
+    change_logs = relationship("app.models.plan.PlanningChangeLog", back_populates="plan_version", cascade="all, delete-orphan")
 
 
 class PlanMission(Base):
@@ -131,4 +131,4 @@ class PlanningChangeLog(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-    plan_version = relationship("PlanVersion", back_populates="change_logs")
+    plan_version = relationship("app.models.plan.PlanVersion", back_populates="change_logs")

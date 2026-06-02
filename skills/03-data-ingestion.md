@@ -2,6 +2,18 @@
 
 > Goal: turn weekly Excel files and emails into rows in `demandes_local`. Everything downstream (planning, KPIs, dispatch) depends on this being correct.
 
+## Current implementation status
+
+Done:
+- `backend/app/services/ingestion_service.py` validates Excel rows and manual payloads, writes `demandes_local`, archives uploaded workbooks when requested, and records `ingestion_log` rows.
+- `backend/app/services/excel_watcher.py` still watches `weekly planning/` and delegates workbook processing to `IngestionService`.
+- `backend/app/routes/ingestion.py` exposes `POST /api/ingestion/demande`, `POST /api/ingestion/upload`, `GET /api/ingestion/logs`, `GET /api/ingestion/logs/{id}`, and `POST /api/ingestion/logs/{id}/retry`.
+- `backend/tests/test_ingestion.py` covers the ingestion service and legacy route behavior; `backend/tests/test_ingestion_api.py` covers manual demande creation plus log detail/retry.
+
+Pending:
+- Email ingestion is still out of scope for v1; no `ingest_email` implementation is present yet.
+- Skill 09 still needs to wire the frontend admin page to the ingestion endpoints.
+
 ## KPI anchor
 - **OTD / OTIF** (R4-06, R4-02) — wrong delivery dates → false delays.
 - **R4-12** — a missing demande means a "lost" client complaint can't be tied back.

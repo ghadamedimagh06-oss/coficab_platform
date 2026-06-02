@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 import datetime
 import os
+import shutil
 from pathlib import Path
 from app.database import get_db, get_db_optional
 from app.services.ingestion_service import IngestionService
+from app.models.ingestion_log import IngestionLog
 from app.models.user import User
 from app.services.auth_service import AuthService, oauth2_scheme, require_role
 from fastapi.security import OAuth2PasswordBearer
@@ -40,6 +42,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 router = APIRouter()
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+WEEKLY_DIR = PROJECT_ROOT / "weekly planning"
+UPLOAD_DIR = WEEKLY_DIR / "uploads"
+ARCHIVE_DIR = PROJECT_ROOT / "archive"
 
 class IngestionTrigger(BaseModel):
     file_path: str
@@ -74,6 +80,21 @@ def validate_file_path(file_path: str) -> str:
     return str(resolved_path)
 
 
+def _log_dict(log: IngestionLog) -> dict:
+    return {
+        "id": log.id,
+        "file_name": log.file_name,
+        "file_path": log.file_path,
+        "import_date": log.import_date.isoformat() if log.import_date else None,
+        "status": log.status,
+        "inserted_rows": log.inserted_rows,
+        "total_rows": log.total_rows,
+        "error_message": log.error_message,
+        "processed_at": log.processed_at.isoformat() if log.processed_at else None,
+        "archived_path": log.archived_path,
+    }
+
+
 @router.post("/data")
 async def ingest_data_payload(
     request: IngestionDataRequest,
@@ -99,6 +120,107 @@ async def ingest_data_payload(
         "inserted_rows": 0,
         "persisted": False,
         "message": "Use /api/ingestion/trigger with a workbook path to persist ingestion results.",
+    }
+
+
+@router.post("/demande")
+async def create_manual_demande(
+    request: Dict[str, Any],
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    service = IngestionService(db)
+    try:
+        demande = service.ingest_demande({**request, "source_import": "manual"})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "id": demande.id,
+        "client_id": demande.client_id,
+        "quantite_kg": float(demande.quantite_kg),
+        "date_livraison": demande.date_livraison.isoformat(),
+        "statut": demande.statut.value if hasattr(demande.statut, "value") else demande.statut,
+        "source_import": demande.source_import,
+    }
+
+
+@router.post("/upload")
+async def upload_planning_file(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename).name
+    target = UPLOAD_DIR / safe_name
+    with target.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    result = IngestionService(db).ingest_excel(target, ARCHIVE_DIR)
+    status = "success" if result.inserted and not result.skipped else (
+        "partial" if result.inserted else "failed"
+    )
+    return {
+        "status": status,
+        "file_name": safe_name,
+        "inserted_rows": result.inserted,
+        "skipped_rows": result.skipped,
+        "errors": result.errors,
+    }
+
+
+@router.get("/logs")
+async def get_ingestion_logs(
+    limit: int = 20,
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 200))
+    logs = db.query(IngestionLog).order_by(IngestionLog.import_date.desc()).limit(limit).all()
+    return {"logs": [_log_dict(log) for log in logs], "count": len(logs)}
+
+
+@router.get("/logs/{log_id}")
+async def get_ingestion_log(
+    log_id: int,
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    log = db.get(IngestionLog, log_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="ingestion log not found")
+    return _log_dict(log)
+
+
+@router.post("/logs/{log_id}/retry")
+async def retry_ingestion_log(
+    log_id: int,
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    log = db.get(IngestionLog, log_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="ingestion log not found")
+    if log.status not in {"failed", "partial"}:
+        raise HTTPException(status_code=400, detail="Only failed or partial imports can be retried")
+
+    path = Path(log.file_path)
+    if not path.exists() or path.suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail="original workbook is unavailable")
+
+    result = IngestionService(db).ingest_excel(path)
+    status = "success" if result.inserted and not result.skipped else (
+        "partial" if result.inserted else "failed"
+    )
+    return {
+        "status": status,
+        "file_name": path.name,
+        "inserted_rows": result.inserted,
+        "skipped_rows": result.skipped,
+        "errors": result.errors,
     }
 
 @router.post("/trigger")

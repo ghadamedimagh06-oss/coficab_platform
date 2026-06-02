@@ -1,5 +1,6 @@
 import { useDraggable } from '@dnd-kit/core';
 import { GripVertical, Lock, RotateCcw, X } from 'lucide-react';
+import { WORK_START, WORK_END, toMinutes, toClock } from './timeline';
 
 const PALETTE = ['#ddd6fe', '#bfdbfe', '#bbf7d0', '#fde68a', '#fecaca', '#99f6e4', '#fed7aa', '#e9d5ff'];
 
@@ -8,25 +9,14 @@ function clientColor(client) {
   return PALETTE[hash % PALETTE.length];
 }
 
-function toMinutes(value) {
-  if (!value) return 480;
-  const [hours, minutes = 0] = String(value).split(':').map(Number);
-  return hours * 60 + minutes;
-}
-
-function toClock(totalMinutes) {
-  const safe = Math.max(0, Math.min(totalMinutes, 23 * 60 + 59));
-  return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
-}
-
 function resizeTimes(delivery, edge, deltaMinutes) {
   const currentStart = toMinutes(delivery.etd);
   const currentEnd = Math.max(toMinutes(delivery.eta), currentStart + 30);
   if (edge === 'start') {
-    const nextStart = Math.min(currentEnd - 30, Math.max(480, currentStart + deltaMinutes));
+    const nextStart = Math.min(currentEnd - 30, Math.max(WORK_START, currentStart + deltaMinutes));
     return [toClock(nextStart), toClock(currentEnd)];
   }
-  const nextEnd = Math.max(currentStart + 30, Math.min(1020, currentEnd + deltaMinutes));
+  const nextEnd = Math.max(currentStart + 30, Math.min(WORK_END, currentEnd + deltaMinutes));
   return [toClock(currentStart), toClock(nextEnd)];
 }
 

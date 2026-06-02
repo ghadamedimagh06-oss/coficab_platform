@@ -2,6 +2,19 @@
 
 > Goal: keep the operations dashboard "alive". Mission statuses, incident counters, and KPI tiles refresh without the planner refreshing the page.
 
+## Current implementation status
+
+Done:
+- `backend/app/agents/monitor.py` is scheduled every 30 seconds and logs one `RETARD_TRAFIC` incident for an overdue in-flight mission stop.
+- `backend/app/routes/tracking.py` keeps the existing `GET /api/tracking/live` payload and adds active mission summaries.
+- `backend/app/routes/tracking.py` exposes `GET /api/tracking/missions/{id}/status` and `POST /api/tracking/stops/{id}/delivered`.
+- Stop close-out updates `mission_demande`, `demandes_local.quantite_livree_kg`, `heure_arrivee_reelle`, `livree_a_temps`, and closes the mission when all stops are done.
+- `backend/tests/test_monitoring.py` covers monitor auto-incidents and operator-driven stop delivery.
+
+Pending:
+- GPS check-in remains a v2/mobile endpoint.
+- SSE incident pop-ups remain optional; polling is still the v1 architecture.
+
 ## KPI anchor
 - **R4-02 OTD risk** — detect SLA breach risk *before* it becomes a real breach, log a `RETARD_TRAFIC` incident.
 - **R4-12** — incoming customer complaints surface immediately, not at month-end.

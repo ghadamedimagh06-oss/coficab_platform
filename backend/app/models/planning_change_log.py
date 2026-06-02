@@ -31,7 +31,7 @@ class PlanningChangeLog(Base):
     reason_text = Column(Text, nullable=True)
     user_id = Column(Integer, nullable=True)
 
-    planning = relationship("PlanningVersion", back_populates="audit_logs")
+    planning = relationship("app.models.planning_version.PlanningVersion", back_populates="audit_logs")
 
     def __repr__(self):
         return f"<PlanningChangeLog(id={self.id}, planning_id={self.planning_id}, field_name='{self.field_name}')>"

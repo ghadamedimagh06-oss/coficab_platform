@@ -78,6 +78,8 @@ class AuthService:
         user = self.get_user(username)
         if not user:
             return None
+        if not user.is_active:
+            return None
         if not self.verify_password(password, user.password_hash):
             return None
         return user

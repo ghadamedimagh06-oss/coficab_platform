@@ -2,6 +2,17 @@
 
 > Goal: every feature has a deterministic way to prove it works. Tests are organized by KPI, not by file — so when R4-13 looks wrong on the dashboard, you know exactly which test to run.
 
+## Current implementation status
+
+Done:
+- Backend pytest coverage exists for auth/security, ingestion service and API, optimizer/watchdog paths, plan validation, dispatch, incidents, monitoring, KPI jobs, and generated daily planning.
+- `backend/tests/test_kpi_invariants.py` pins the current live KPI formulas and color bands for all eight Coficab KPI codes.
+- `.github/workflows/ci.yml` runs backend tests and a KPI-focused slice including `test_kpi_invariants.py`.
+
+Pending:
+- The full ingestion -> optimize -> validate -> delivered -> KPI snapshot integration test is still pending.
+- Manual UI verification is still pending, especially frontend auth guards and admin ingestion/log pages.
+
 ## Test pyramid
 
 | Layer | Tool | Where | What |

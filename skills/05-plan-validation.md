@@ -2,6 +2,18 @@
 
 > Goal: let the transport manager review the DRAFT plan in the Gantt UI, drag/reassign as needed, see the KPI impact of every change in real time, then **lock** the plan with one click. After lock, dispatch fires (skill 06).
 
+## Current implementation status
+
+Audited and implemented on 2026-06-02:
+- ✅ `backend/app/services/plan_validation_service.py` previews KPI impact for new `PlanVersion` rows.
+- ✅ `/api/planning/{plan_version_id}/impact`, `/api/planning/{plan_version_id}/reassign`, `/api/planning/{plan_version_id}/validate`, `/api/planning/{plan_version_id}/clone`, and `/api/planning/{plan_version_id}/changelog` are wired.
+- ✅ Reassign moves a demande between missions, renumbers stops, flips DRAFT to EN_REVUE, and logs the edit.
+- ✅ Validation locks `PlanVersion.statut_plan` to `VALIDE`, writes `planning_change_log`, and triggers `DispatchService`.
+- ✅ Repeat validation is idempotent and does not resend notifications.
+- ✅ Clone-after-validation creates a fresh DRAFT `PlanVersion` with copied missions/stops.
+- ✅ `backend/tests/test_plan_validation.py` verifies impact preview, reassign, validation, dispatch, clone, no duplicate resend, and changelog.
+- ⬜ Frontend Gantt wiring remains pending.
+
 ## KPI anchor
 - **R4-02 OTD / R4-06 OTIF** — every manual reassignment recomputes expected delay.
 - **R4 Load Efficiency** — every reassignment recomputes truck fill rate.

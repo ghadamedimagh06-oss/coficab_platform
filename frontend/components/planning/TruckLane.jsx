@@ -2,16 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import DeliveryBlock from './DeliveryBlock';
 import DepotMarker from './DepotMarker';
-
-function minutes(value) {
-  if (!value) return 480;
-  const [h, m] = String(value).split(':').map(Number);
-  return h * 60 + (m || 0);
-}
-
-function pct(value) {
-  return Math.max(0, Math.min(100, ((minutes(value) - 480) / 540) * 100));
-}
+import { WORK_START, WORK_MINUTES, toMinutes as minutes, pct } from './timeline';
 
 function deliveryBox(delivery) {
   const start = minutes(delivery.etd);
@@ -21,8 +12,8 @@ function deliveryBox(delivery) {
     ...delivery,
     _start: start,
     _end: end,
-    _left: ((start - 480) / 540) * 100,
-    _width: Math.max((duration / 540) * 100, 8),
+    _left: ((start - WORK_START) / WORK_MINUTES) * 100,
+    _width: Math.max((duration / WORK_MINUTES) * 100, 8),
   };
 }
 
@@ -73,7 +64,7 @@ export default function TruckLane({ truck, onResizeDelivery, onCancel, onRestore
   const packed = packedStops(allStops);
   const rowCount = Math.max(1, packed.reduce((max, stop) => Math.max(max, stop._row + 1), 1));
   const laneHeight = Math.max(118, rowCount * 94 + 24);
-  const minutesPerPixel = laneWidth ? 540 / laneWidth : 1;
+  const minutesPerPixel = laneWidth ? WORK_MINUTES / laneWidth : 1;
 
   return (
     <div className="grid grid-cols-[10rem_1fr] border-b border-[#e8e5df] last:border-b-0" style={{ minHeight: laneHeight }}>

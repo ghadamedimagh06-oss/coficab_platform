@@ -307,6 +307,21 @@ CREATE TABLE IF NOT EXISTS planning_change_log (
 CREATE INDEX IF NOT EXISTS idx_pcl_version ON planning_change_log(plan_version_id);
 
 -- ---------------------------------------------------------------------------
+-- Dispatch notification log (driver mission brief attempts)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS notification_log (
+    id           SERIAL PRIMARY KEY,
+    mission_id   INTEGER NOT NULL REFERENCES plan_mission(id),
+    chauffeur_id INTEGER NOT NULL REFERENCES chauffeurs(id),
+    status       VARCHAR(20) NOT NULL,
+    error        TEXT,
+    body         TEXT,
+    sent_at      TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notification_mission ON notification_log(mission_id);
+CREATE INDEX IF NOT EXISTS idx_notification_sent_at ON notification_log(sent_at);
+
+-- ---------------------------------------------------------------------------
 -- Ingestion log (tracks file-level import operations)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ingestion_logs (

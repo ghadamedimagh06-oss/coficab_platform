@@ -8,6 +8,7 @@ import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
 import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
+import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
 
 const item = {
   hidden: { opacity: 0, y: 20 },
@@ -54,27 +55,12 @@ function mutateDelivery(plan, deliveryId, mapper) {
   };
 }
 
-function toMinutes(value) {
-  if (!value) return 480;
-  const [hours, minutes = 0] = String(value).split(':').map(Number);
-  return hours * 60 + minutes;
-}
-
-function toClock(totalMinutes) {
-  const safe = Math.max(0, Math.min(totalMinutes, 23 * 60 + 59));
-  return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
-}
-
 function deliveryDuration(delivery) {
   return Math.max(30, toMinutes(delivery.eta) - toMinutes(delivery.etd) || 45);
 }
 
 function flattenStops(truck) {
   return (truck.trips || []).flatMap((trip) => trip.stops || []);
-}
-
-function clampMinute(value, min = 480, max = 1020) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function findDelivery(plan, deliveryId) {
@@ -111,19 +97,19 @@ function buildLaneTrip(truckId, stops) {
     const lastEnd = toMinutes(tripStops[tripStops.length - 1].eta);
     return {
       trip_id: `${truckId}-trip-${index + 1}`,
-      depart_at: toClock(Math.max(480, firstStart - 15)),
-      return_at: toClock(Math.min(1020, lastEnd + 15)),
+      depart_at: toClock(Math.max(WORK_START, firstStart - 15)),
+      return_at: toClock(Math.min(WORK_END, lastEnd + 15)),
       stops: tripStops,
     };
   });
 }
 
-function reflowStops(stops, anchorMinute = 480) {
-  let cursor = Math.max(480, anchorMinute);
+function reflowStops(stops, anchorMinute = WORK_START) {
+  let cursor = Math.max(WORK_START, anchorMinute);
   return stops.map((stop, index) => {
     const duration = deliveryDuration(stop);
     const preferred = index === 0 ? cursor : Math.max(cursor, toMinutes(stop.etd));
-    const start = Math.min(preferred, 1020 - duration);
+    const start = Math.min(preferred, WORK_END - duration);
     const end = start + duration;
     cursor = end + 15;
     return { ...stop, etd: toClock(start), eta: toClock(end) };
@@ -162,7 +148,7 @@ export default function GeneratedDailyPlanningPage() {
     regenerate(day);
   }, []);
 
-  function moveDelivery(deliveryId, targetTruckId, targetMinute = 480) {
+  function moveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {
     if (!deliveryId || !plan) return;
     let moved = null;
     const sourceCleared = {
@@ -184,7 +170,7 @@ export default function GeneratedDailyPlanningPage() {
     if (!moved) return;
 
     const duration = deliveryDuration(moved);
-    const normalizedTargetMinute = clampMinute(targetMinute, 480, 1020 - duration);
+    const normalizedTargetMinute = clampMinute(targetMinute, WORK_START, WORK_END - duration);
     const requiredTruck = moved.constraints?.required_truck_id;
     if (requiredTruck && String(requiredTruck) !== String(targetTruckId)) {
       setError(`${moved.client} is fixed to Truck ${requiredTruck}.`);

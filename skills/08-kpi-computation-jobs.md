@@ -2,6 +2,15 @@
 
 > Goal: aggregate raw operational rows into `kpi_journalier` (daily) and `kpi_mensuel` (monthly) snapshots so the dashboard reads pre-computed numbers instead of re-aggregating on every request.
 
+## Current implementation status
+
+Audited and implemented on 2026-06-02:
+- ✅ `backend/app/agents/kpi_jobs.py` runs daily, monthly, and range recompute snapshot upserts.
+- ✅ `backend/app/agents/scheduler.py` schedules `kpi_daily` at 23:30 and `kpi_monthly` on day 1 at 02:00.
+- ✅ `/api/metrics/kpi/snapshot/daily`, `/api/metrics/kpi/snapshot/monthly`, and `/api/metrics/kpi/recompute` are wired.
+- ✅ `backend/scripts/recompute_kpis.py` provides the manual back-fill CLI.
+- ✅ `backend/tests/test_kpi_jobs.py` verifies daily/monthly upserts and duplicate-safe reruns.
+
 ## KPI anchor
 This skill is the **producer** of every number the dashboard renders. If the job is broken, the dashboard lies. If the job is correct, every KPI in skill 01 has a fresh row each day and each month.
 

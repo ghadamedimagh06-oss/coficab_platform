@@ -21,21 +21,21 @@ This folder is the **implementation playbook** for finishing the Coficab AI Tran
 
 | # | Skill | KPI anchor | Status |
 |---|---|---|---|
-| 00 | [Architecture overview](00-architecture-overview.md) | (cross-cutting) | foundation |
-| 01 | [**Scoring system**](01-scoring-system.md) | **all R4 & R5 KPIs** | **anchor** |
-| 02 | [Database schema](02-database-schema.md) | feeds every KPI | foundation |
-| 03 | [Data ingestion](03-data-ingestion.md) | feeds OTD / OTIF / Load Eff | inbound |
-| 04 | [VRPTW optimization](04-vrptw-optimization.md) | Load Eff, Fuel, Logistics Cost | core |
-| 05 | [Plan validation (human-in-the-loop)](05-plan-validation.md) | OTD, Premium Freight | core |
-| 06 | [Driver dispatch & notifications](06-driver-dispatch.md) | OTD, OTIF | execution |
-| 07 | [Incident & alea tracking](07-incident-tracking.md) | Customer Logistics Incidents/MKm | feedback |
-| 08 | [KPI computation jobs](08-kpi-computation-jobs.md) | snapshots all KPIs daily/monthly | feedback |
-| 09 | [Frontend wiring (UI unchanged)](09-frontend-wiring.md) | exposes every KPI to UI | presentation |
-| 10 | [Real-time monitoring](10-realtime-monitoring.md) | OTD risk, incidents | execution |
-| 11 | [Auth & roles](11-auth-and-permissions.md) | (governance) | foundation |
-| 12 | [Testing & verification](12-testing-and-verification.md) | every KPI | quality |
-| 13 | [Collaboration & autonomous merging](13-collaboration-and-merging.md) | protects scoring + UI | governance |
-| 14 | [Generated daily planning (Gantt editor)](14-generated-daily-planning.md) | Load Eff, OTD (edit-time only) | partial — Gantt renders; drag-and-drop / export pending |
+| 00 | [Architecture overview](00-architecture-overview.md) | (cross-cutting) | partial — backend scheduler/modules exist; external `agents/` + `orchestrator/` cleanup still pending |
+| 01 | [**Scoring system**](01-scoring-system.md) | **all R4 & R5 KPIs** | done — all 8 KPI formulas, color bands, seed catalog, and dashboard payload are implemented |
+| 02 | [Database schema](02-database-schema.md) | feeds every KPI | done — Coficab ERD schema, ORM models, KPI seed, and demo seed exist |
+| 03 | [Data ingestion](03-data-ingestion.md) | feeds OTD / OTIF / Load Eff | partial - backend ingestion service, validation, logging, archive, watcher, upload/manual/log/retry endpoints, and focused API tests exist; email ingestion and frontend wiring remain pending |
+| 04 | [VRPTW optimization](04-vrptw-optimization.md) | Load Eff, Fuel, Logistics Cost | done — DB-aware optimizer, legacy UI optimizer, endpoints, and daily agent wrapper exist |
+| 05 | [Plan validation (human-in-the-loop)](05-plan-validation.md) | OTD, Premium Freight | partial — backend impact/reassign/validate/clone/changelog and dispatch trigger are done; frontend wiring remains pending |
+| 06 | [Driver dispatch & notifications](06-driver-dispatch.md) | OTD, OTIF | done — backend dispatch service/routes/log table/mock provider and validation trigger are wired |
+| 07 | [Incident & alea tracking](07-incident-tracking.md) | Customer Logistics Incidents/MKm | partial — backend service/routes/stats and R4-12 feedback are done; frontend incident feed is pending |
+| 08 | [KPI computation jobs](08-kpi-computation-jobs.md) | snapshots all KPIs daily/monthly | done — scheduled daily/monthly jobs, recompute API, snapshot endpoints, CLI, and focused tests exist |
+| 09 | [Frontend wiring (UI unchanged)](09-frontend-wiring.md) | exposes every KPI to UI | partial — API wrapper plus KPI/weekly/fleet hooks exist; several pages still import mock data |
+| 10 | [Real-time monitoring](10-realtime-monitoring.md) | OTD risk, incidents | partial - polling hooks, `/api/tracking/live`, mission status, stop close-out, scheduled monitor auto-incidents, and focused backend tests exist; SSE/GPS v2 remains optional |
+| 11 | [Auth & roles](11-auth-and-permissions.md) | (governance) | partial - JWT/password hashing/login/register, dev role helper, `/me`, admin user list/create/update/deactivate, inactive login rejection, and focused tests exist; full DB-backed route guards remain pending |
+| 12 | [Testing & verification](12-testing-and-verification.md) | every KPI | partial - pytest coverage exists for auth/API/ingestion/optimizer/watchdog/generated planning plus KPI invariants; full end-to-end planning cycle and manual UI checklist remain pending |
+| 13 | [Collaboration & autonomous merging](13-collaboration-and-merging.md) | protects scoring + UI | partial - `.github` PR template, CODEOWNERS, and CI workflow exist; real GitHub handles, branch protection, and a live CI run remain pending |
+| 14 | [Generated daily planning (Gantt editor)](14-generated-daily-planning.md) | Load Eff, OTD (edit-time only) | done — Gantt, drag/drop, resize, cancel/restore, add delivery, constraints, export, and round-trip tests exist |
 
 ---
 

@@ -8,10 +8,7 @@ import {
 } from '@dnd-kit/core';
 import TimeAxis from './TimeAxis';
 import TruckLane from './TruckLane';
-
-const WORK_START = 480;
-const WORK_MINUTES = 540;
-const SNAP_MINUTES = 15;
+import { WORK_START, WORK_MINUTES, SNAP_MINUTES } from './timeline';
 
 function snappedMinuteFromDrag(event) {
   const overRect = event.over?.rect;

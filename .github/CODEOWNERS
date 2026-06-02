@@ -1,0 +1,22 @@
+# Default: project owner
+* @ghada
+
+# KPI scoring system - data steward only
+/backend/app/services/kpi_service.py @data-steward
+/backend/app/agents/kpi_jobs.py @data-steward
+/database/seed_kpi_definitions.sql @data-steward
+/skills/01-scoring-system.md @data-steward
+/skills/reference/kpi-formulas.md @data-steward
+
+# Schema - backend lead + data steward
+/database/schema.sql @backend-lead @data-steward
+/backend/app/models/ @backend-lead
+
+# Frontend visual identity - UI lead
+/frontend/tailwind.config.js @ui-lead
+/frontend/app/globals.css @ui-lead
+/frontend/components/layout/ @ui-lead
+/skills/reference/ui-conventions.md @ui-lead
+
+# Skills folder - owner + affected discipline
+/skills/ @ghada

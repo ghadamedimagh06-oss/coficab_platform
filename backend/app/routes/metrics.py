@@ -3,13 +3,19 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_optional
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, require_role
 from app.services.kpi_service import KpiService
 
 router = APIRouter()
+
+
+class KpiRecomputeRequest(BaseModel):
+    start: date
+    end: date
 
 
 @router.get("/kpi")
@@ -27,6 +33,87 @@ async def get_kpi(
     svc = KpiService(db)
     kpis = svc.get_dashboard_kpis(ref_date)
     return {"kpis": kpis}
+
+
+@router.get("/kpi/snapshot/daily")
+async def get_daily_snapshot(
+    snapshot_date: date = Query(..., alias="date"),
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All materialized KPI values for one day."""
+    from app.models.kpi import KpiDefinition, KpiJournalier
+
+    rows = (
+        db.query(KpiJournalier)
+        .join(KpiDefinition)
+        .filter(KpiJournalier.date_mesure == snapshot_date, KpiJournalier.plant.is_(None))
+        .order_by(KpiDefinition.code)
+        .all()
+    )
+    return {
+        "date": snapshot_date.isoformat(),
+        "kpis": [
+            {
+                "code": row.kpi_def.code,
+                "label": row.kpi_def.nom,
+                "value": float(row.valeur) if row.valeur is not None else None,
+                "unit": row.kpi_def.unite,
+                "color": row.color,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/kpi/snapshot/monthly")
+async def get_monthly_snapshot(
+    ym: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All materialized KPI values for one month (ym=YYYY-MM)."""
+    from app.models.kpi import KpiDefinition, KpiMensuel
+
+    year, month = (int(part) for part in ym.split("-", 1))
+    rows = (
+        db.query(KpiMensuel)
+        .join(KpiDefinition)
+        .filter(KpiMensuel.annee == year, KpiMensuel.mois == month, KpiMensuel.plant.is_(None))
+        .order_by(KpiDefinition.code)
+        .all()
+    )
+    return {
+        "ym": ym,
+        "kpis": [
+            {
+                "code": row.kpi_def.code,
+                "label": row.kpi_def.nom,
+                "value": float(row.valeur) if row.valeur is not None else None,
+                "unit": row.kpi_def.unite,
+                "target": float(row.target) if row.target is not None else None,
+                "status": row.status.value if hasattr(row.status, "value") else row.status,
+                "color": row.color,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/kpi/recompute")
+async def recompute_kpis(
+    payload: KpiRecomputeRequest,
+    _user: dict = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Backfill KPI daily and monthly snapshots for an inclusive range."""
+    from app.agents.kpi_jobs import recompute
+
+    try:
+        result = recompute(payload.start, payload.end, db=db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "ok", **result}
 
 
 @router.get("/kpi/{code}")

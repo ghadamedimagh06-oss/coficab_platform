@@ -2,6 +2,18 @@
 
 > Goal: let multiple collaborators (humans + AI agents) work on the platform in parallel without breaking the KPI scoring contract or the frozen UI. Define what can merge automatically, what needs a human, and how conflicts get resolved without information loss.
 
+## Current implementation status
+
+Done:
+- `.github/pull_request_template.md` now captures KPI impact, UI impact, merge tier, and rollback plan.
+- `.github/CODEOWNERS` now protects KPI logic, schema, frontend visual identity, and the skills folder with placeholder owners from this skill.
+- `.github/workflows/ci.yml` runs backend tests, a KPI-focused test slice, schema application against Postgres, frontend build, and frontend lint.
+
+Pending:
+- Replace placeholder CODEOWNERS handles (`@ghada`, `@data-steward`, `@backend-lead`, `@ui-lead`) with real GitHub usernames or teams.
+- Configure GitHub branch protection so CODEOWNERS review and green CI are required before merging.
+- Confirm the workflow on GitHub Actions after pushing the branch.
+
 ---
 
 ## Applicability by team size

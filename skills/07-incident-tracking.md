@@ -2,6 +2,16 @@
 
 > Goal: capture every disruption (breakdowns, traffic, refused deliveries, client complaints) into `evenement_alea`, link it to the affected mission/demande, and feed it back into the KPIs.
 
+## Current implementation status
+
+Audited and implemented on 2026-06-02:
+- ✅ `backend/app/services/incident_service.py` logs and resolves incidents through a dedicated service.
+- ✅ `/api/incidents`, `/api/incidents/{id}`, `/api/incidents/{id}/resolve`, and `/api/incidents/stats` are wired.
+- ✅ `PANNE_VEHICULE` cancels the linked mission and `CLIENT_INDISPONIBLE` cancels the linked demande.
+- ✅ `CLIENT_COMPLAINT` feeds R4-12 through the KPI monthly snapshot job.
+- ✅ `backend/tests/test_incidents.py` verifies service side effects, API list/stats/resolve, and R4-12 feedback.
+- ⬜ Frontend incident feed wiring remains pending under skill 09/10.
+
 ## KPI anchor
 - **R4-12 Customer Logistics Incidents / MKm sold** — counts `type='CLIENT_COMPLAINT'`.
 - **R4-02 OTD / R4-06 OTIF** — `impact_delai_min` directly worsens these.

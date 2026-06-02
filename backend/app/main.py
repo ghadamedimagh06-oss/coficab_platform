@@ -21,6 +21,8 @@ from app.routes import (
     delivery_split,
     agents,
     fleet,
+    incidents,
+    dispatch,
 )
 from app.database import engine, Base
 from app.agents.scheduler import start_scheduler
@@ -110,6 +112,8 @@ app.include_router(delivery_split.router, prefix="/api", tags=["delivery-split"]
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(fleet.router, prefix="/api/fleet", tags=["fleet"])
 app.include_router(fleet.clients_router, prefix="/api/clients", tags=["clients"])
+app.include_router(incidents.router, prefix="/api/incidents", tags=["incidents"])
+app.include_router(dispatch.router, prefix="/api/dispatch", tags=["dispatch"])
 
 
 @app.get("/")

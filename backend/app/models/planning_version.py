@@ -28,7 +28,7 @@ class PlanningVersion(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     livraisons = relationship("Livraison", back_populates="planning", cascade="all, delete-orphan")
-    audit_logs = relationship("PlanningChangeLog", back_populates="planning", cascade="all, delete-orphan")
+    audit_logs = relationship("app.models.planning_change_log.PlanningChangeLog", back_populates="planning", cascade="all, delete-orphan")
     diffs = relationship("PlanningDiff", back_populates="planning", cascade="all, delete-orphan")
 
     def __repr__(self):
