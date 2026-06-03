@@ -8,6 +8,7 @@ import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
 import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
+import PlanTable from '../../components/planning/PlanTable';
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
 
 const item = {
@@ -486,6 +487,14 @@ export default function GeneratedDailyPlanningPage() {
           )}
           <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
         </div>
+
+        {plan && (
+          <PlanTable
+            plan={plan}
+            exporting={exporting}
+            onExport={plan?.source_file ? handleExport : null}
+          />
+        )}
       </motion.div>
 
       <AddDeliveryModal
