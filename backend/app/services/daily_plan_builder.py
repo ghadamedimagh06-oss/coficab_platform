@@ -12,10 +12,11 @@ Builds a realistic truck-by-time plan from the weekly-planning workbook:
      split into trips by position capacity, and schedule each stop with its real
      travel time, on-site service time, and Excel time-window constraints.
 
-Each trip records depart_at / return_at = the real depot→first-stop and
-last-stop→depot legs, which the Gantt renders as the red "out of Coficab" bars.
-Customers that are foreign export sites, or that cannot be geocoded, are returned
-as unassigned with a reason rather than being given a fake 30-minute slot.
+Each trip records depart_at / return_at for audit/export only. The Gantt no
+longer turns those values into automatic red bars; dispatchers add manual
+blocking markers when they want to reserve time visually. Customers that are
+foreign export sites, or that cannot be geocoded, are returned as unassigned
+with a reason rather than being given a fake slot.
 """
 
 from __future__ import annotations
@@ -56,7 +57,9 @@ except ImportError:
 class DailyPlanConfig:
     work_start: str = "06:00"      # depots open early for long hauls
     work_end: str = "20:00"
-    service_minutes: int = 20      # realistic on-site (un)loading time
+    service_minutes: int = 20      # minimum on-site setup/(un)loading time
+    service_minutes_per_position: float = 3.0
+    max_service_minutes: int = 120
     reload_minutes: int = 30       # back at depot between trips of one truck
     avg_speed_kmh: float = 55.0    # loaded-truck average over Tunisian roads
 
@@ -105,14 +108,25 @@ class DailyPlanBuilder:
         # servable delivery needs (a 33-pos drop must not steal the 24-truck a
         # 16-pos drop could use).
         max_truck_cap = max(t["capacity_positions"] for t in trucks)
+        max_truck_kg = max(t["capacity_kg"] for t in trucks)
         servable: list[dict[str, Any]] = []
         for d in routable:
-            if float(d.get("quantity_positions") or 0) > max_truck_cap:
+            qty_pos = float(d.get("quantity_positions") or 0)
+            qty_kg = float(d.get("quantity_kg") or 0)
+            if qty_pos > max_truck_cap:
                 unassigned.append({
                     **self._clean_stop(d),
                     "unassigned_reason": (
-                        f"{int(d.get('quantity_positions') or 0)} positions exceeds the largest "
+                        f"{int(qty_pos)} positions exceeds the largest "
                         f"truck ({max_truck_cap}) — needs a delivery split"
+                    ),
+                })
+            elif qty_kg > max_truck_kg:
+                unassigned.append({
+                    **self._clean_stop(d),
+                    "unassigned_reason": (
+                        f"{int(qty_kg)} kg exceeds the largest truck "
+                        f"({int(max_truck_kg)} kg) — needs a delivery split"
                     ),
                 })
             else:
@@ -131,14 +145,22 @@ class DailyPlanBuilder:
             groups = self._assign_to_trucks(servable, trucks)
 
             # Step 5: order + schedule each truck.
+            overflow_all: list[dict[str, Any]] = []
             for truck in trucks:
                 items = groups.get(truck["truck_id"], [])
                 if not items:
                     continue
-                overflow = self._schedule_truck(truck, items, dur_min)
-                for d in overflow:
-                    reason = d.get("unassigned_reason") or "Exceeds working hours"
-                    unassigned.append({**self._clean_stop(d), "unassigned_reason": reason})
+                overflow_all.extend(self._schedule_truck(truck, items, dur_min))
+
+            # Step 6: rescue pass. A truck that finished its zone early (or stayed
+            # idle) can still run an extra depot→drop→depot trip. Place each
+            # overflowed delivery on a truck that can legally carry it (positions
+            # AND weight) and complete the round trip inside the working day and
+            # the customer's time window. This stops servable drops being thrown
+            # away while owned trucks sit idle.
+            for d in self._rescue_overflow(trucks, overflow_all):
+                reason = d.get("unassigned_reason") or "Exceeds working hours"
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": reason})
 
         clean_trucks = [self._clean_truck(t) for t in trucks]
 
@@ -147,6 +169,7 @@ class DailyPlanBuilder:
             "day": day.isoformat(),
             "source_file": source_path.name,
             "generated_at": datetime.utcnow().isoformat() + "Z",
+            "algorithm": "clustered VRPTW scheduler with OR-Tools time-window ordering",
             "depot": {"lat": depot[0], "lon": depot[1]},
             "work_window": {"start": self.cfg.work_start, "end": self.cfg.work_end},
             "selection": selection,
@@ -233,17 +256,24 @@ class DailyPlanBuilder:
         raw = [zone for zone in cluster_zones(latlons, k=k) if zone]
 
         # Largest (heaviest) zone goes to the largest-capacity truck so a big
-        # region needs the fewest trips. Trucks already holding pins go last.
+        # region needs the fewest trips. The rented truck (id 999) is kept as a
+        # last resort even though it is large, so we never pay for a rental while
+        # an owned truck sits idle. Trucks already holding pins go last.
         trucks_sorted = sorted(
             trucks,
-            key=lambda t: (len(groups[t["truck_id"]]) > 0, -t["capacity_positions"]),
+            key=lambda t: (
+                len(groups[t["truck_id"]]) > 0,
+                t["truck_id"] == self.RENTED_TRUCK_ID,
+                -t["capacity_positions"],
+            ),
         )
 
-        def zone_demand(zone: list[dict[str, Any]]) -> tuple[float, float]:
-            qtys = [float(d.get("quantity_positions") or 0) for d in zone]
-            # Largest single delivery first (it dictates the truck size needed),
-            # then total load — so a zone holding a big drop gets a big truck.
-            return (max(qtys, default=0.0), sum(qtys))
+        def zone_demand(zone: list[dict[str, Any]]) -> tuple[float, float, float]:
+            pos = [float(d.get("quantity_positions") or 0) for d in zone]
+            kg = [float(d.get("quantity_kg") or 0) for d in zone]
+            # Hardest single drop first (positions, then kg — it dictates the
+            # truck size needed), then total positions as a tie-breaker.
+            return (max(pos, default=0.0), max(kg, default=0.0), sum(pos))
 
         zones_by_demand = sorted(
             ([free[i] for i in zone] for zone in raw),
@@ -252,15 +282,24 @@ class DailyPlanBuilder:
         )
 
         # Capacity-feasibility-aware assignment: take zones biggest-demand first
-        # and give each the largest still-free truck that can hold its biggest
-        # single delivery, so a zone with a 16-pos drop lands on a ≥16 truck
-        # instead of overflowing a 14-truck.
+        # and give each the best still-free truck that can physically carry its
+        # hardest single drop by BOTH positions and weight, so a heavy or bulky
+        # drop never lands on a truck that cannot legally haul it.
         available = list(trucks_sorted)
         for zone in zones_by_demand:
             if not available:
                 break
-            max_single = max((float(d.get("quantity_positions") or 0) for d in zone), default=0.0)
-            choice = next((t for t in available if t["capacity_positions"] >= max_single), available[0])
+            max_pos = max((float(d.get("quantity_positions") or 0) for d in zone), default=0.0)
+            max_kg = max((float(d.get("quantity_kg") or 0) for d in zone), default=0.0)
+            choice = next(
+                (t for t in available
+                 if t["capacity_positions"] >= max_pos and t["capacity_kg"] >= max_kg),
+                None,
+            )
+            if choice is None:
+                # No remaining truck fits the hardest drop; fall back to the
+                # roomiest one so the scheduler reports the true overflow.
+                choice = max(available, key=lambda t: (t["capacity_kg"], t["capacity_positions"]))
             groups[choice["truck_id"]].extend(zone)
             available.remove(choice)
         return groups
@@ -270,6 +309,9 @@ class DailyPlanBuilder:
     # for the truck to drive back to the depot and run a second trip later.
     LONG_WAIT_SPLIT_MIN = 120
 
+    # The hired truck is only used once every owned vehicle is committed.
+    RENTED_TRUCK_ID = 999
+
     def _schedule_truck(
         self, truck: dict[str, Any], items: list[dict[str, Any]], dur_min: list[list[float]]
     ) -> list[dict[str, Any]]:
@@ -278,23 +320,36 @@ class DailyPlanBuilder:
         wait. Returns the deliveries that did not fit the working day."""
         order = self._order_stops(items, dur_min)
         capacity = truck["capacity_positions"]
+        cap_kg = float(truck["capacity_kg"])
         work_end = self._minutes(self.cfg.work_end)
-        service = self.cfg.service_minutes
 
         cursor = self._minutes(self.cfg.work_start)  # truck free-at-depot time
         overflow: list[dict[str, Any]] = []
 
         trip_stops: list[dict[str, Any]] = []
-        depart_at = cursor
-        load = 0.0
+        depart_at = float(cursor)
+        load = 0.0       # positions on the open trip
+        load_kg = 0.0    # gross weight on the open trip
         t = float(cursor)
         prev = 0  # depot node
 
         def close_trip() -> None:
-            nonlocal cursor
+            nonlocal cursor, trip_stops, load, load_kg, prev, t, depart_at
             if not trip_stops:
                 return
             return_at = t + dur_min[prev][0]
+            if return_at > work_end:
+                overflow.extend({
+                    **stop,
+                    "unassigned_reason": "Trip cannot return before the working day ends",
+                } for stop in trip_stops)
+                trip_stops = []
+                load = 0.0
+                load_kg = 0.0
+                prev = 0
+                t = float(cursor)
+                depart_at = float(cursor)
+                return
             truck["trips"].append({
                 "trip_id": f"{truck['truck_id']}-{len(truck['trips']) + 1}",
                 "depart_at": self._clock(int(round(depart_at))),
@@ -302,18 +357,29 @@ class DailyPlanBuilder:
                 "stops": list(trip_stops),
             })
             cursor = return_at + self.cfg.reload_minutes
+            trip_stops = []
+            load = 0.0
+            load_kg = 0.0
+            prev = 0
+            t = float(cursor)
+            depart_at = float(cursor)
 
         for d in order:
             mi = d["_mi"]
             qty = float(d.get("quantity_positions") or 0)
-            if qty > capacity:
+            qty_kg = float(d.get("quantity_kg") or 0)
+            if qty > capacity or qty_kg > cap_kg:
                 # Servable in principle (it fits a bigger truck), but every
                 # larger truck is already committed to a heavier zone today.
+                limit = (
+                    f"{capacity} positions" if qty > capacity
+                    else f"{int(cap_kg)} kg"
+                )
                 overflow.append({
                     **d,
                     "unassigned_reason": (
-                        f"{qty:.0f} positions needs a truck larger than "
-                        f"{capacity} — all larger trucks are committed today"
+                        f"{qty:.0f} pos / {qty_kg:.0f} kg exceeds this truck's "
+                        f"{limit} — all larger trucks are committed today"
                     ),
                 })
                 continue
@@ -326,9 +392,13 @@ class DailyPlanBuilder:
             arrival = t + dur_min[prev][mi]
             forced_wait = max(0, (win_start - arrival)) if win_start is not None else 0
 
-            if in_trip and (load + qty > capacity or forced_wait > self.LONG_WAIT_SPLIT_MIN):
+            if in_trip and (
+                load + qty > capacity
+                or load_kg + qty_kg > cap_kg
+                or forced_wait > self.LONG_WAIT_SPLIT_MIN
+            ):
                 close_trip()
-                trip_stops, load, prev, in_trip = [], 0.0, 0, False
+                in_trip = False
 
             if not in_trip:
                 # Leaving the depot fresh: depart late enough to roll straight
@@ -344,10 +414,18 @@ class DailyPlanBuilder:
 
             if win_start is not None and arrival < win_start:
                 arrival = float(win_start)
+            service = self._service_minutes(d)
             service_end = arrival + service
 
             if service_end > work_end or (win_end is not None and arrival > win_end):
-                overflow.append(d)
+                overflow.append({
+                    **d,
+                    "unassigned_reason": (
+                        "Outside customer time window"
+                        if win_end is not None and arrival > win_end
+                        else "Exceeds working hours"
+                    ),
+                })
                 continue
 
             trip_stops.append({
@@ -355,13 +433,104 @@ class DailyPlanBuilder:
                 "etd": self._clock(int(round(arrival))),
                 "eta": self._clock(int(round(service_end))),
                 "travel_min": int(round(dur_min[prev][mi])),
+                "service_min": int(round(service)),
             })
             t = service_end
             prev = mi
             load += qty
+            load_kg += qty_kg
 
         close_trip()
         return overflow
+
+    def _rescue_overflow(
+        self, trucks: list[dict[str, Any]], overflow: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Try to place each overflowed delivery on a truck with spare time.
+
+        Builds one extra depot→drop→depot trip per rescued delivery, starting
+        when the chosen truck next becomes free at the depot. A truck is only
+        used if it can carry the drop by BOTH positions and weight and finish the
+        round trip before the working day ends (and inside any time window).
+        Heaviest drops are placed first so they claim the few high-capacity
+        trucks; the smallest adequate, owned truck is preferred so big and hired
+        vehicles stay free for loads that truly need them. Returns the deliveries
+        that still could not be placed."""
+        work_start = self._minutes(self.cfg.work_start)
+        work_end = self._minutes(self.cfg.work_end)
+        speed = self.cfg.avg_speed_kmh
+
+        def free_at(truck: dict[str, Any]) -> int:
+            if truck["trips"]:
+                return self._minutes(truck["trips"][-1]["return_at"]) + self.cfg.reload_minutes
+            return work_start
+
+        still: list[dict[str, Any]] = []
+        ordered = sorted(
+            overflow,
+            key=lambda d: (float(d.get("quantity_kg") or 0), float(d.get("quantity_positions") or 0)),
+            reverse=True,
+        )
+        for d in ordered:
+            qty = float(d.get("quantity_positions") or 0)
+            qty_kg = float(d.get("quantity_kg") or 0)
+            km = d.get("distance_km")
+            if km is None:
+                still.append(d)
+                continue
+            leg = float(km) / speed * 60.0
+            service = self._service_minutes(d)
+            window = d.get("constraints", {}).get("time_window")
+            win_start = self._minutes(window[0]) if window else None
+            win_end = self._minutes(window[1]) if window else None
+
+            candidates = [
+                t for t in trucks
+                if t["capacity_positions"] >= qty and float(t["capacity_kg"]) >= qty_kg
+            ]
+            # Owned before hired, smallest adequate first, then earliest free.
+            candidates.sort(key=lambda t: (
+                t["truck_id"] == self.RENTED_TRUCK_ID,
+                t["capacity_positions"],
+                free_at(t),
+            ))
+
+            placed = False
+            for t in candidates:
+                start = free_at(t)
+                if win_start is not None:
+                    start = max(start, win_start - int(round(leg)))
+                arrival = start + leg
+                if win_start is not None and arrival < win_start:
+                    arrival = float(win_start)
+                service_end = arrival + service
+                return_at = service_end + leg
+                if service_end > work_end or return_at > work_end:
+                    continue
+                if win_end is not None and arrival > win_end:
+                    continue
+                t["trips"].append({
+                    "trip_id": f"{t['truck_id']}-{len(t['trips']) + 1}",
+                    "depart_at": self._clock(int(round(start))),
+                    "return_at": self._clock(int(round(return_at))),
+                    "stops": [{
+                        **self._clean_stop(d),
+                        "etd": self._clock(int(round(arrival))),
+                        "eta": self._clock(int(round(service_end))),
+                        "travel_min": int(round(leg)),
+                        "service_min": int(round(service)),
+                    }],
+                })
+                placed = True
+                break
+            if not placed:
+                still.append(d)
+        return still
+
+    def _service_minutes(self, delivery: dict[str, Any]) -> int:
+        positions = float(delivery.get("quantity_positions") or delivery.get("position_count") or 0)
+        computed = self.cfg.service_minutes + positions * self.cfg.service_minutes_per_position
+        return int(round(min(self.cfg.max_service_minutes, max(self.cfg.service_minutes, computed))))
 
     def _order_stops(
         self, items: list[dict[str, Any]], dur_min: list[list[float]]
@@ -371,10 +540,93 @@ class DailyPlanBuilder:
             return list(items)
         local = [0] + [d["_mi"] for d in items]
         if HAS_ORTOOLS:
+            order_idx = self._ortools_vrptw_order(local, items, dur_min)
+            if order_idx is not None:
+                return [items[i] for i in order_idx]
             order_idx = self._ortools_tsp(local, dur_min)
             if order_idx is not None:
                 return [items[i] for i in order_idx]
         return self._greedy_order(items, dur_min)
+
+    def _ortools_vrptw_order(
+        self,
+        local: list[int],
+        items: list[dict[str, Any]],
+        dur_min: list[list[float]],
+    ) -> Optional[list[int]]:
+        """Single-truck VRPTW ordering: distance objective with time windows.
+
+        Assignment to trucks happens before this method. This solver chooses a
+        feasible order for one truck's zone, respecting delivery time windows
+        where the workbook provides them. The scheduler below still emits the
+        final human-readable arrival/departure times sequentially.
+        """
+        try:
+            n = len(local)
+            manager = pywrapcp.RoutingIndexManager(n, 1, 0)
+            routing = pywrapcp.RoutingModel(manager)
+
+            def distance_cost(from_idx: int, to_idx: int) -> int:
+                gi = local[manager.IndexToNode(from_idx)]
+                gj = local[manager.IndexToNode(to_idx)]
+                return int(dur_min[gi][gj] * 100)
+
+            def transit_time(from_idx: int, to_idx: int) -> int:
+                from_node = manager.IndexToNode(from_idx)
+                gi = local[from_node]
+                gj = local[manager.IndexToNode(to_idx)]
+                service = 0 if gi == 0 else self._service_minutes(items[from_node - 1])
+                return int(round(dur_min[gi][gj] + service))
+
+            cost_cb = routing.RegisterTransitCallback(distance_cost)
+            routing.SetArcCostEvaluatorOfAllVehicles(cost_cb)
+            time_cb = routing.RegisterTransitCallback(transit_time)
+            horizon = self._minutes(self.cfg.work_end)
+            routing.AddDimension(time_cb, horizon, horizon, False, "Time")
+            time_dim = routing.GetDimensionOrDie("Time")
+            time_dim.CumulVar(routing.Start(0)).SetRange(
+                self._minutes(self.cfg.work_start),
+                self._minutes(self.cfg.work_end),
+            )
+            time_dim.CumulVar(routing.End(0)).SetRange(
+                self._minutes(self.cfg.work_start),
+                self._minutes(self.cfg.work_end),
+            )
+
+            for local_pos, delivery in enumerate(items, start=1):
+                index = manager.NodeToIndex(local_pos)
+                window = delivery["constraints"].get("time_window")
+                if window:
+                    start = self._minutes(window[0])
+                    end = self._minutes(window[1])
+                else:
+                    start = self._minutes(self.cfg.work_start)
+                    end = self._minutes(self.cfg.work_end)
+                time_dim.CumulVar(index).SetRange(start, end)
+
+            params = pywrapcp.DefaultRoutingSearchParameters()
+            params.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+            )
+            params.local_search_metaheuristic = (
+                routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+            )
+            params.time_limit.FromSeconds(3)
+            solution = routing.SolveWithParameters(params)
+            if solution is None:
+                return None
+
+            order: list[int] = []
+            idx = routing.Start(0)
+            while not routing.IsEnd(idx):
+                node = manager.IndexToNode(idx)
+                if node != 0:
+                    order.append(node - 1)
+                idx = solution.Value(routing.NextVar(idx))
+            return order
+        except Exception as exc:
+            log.warning("DailyPlanBuilder: OR-Tools VRPTW ordering failed — %s", exc)
+            return None
 
     def _ortools_tsp(
         self, local: list[int], dur_min: list[list[float]]

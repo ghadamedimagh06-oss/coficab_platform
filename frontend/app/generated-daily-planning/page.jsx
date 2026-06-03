@@ -116,6 +116,23 @@ function reflowStops(stops, anchorMinute = WORK_START) {
   });
 }
 
+function normalizeTruckTrips(truck, anchorMinute = null) {
+  const stops = flattenStops(truck).sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
+  if (stops.length === 0) return { ...truck, trips: [] };
+  const firstStart = anchorMinute ?? toMinutes(stops[0].etd);
+  return {
+    ...truck,
+    trips: buildLaneTrip(truck.truck_id, reflowStops(stops, firstStart)),
+  };
+}
+
+function withManualMarkers(plan) {
+  return {
+    ...plan,
+    manual_markers: plan?.manual_markers || [],
+  };
+}
+
 export default function GeneratedDailyPlanningPage() {
   const [day, setDay] = useState(todayIso());
   const [plan, setPlan] = useState(null);
@@ -136,7 +153,7 @@ export default function GeneratedDailyPlanningPage() {
     setError(null);
     try {
       const nextPlan = await generateDailyPlan(nextDay);
-      setPlan(nextPlan);
+      setPlan(withManualMarkers(nextPlan));
       setStatus('ready');
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Unable to generate the daily plan.');
@@ -194,11 +211,14 @@ export default function GeneratedDailyPlanningPage() {
       trucks: sourceCleared.trucks.map((truck) => {
         const stops = flattenStops(truck).sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
         if (String(truck.truck_id) !== String(targetTruckId)) {
-          return { ...truck, trips: buildLaneTrip(truck.truck_id, stops) };
+          return normalizeTruckTrips({ ...truck, trips: buildLaneTrip(truck.truck_id, stops) });
         }
 
         const movedWithTarget = { ...moved, etd: toClock(normalizedTargetMinute), eta: toClock(normalizedTargetMinute + duration) };
-        return { ...truck, trips: buildLaneTrip(truck.truck_id, [...stops, movedWithTarget]) };
+        return normalizeTruckTrips(
+          { ...truck, trips: buildLaneTrip(truck.truck_id, [...stops, movedWithTarget]) },
+          Math.min(normalizedTargetMinute, toMinutes(stops[0]?.etd || movedWithTarget.etd)),
+        );
       }),
     });
   }
@@ -234,7 +254,7 @@ export default function GeneratedDailyPlanningPage() {
             ? { ...stop, etd: toClock(nextStart), eta: toClock(nextEnd) }
             : stop
         ));
-        return { ...truck, trips: buildLaneTrip(truck.truck_id, stops) };
+        return normalizeTruckTrips({ ...truck, trips: buildLaneTrip(truck.truck_id, stops) });
       }),
     });
   }
@@ -275,6 +295,48 @@ export default function GeneratedDailyPlanningPage() {
         };
       }),
     }));
+  }
+
+  function addMarker(targetTruckId, targetMinute) {
+    setPlan((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        manual_markers: [
+          ...(current.manual_markers || []),
+          {
+            id: `marker-${Date.now()}`,
+            truck_id: targetTruckId,
+            time: toClock(clampMinute(targetMinute, WORK_START, WORK_END)),
+            label: 'Manual marker',
+          },
+        ],
+      };
+    });
+  }
+
+  function moveMarker(markerId, targetTruckId, targetMinute) {
+    setPlan((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        manual_markers: (current.manual_markers || []).map((marker) => (
+          String(marker.id) === String(markerId)
+            ? { ...marker, truck_id: targetTruckId, time: toClock(clampMinute(targetMinute, WORK_START, WORK_END)) }
+            : marker
+        )),
+      };
+    });
+  }
+
+  function deleteMarker(markerId) {
+    setPlan((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        manual_markers: (current.manual_markers || []).filter((marker) => String(marker.id) !== String(markerId)),
+      };
+    });
   }
 
   async function handleExport() {
@@ -403,13 +465,24 @@ export default function GeneratedDailyPlanningPage() {
               <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
             </div>
           ) : (
-            <GanttBoard
-              plan={plan}
-              onDropDelivery={moveDelivery}
-              onResizeDelivery={resizeDelivery}
-              onCancel={cancelDelivery}
-              onRestore={restoreDelivery}
-            />
+            // Wrap in a single grid cell: GanttBoard's <DndContext> renders
+            // several sibling nodes (marker toolbar, the scroller, and dnd-kit's
+            // hidden a11y live regions). Without this wrapper those siblings are
+            // auto-placed as separate grid items and the timeline gets squeezed
+            // into the narrow side column. min-w-0 lets the scroller shrink so
+            // its 1800px content stays inside the cell and scrolls horizontally.
+            <div className="min-w-0">
+              <GanttBoard
+                plan={plan}
+                onDropDelivery={moveDelivery}
+                onResizeDelivery={resizeDelivery}
+                onCancel={cancelDelivery}
+                onRestore={restoreDelivery}
+                onDropMarker={addMarker}
+                onMoveMarker={moveMarker}
+                onDeleteMarker={deleteMarker}
+              />
+            </div>
           )}
           <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
         </div>

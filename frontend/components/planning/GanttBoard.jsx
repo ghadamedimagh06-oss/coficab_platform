@@ -3,12 +3,39 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDraggable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
 import TimeAxis from './TimeAxis';
 import TruckLane from './TruckLane';
 import { WORK_START, WORK_MINUTES, SNAP_MINUTES } from './timeline';
+
+function MarkerTool() {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: 'marker-template',
+    data: { markerTemplate: true },
+  });
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    opacity: isDragging ? 0.8 : undefined,
+    zIndex: isDragging ? 40 : undefined,
+  } : undefined;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      className="inline-flex cursor-grab items-center gap-2 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 shadow-sm active:cursor-grabbing"
+      style={{ touchAction: 'none', ...style }}
+    >
+      <span className="h-5 w-3 rounded-sm border border-red-300 bg-[repeating-linear-gradient(135deg,#ef4444_0,#ef4444_3px,#fee2e2_3px,#fee2e2_6px)]" />
+      Manual marker
+    </button>
+  );
+}
 
 function snappedMinuteFromDrag(event) {
   const overRect = event.over?.rect;
@@ -21,7 +48,16 @@ function snappedMinuteFromDrag(event) {
   return WORK_START + Math.round((ratio * WORK_MINUTES) / SNAP_MINUTES) * SNAP_MINUTES;
 }
 
-export default function GanttBoard({ plan, onDropDelivery, onResizeDelivery, onCancel, onRestore }) {
+export default function GanttBoard({
+  plan,
+  onDropDelivery,
+  onResizeDelivery,
+  onCancel,
+  onRestore,
+  onDropMarker,
+  onMoveMarker,
+  onDeleteMarker,
+}) {
   const hasStops = (plan?.trucks || []).some((truck) => (truck.trips || []).some((trip) => (trip.stops || []).length > 0));
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -30,13 +66,30 @@ export default function GanttBoard({ plan, onDropDelivery, onResizeDelivery, onC
 
   function handleDragEnd(event) {
     const targetTruckId = event.over?.data?.current?.truckId;
-    const deliveryId = event.active?.data?.current?.deliveryId;
-    if (!targetTruckId || !deliveryId) return;
-    onDropDelivery(deliveryId, targetTruckId, snappedMinuteFromDrag(event));
+    const activeData = event.active?.data?.current || {};
+    if (!targetTruckId) return;
+    const targetMinute = snappedMinuteFromDrag(event);
+
+    if (activeData.markerTemplate) {
+      onDropMarker?.(targetTruckId, targetMinute);
+      return;
+    }
+
+    if (activeData.markerId) {
+      onMoveMarker?.(activeData.markerId, targetTruckId, targetMinute);
+      return;
+    }
+
+    if (activeData.deliveryId) {
+      onDropDelivery(activeData.deliveryId, targetTruckId, targetMinute);
+    }
   }
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="mb-3 flex justify-end">
+        <MarkerTool />
+      </div>
       <div className="overflow-x-auto rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm">
         <div className="min-w-[1800px]">
           <TimeAxis />
@@ -44,9 +97,11 @@ export default function GanttBoard({ plan, onDropDelivery, onResizeDelivery, onC
             <TruckLane
               key={truck.truck_id}
               truck={truck}
+              markers={plan?.manual_markers || []}
               onResizeDelivery={onResizeDelivery}
               onCancel={onCancel}
               onRestore={onRestore}
+              onDeleteMarker={onDeleteMarker}
             />
           ))}
           {plan && !hasStops && (
