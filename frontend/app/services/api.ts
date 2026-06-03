@@ -1,4 +1,4 @@
-const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8888';
+const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 const debugAPI = process.env.NEXT_PUBLIC_DEBUG_API === 'true';
 
 export function apiUrl(path: string) {
