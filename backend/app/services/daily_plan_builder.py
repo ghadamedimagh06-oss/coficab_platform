@@ -70,10 +70,12 @@ class DailyPlanBuilder:
         source_dir: Path,
         cfg: Optional[DailyPlanConfig] = None,
         geo: Optional[GeoService] = None,
+        trucks: Optional[list[dict[str, Any]]] = None,
     ):
         self.source_dir = source_dir
         self.cfg = cfg or DailyPlanConfig()
         self.geo = geo or GeoService()
+        self.truck_templates = trucks or DEFAULT_TRUCKS
 
     # ------------------------------------------------------------------ build
     def build(self, day: date, source_file: Optional[str] = None) -> dict[str, Any]:
@@ -101,7 +103,7 @@ class DailyPlanBuilder:
             delivery["_table_km"] = loc.get("km")  # authoritative depot distance
             routable.append(delivery)
 
-        trucks = [self._fresh_truck(t) for t in DEFAULT_TRUCKS]
+        trucks = [self._fresh_truck(t) for t in self.truck_templates]
 
         # A single delivery larger than the biggest truck can never be loaded —
         # set these aside up front so they don't consume a large truck that a

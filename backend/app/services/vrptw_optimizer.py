@@ -136,44 +136,120 @@ def cluster_zones(
     return clusters
 
 
+def capacity_aware_cluster(
+    latlons: List[Tuple[float, float]],
+    qtys: List[int],
+    capacities: List[int],
+) -> List[List[int]]:
+    """Build compact geographic clusters while respecting position capacity."""
+    n = len(latlons)
+    k = len(capacities)
+    if n == 0:
+        return [[] for _ in range(k)]
+    if k == 0:
+        return []
+    if k == 1:
+        return [list(range(n))]
+
+    target_fill_pct = 0.80
+
+    def _angle(idx: int) -> float:
+        lat, lon = latlons[idx]
+        return math.atan2(lon - DEPOT_LON, lat - DEPOT_LAT)
+
+    polar_order = sorted(range(n), key=_angle)
+    truck_order = sorted(range(k), key=lambda i: capacities[i], reverse=True)
+    clusters: List[List[int]] = [[] for _ in range(k)]
+    cluster_loads: List[int] = [0] * k
+    assigned = [False] * n
+
+    for truck_rank, ci in enumerate(truck_order):
+        cap = max(0, capacities[ci])
+        if cap <= 0:
+            continue
+        target = max(1, int(cap * target_fill_pct))
+        centroid_lat = DEPOT_LAT
+        centroid_lon = DEPOT_LON
+
+        while cluster_loads[ci] < cap:
+            best_idx = None
+            best_dist = float("inf")
+            for di in polar_order:
+                if assigned[di]:
+                    continue
+                if cluster_loads[ci] + qtys[di] > cap:
+                    continue
+                dist = _haversine_km(
+                    centroid_lat, centroid_lon,
+                    latlons[di][0], latlons[di][1],
+                )
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = di
+
+            if best_idx is None:
+                break
+
+            clusters[ci].append(best_idx)
+            cluster_loads[ci] += qtys[best_idx]
+            assigned[best_idx] = True
+
+            centroid_lat = sum(latlons[j][0] for j in clusters[ci]) / len(clusters[ci])
+            centroid_lon = sum(latlons[j][1] for j in clusters[ci]) / len(clusters[ci])
+
+            remaining_unassigned = sum(1 for value in assigned if not value)
+            trucks_left = k - truck_rank - 1
+            if cluster_loads[ci] >= target and trucks_left > 0 and remaining_unassigned > 0:
+                break
+
+    for di in polar_order:
+        if assigned[di]:
+            continue
+        best_ci = None
+        best_room = -1
+        for ci in range(k):
+            room = capacities[ci] - cluster_loads[ci]
+            if room >= qtys[di] and room > best_room:
+                best_room = room
+                best_ci = ci
+        if best_ci is None:
+            best_ci = min(range(k), key=lambda i: cluster_loads[i])
+        clusters[best_ci].append(di)
+        cluster_loads[best_ci] += qtys[di]
+        assigned[di] = True
+
+    return clusters
+
+
 def _rebalance_for_capacity(
     clusters: List[List[int]],
-    kg_per_point: List[float],
-    capacities_kg: List[float],
+    qty_per_point: List[float],
+    capacities: List[float],
 ) -> Tuple[List[List[int]], List[int]]:
     """
-    If any cluster's total weight exceeds its truck's capacity, move the
+    If any cluster's total quantity exceeds its truck's capacity, move the
     heaviest overflowing node to the least-loaded cluster that has room.
-
-    This preserves spatial compactness: overflow nodes go to the nearest
-    feasible zone rather than an arbitrary one (callers should sort clusters
-    by centroid proximity before passing, but correctness holds either way).
-
-    Returns (rebalanced_clusters, unassigned_positions) where unassigned_positions
-    are 0-indexed positions in the original kg_per_point list that could not
-    fit any truck.
     """
     unassigned: List[int] = []
-    default_cap = capacities_kg[-1] if capacities_kg else float("inf")
+    default_cap = capacities[-1] if capacities else float("inf")
 
-    for _ in range(len(kg_per_point) * 2):
+    for _ in range(len(qty_per_point) * 2):
         changed = False
         for ci, cluster in enumerate(clusters):
-            cap = capacities_kg[ci] if ci < len(capacities_kg) else default_cap
-            total = sum(kg_per_point[j] for j in cluster)
+            cap = capacities[ci] if ci < len(capacities) else default_cap
+            total = sum(qty_per_point[j] for j in cluster)
             if total <= cap:
                 continue
             changed = True
-            # Evict the heaviest node
-            heaviest_local = max(range(len(cluster)), key=lambda x: kg_per_point[cluster[x]])
+            heaviest_local = max(range(len(cluster)), key=lambda x: qty_per_point[cluster[x]])
             node = cluster.pop(heaviest_local)
-            node_kg = kg_per_point[node]
+            node_qty = qty_per_point[node]
             placed = False
             for other_ci, other_cluster in enumerate(clusters):
                 if other_ci == ci:
                     continue
-                other_cap = capacities_kg[other_ci] if other_ci < len(capacities_kg) else default_cap
-                if sum(kg_per_point[j] for j in other_cluster) + node_kg <= other_cap:
+                other_cap = capacities[other_ci] if other_ci < len(capacities) else default_cap
+                if sum(qty_per_point[j] for j in other_cluster) + node_qty <= other_cap:
                     other_cluster.append(node)
                     placed = True
                     break
@@ -266,12 +342,30 @@ class VrptwOptimizer:
             raise ValueError(f"No pending demandes for {day}")
 
         # Build node list — node 0 = depot, nodes 1..N = deliveries
-        nodes = self._build_nodes(demandes)
+        valid_demandes = []
+        for demande in demandes:
+            positions = self._get_positions(demande)
+            if positions <= 0:
+                log.warning(
+                    "Demande %s skipped: positions=%s",
+                    getattr(demande, "id", "?"),
+                    positions,
+                )
+                continue
+            valid_demandes.append(demande)
+
+        if not valid_demandes:
+            raise ValueError(f"All demandes for {day} have zero positions")
+
+        nodes = self._build_nodes(valid_demandes)
         delivery_idx = list(range(1, len(nodes)))  # 1-indexed positions in nodes[]
 
         # Step 2: geographic clustering
         latlons = [(nodes[i]["lat"], nodes[i]["lon"]) for i in delivery_idx]
-        raw_clusters = cluster_zones(latlons, k=len(trucks))
+        qtys = [int(nodes[i]["qty"]) for i in delivery_idx]
+        trucks_sorted = sorted(trucks, key=self._get_truck_capacity, reverse=True)
+        capacities = [self._get_truck_capacity(t) for t in trucks_sorted]
+        raw_clusters = capacity_aware_cluster(latlons, qtys, capacities)
         # Convert 0-indexed latlons positions → 1-indexed nodes positions
         node_clusters = [
             [delivery_idx[j] for j in zone]
@@ -279,11 +373,13 @@ class VrptwOptimizer:
         ]
 
         # Step 3: capacity rebalancing
-        kg_per_delivery = [nodes[i]["kg"] for i in delivery_idx]
-        capacities = [float(t.capacite_kg) for t in trucks]
         # Convert to 0-indexed delivery positions for rebalancer
         flat = [[j - 1 for j in zone] for zone in node_clusters]
-        flat, unassigned_flat = _rebalance_for_capacity(flat, kg_per_delivery, capacities)
+        flat, unassigned_flat = _rebalance_for_capacity(
+            flat,
+            [nodes[i]["qty"] for i in delivery_idx],
+            [float(c) for c in capacities],
+        )
         node_clusters = [[j + 1 for j in zone] for zone in flat]
 
         if unassigned_flat:
@@ -293,16 +389,10 @@ class VrptwOptimizer:
                 len(unassigned_flat), skipped,
             )
 
-        # Step 4: assign heaviest zone to largest truck
-        trucks_sorted = sorted(trucks, key=lambda t: float(t.capacite_kg), reverse=True)
-        cluster_weights = sorted(
-            [(sum(nodes[i]["kg"] for i in zone), zone) for zone in node_clusters if zone],
-            key=lambda x: x[0],
-            reverse=True,
-        )
         assignments = [
-            (trucks_sorted[idx % len(trucks_sorted)], zone)
-            for idx, (_, zone) in enumerate(cluster_weights)
+            (trucks_sorted[idx], zone)
+            for idx, zone in enumerate(node_clusters)
+            if idx < len(trucks_sorted) and zone
         ]
 
         dist_m = self._build_dist_matrix(nodes)
@@ -319,7 +409,7 @@ class VrptwOptimizer:
             statut_plan=StatutPlan.DRAFT,
             commentaire=(
                 f"VrptwOptimizer — {len(assignments)} zones, "
-                f"{len(demandes)} demandes, zone-isolated routes"
+                f"{len(valid_demandes)} demandes, zone-isolated routes"
             ),
         )
         self.db.add(version)
@@ -334,9 +424,11 @@ class VrptwOptimizer:
             if not ordered:
                 continue
 
+            total_qty = sum(nodes[i]["qty"] for i in ordered)
             total_kg = sum(nodes[i]["kg"] for i in ordered)
             total_km = self._route_km(ordered, dist_m)
-            load_pct = round(total_kg / float(truck.capacite_kg) * 100, 2)
+            truck_capacity = float(self._get_truck_capacity(truck))
+            load_pct = round(total_qty / truck_capacity * 100, 2) if truck_capacity else 0.0
             fuel_rate = float(truck.consommation_base_l_100km or FUEL_L_PER_100KM)
             fuel_l = total_km * fuel_rate / 100.0
             cost_transport = round(total_km * 1.20, 2)  # €1.20/km baseline
@@ -350,7 +442,8 @@ class VrptwOptimizer:
                 mode=ModeMission.NORMAL,
                 km_parcourus=round(total_km, 2),
                 charge_kg=round(total_kg, 2),
-                load_eff_kg_pct=load_pct,
+                charge_palettes=int(total_qty),
+                load_eff_pallets_pct=load_pct,
                 load_eff_pct=load_pct,
                 fuel_consomme_l=round(fuel_l, 2),
                 cout_transport_eur=cost_transport,
@@ -371,6 +464,32 @@ class VrptwOptimizer:
         return version
 
     # ---------------------------------------------------------------- helpers
+
+    @staticmethod
+    def _get_positions(demande: Any) -> int:
+        for attr in ("nb_positions", "nombre_palettes", "positions"):
+            val = getattr(demande, attr, None)
+            if val is not None:
+                try:
+                    return max(0, int(float(val)))
+                except (TypeError, ValueError):
+                    return 0
+        return 0
+
+    @staticmethod
+    def _get_truck_capacity(truck: Any) -> int:
+        for attr in ("max_palettes", "nombre_palettes", "capacite_palettes", "nb_palettes"):
+            val = getattr(truck, attr, None)
+            if val is not None:
+                try:
+                    return max(1, int(float(val)))
+                except (TypeError, ValueError):
+                    break
+        log.warning(
+            "Truck %s has no palette capacity field; defaulting to 33",
+            getattr(truck, "id", "?"),
+        )
+        return 33
 
     def _solve_zone(
         self,
@@ -414,11 +533,11 @@ class VrptwOptimizer:
         routing.SetArcCostEvaluatorOfAllVehicles(cost_cb_idx)
 
         def demand_cb(idx: int) -> int:
-            return int(nodes[local_to_global[manager.IndexToNode(idx)]]["kg"])
+            return int(nodes[local_to_global[manager.IndexToNode(idx)]]["qty"])
 
         dem_idx = routing.RegisterUnaryTransitCallback(demand_cb)
         routing.AddDimensionWithVehicleCapacity(
-            dem_idx, 0, [int(float(truck.capacite_kg))], True, "Capacity"
+            dem_idx, 0, [self._get_truck_capacity(truck)], True, "Capacity"
         )
 
         def time_cb(from_idx: int, to_idx: int) -> int:
@@ -429,14 +548,19 @@ class VrptwOptimizer:
             return travel + service
 
         time_cb_idx = routing.RegisterTransitCallback(time_cb)
-        horizon = self.cfg.work_window_hours * 60
-        routing.AddDimension(time_cb_idx, 30, horizon, False, "Time")
+        routing.AddDimension(time_cb_idx, 30, SHIFT_END_MIN, False, "Time")
         time_dim = routing.GetDimensionOrDie("Time")
+        time_dim.CumulVar(routing.Start(0)).SetRange(SHIFT_START_MIN, SHIFT_END_MIN)
+        time_dim.CumulVar(routing.End(0)).SetRange(SHIFT_START_MIN, SHIFT_END_MIN)
 
         for local_i, global_i in enumerate(local_to_global):
             if local_i == 0:
                 continue
             start, end = nodes[global_i]["window"]
+            start = max(start, SHIFT_START_MIN)
+            end = min(end, SHIFT_END_MIN)
+            if end < start:
+                end = start
             time_dim.CumulVar(manager.NodeToIndex(local_i)).SetRange(start, end)
 
         params = pywrapcp.DefaultRoutingSearchParameters()
@@ -487,7 +611,8 @@ class VrptwOptimizer:
             "lat": self.cfg.depot_lat,
             "lon": self.cfg.depot_lon,
             "kg": 0.0,
-            "window": (0, self.cfg.work_window_hours * 60),
+            "qty": 0,
+            "window": (SHIFT_START_MIN, SHIFT_END_MIN),
             "demande": None,
             "demande_id": None,
         }]
@@ -503,9 +628,14 @@ class VrptwOptimizer:
                 c.fenetre_fermeture.hour * 60 + c.fenetre_fermeture.minute
                 if c.fenetre_fermeture else SHIFT_END_MIN
             )
+            start = max(start, SHIFT_START_MIN)
+            end = min(end, SHIFT_END_MIN)
+            if end < start:
+                end = start
             nodes.append({
                 "lat": lat,
                 "lon": lon,
+                "qty": self._get_positions(d),
                 "kg": float(d.quantite_kg),
                 "window": (start, end),
                 "demande": d,
@@ -562,13 +692,15 @@ class VRPTWOptimizer:
     def optimize(self) -> Dict[str, Any]:
         cost_before = self._calculate_before_cost()
 
-        # Pre-check oversized deliveries
+        zero_qty: List[Dict] = []
         self._oversized_deliveries: List[Dict] = []
         max_capacity = max((int(t.get("capacity", 0)) for t in self.trucks), default=0)
         filtered = []
         for d in self.deliveries:
-            q = int(float(d.get("quantity", 0))) if d.get("quantity") is not None else 0
-            if q > max_capacity > 0:
+            q = self._delivery_qty(d)
+            if q <= 0:
+                zero_qty.append(d)
+            elif q > max_capacity > 0:
                 self._oversized_deliveries.append(d)
             else:
                 filtered.append(d)
@@ -580,16 +712,16 @@ class VRPTWOptimizer:
             try:
                 result = self._optimize_with_ortools()
                 result["status"] = "success"
-                result["algorithm"] = "OR-Tools VRPTW (zone-clustered)"
+                result["algorithm"] = "OR-Tools VRPTW (zone-clustered, positions)"
             except Exception as exc:
                 log.error("OR-Tools optimization failed: %s — falling back to greedy", exc)
                 result = self._optimize_greedy()
                 result["status"] = "success"
-                result["algorithm"] = "Greedy VRPTW (zone-clustered)"
+                result["algorithm"] = "Greedy VRPTW (zone-clustered, positions)"
         else:
             result = self._optimize_greedy()
             result["status"] = "success"
-            result["algorithm"] = "Greedy VRPTW (zone-clustered)"
+            result["algorithm"] = "Greedy VRPTW (zone-clustered, positions)"
 
         total_after = result["costs"].get("total_cost", 0.0)
         savings = round(cost_before - total_after, 2)
@@ -601,13 +733,22 @@ class VRPTWOptimizer:
         result["costs"]["savings_percent"] = savings_pct
         result["current_routes"] = self.current_routes
 
+        if zero_qty:
+            result.setdefault("skipped_zero_qty", []).extend(zero_qty)
+            result.setdefault("suggestions", []).append({
+                "type": "ZERO_QTY",
+                "severity": "warning",
+                "message": f"{len(zero_qty)} delivery row(s) ignored because positions = 0.",
+                "action": "Check position/palette quantity in the planning data.",
+            })
+
         if self._oversized_deliveries:
             result.setdefault("unassigned", []).extend(self._oversized_deliveries)
             result.setdefault("suggestions", []).append({
                 "type": "CAPACITY",
                 "severity": "high",
                 "message": (
-                    "Some deliveries exceed the maximum truck capacity and were not assigned: "
+                    "Some deliveries exceed the maximum truck position capacity and were not assigned: "
                     + ", ".join(
                         str(d.get("row_number") or d.get("id") or d.get("customer"))
                         for d in self._oversized_deliveries
@@ -634,7 +775,11 @@ class VRPTWOptimizer:
             (float(d.get("lat", DEPOT_LAT)), float(d.get("lng", DEPOT_LON)))
             for d in self.deliveries
         ]
-        zone_clusters = cluster_zones(latlons, k=len(self.trucks))
+        zone_clusters = capacity_aware_cluster(
+            latlons,
+            [self._delivery_qty(d) for d in self.deliveries],
+            [int(t.get("capacity", 33)) for t in self.trucks],
+        )
         # Map: 0-indexed delivery position → zone index (= truck index)
         delivery_to_zone: Dict[int, int] = {}
         for zone_idx, zone in enumerate(zone_clusters):
@@ -671,7 +816,7 @@ class VRPTWOptimizer:
 
         def demand_cb(from_idx: int) -> int:
             node = manager.IndexToNode(from_idx)
-            return 0 if node == 0 else int(float(self.deliveries[node - 1].get("quantity", 0)))
+            return 0 if node == 0 else self._delivery_qty(self.deliveries[node - 1])
 
         demand_idx = routing.RegisterUnaryTransitCallback(demand_cb)
         routing.AddDimensionWithVehicleCapacity(
@@ -689,7 +834,7 @@ class VRPTWOptimizer:
             return travel + service
 
         time_cb_idx = routing.RegisterTransitCallback(time_cb)
-        routing.AddDimension(time_cb_idx, 1020, 1020, False, "Time")
+        routing.AddDimension(time_cb_idx, 30, SHIFT_END_MIN, False, "Time")
         time_dim = routing.GetDimensionOrDie("Time")
 
         for pos, delivery in enumerate(self.deliveries):
@@ -697,6 +842,10 @@ class VRPTWOptimizer:
             index = manager.NodeToIndex(node_idx)
             earliest = int(delivery.get("earliest_time", SHIFT_START_MIN))
             latest = int(delivery.get("latest_time", SHIFT_END_MIN))
+            earliest = max(earliest, SHIFT_START_MIN)
+            latest = min(latest, SHIFT_END_MIN)
+            if latest < earliest:
+                latest = earliest
             time_dim.CumulVar(index).SetRange(earliest, latest)
             routing.AddDisjunction([index], 10000)
 
@@ -750,7 +899,11 @@ class VRPTWOptimizer:
             (float(d.get("lat", DEPOT_LAT)), float(d.get("lng", DEPOT_LON)))
             for d in self.deliveries
         ]
-        zone_clusters = cluster_zones(latlons, k=len(self.trucks))
+        zone_clusters = capacity_aware_cluster(
+            latlons,
+            [self._delivery_qty(d) for d in self.deliveries],
+            [int(t.get("capacity", 33)) for t in self.trucks],
+        )
 
         routes: List[Dict] = []
         all_unassigned: List[Dict] = []
@@ -760,11 +913,11 @@ class VRPTWOptimizer:
             # Sort zone deliveries by quantity descending for best bin-packing
             zone_deliveries = sorted(
                 [self.deliveries[j] for j in zone_pos],
-                key=lambda x: float(x.get("quantity", 0)),
+                key=self._delivery_qty,
                 reverse=True,
             )
             remaining = list(zone_deliveries)
-            capacity = int(truck.get("capacity", 10000))
+            capacity = int(truck.get("capacity", 33))
 
             for trip_idx in range(trips_per_truck):
                 if not remaining:
@@ -783,20 +936,36 @@ class VRPTWOptimizer:
                 total_quantity = 0
                 assigned_indices: List[int] = []
 
-                for idx in range(len(remaining) - 1, -1, -1):
-                    delivery = remaining[idx]
-                    quantity = float(delivery.get("quantity", 0))
-                    if total_quantity + quantity > capacity:
-                        continue
+                open_indices = list(range(len(remaining)))
+                while open_indices:
+                    best_idx = None
+                    best_dist = float("inf")
+                    for idx in open_indices:
+                        delivery = remaining[idx]
+                        quantity = self._delivery_qty(delivery)
+                        if total_quantity + quantity > capacity:
+                            continue
+                        lat = float(delivery.get("lat", DEPOT_LAT))
+                        lng = float(delivery.get("lng", DEPOT_LON))
+                        dist = _haversine_km(prev_lat, prev_lng, lat, lng)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_idx = idx
 
+                    if best_idx is None:
+                        break
+
+                    delivery = remaining[best_idx]
+                    quantity = self._delivery_qty(delivery)
                     lat = float(delivery.get("lat", DEPOT_LAT))
                     lng = float(delivery.get("lng", DEPOT_LON))
-                    dist = _haversine_km(prev_lat, prev_lng, lat, lng)
-                    travel_time = int(dist / DEFAULT_SPEED_KMH * 60)
+                    travel_time = int(best_dist / DEFAULT_SPEED_KMH * 60)
                     current_time += travel_time
 
-                    earliest = int(delivery.get("earliest_time", SHIFT_START_MIN))
-                    latest = int(delivery.get("latest_time", SHIFT_END_MIN))
+                    earliest = max(int(delivery.get("earliest_time", SHIFT_START_MIN)), SHIFT_START_MIN)
+                    latest = min(int(delivery.get("latest_time", SHIFT_END_MIN)), SHIFT_END_MIN)
+                    if latest < earliest:
+                        latest = earliest
                     if current_time < earliest:
                         status = "EARLY"
                         current_time = earliest
@@ -812,13 +981,14 @@ class VRPTWOptimizer:
                         "arrival_time": current_time,
                         "departure_time": departure,
                         "status": status,
-                        "quantity": int(quantity),
+                        "quantity": quantity,
                     })
                     current_time = departure
-                    total_distance += dist
-                    total_quantity += int(quantity)
+                    total_distance += best_dist
+                    total_quantity += quantity
                     prev_lat, prev_lng = lat, lng
-                    assigned_indices.append(idx)
+                    assigned_indices.append(best_idx)
+                    open_indices.remove(best_idx)
 
                 for idx in sorted(assigned_indices, reverse=True):
                     remaining.pop(idx)
@@ -837,7 +1007,7 @@ class VRPTWOptimizer:
                         "end_time": current_time,
                         "total_distance": round(total_distance, 2),
                         "total_cost": round(50.0 + total_distance * 0.5, 2),
-                        "utilization_percent": round(total_quantity / capacity * 100, 1),
+                        "utilization_percent": round(total_quantity / capacity * 100, 1) if capacity else 0,
                     })
 
             all_unassigned.extend(remaining)
@@ -846,9 +1016,20 @@ class VRPTWOptimizer:
 
     # ---------------------------------------------------------------- shared
 
+    @staticmethod
+    def _delivery_qty(delivery: Dict[str, Any]) -> int:
+        for key in ("nb_positions", "positions", "quantity", "position_count"):
+            val = delivery.get(key)
+            if val is not None:
+                try:
+                    return max(0, int(float(val)))
+                except (TypeError, ValueError):
+                    return 0
+        return 0
+
     def _build_vehicle_instances(self) -> List[Dict[str, Any]]:
-        total_qty = sum(int(float(d.get("quantity", 0))) for d in self.deliveries)
-        total_cap = sum(int(t.get("capacity", 10000)) for t in self.trucks) or 1
+        total_qty = sum(self._delivery_qty(d) for d in self.deliveries)
+        total_cap = sum(int(t.get("capacity", 33)) for t in self.trucks) or 1
         trips_needed = max(1, math.ceil(total_qty / total_cap))
         trips_per_truck = min(MAX_TRIPS_PER_TRUCK, trips_needed)
 
@@ -858,7 +1039,7 @@ class VRPTWOptimizer:
                 instances.append({
                     "truck_id": truck.get("id"),
                     "truck_type": truck.get("type"),
-                    "capacity": int(truck.get("capacity", 10000)),
+                    "capacity": int(truck.get("capacity", 33)),
                     "trip_number": trip_idx + 1,
                 })
         return instances
@@ -883,7 +1064,7 @@ class VRPTWOptimizer:
     ) -> Dict[str, Any]:
         total_distance = sum(r.get("total_distance", 0) for r in routes)
         total_cost = sum(r.get("total_cost", 0) for r in routes)
-        total_weight = sum(
+        total_positions = sum(
             sum(float(s.get("quantity", 0)) for s in r.get("stops", []))
             for r in routes
         )
@@ -898,7 +1079,7 @@ class VRPTWOptimizer:
                 "type": "EMPTY_PLAN",
                 "severity": "warning",
                 "message": "No route could be planned with the available trucks.",
-                "action": "Check delivery quantities, truck capacities, and time windows.",
+                "action": "Check delivery positions, truck capacities, and time windows.",
             })
         if unassigned:
             suggestions.append({
@@ -923,7 +1104,8 @@ class VRPTWOptimizer:
             "metrics": {
                 "total_routes": len(routes),
                 "total_deliveries": sum(len(r.get("stops", [])) for r in routes),
-                "total_weight": int(total_weight),
+                "total_positions": int(total_positions),
+                "total_weight": int(total_positions),
                 "total_distance": round(total_distance, 2),
                 "total_time_minutes": sum(
                     r.get("end_time", 0) - r.get("start_time", 0) for r in routes
@@ -955,14 +1137,16 @@ class VRPTWOptimizer:
                 node = manager.IndexToNode(index)
                 if node > 0:
                     delivery = self.deliveries[node - 1]
-                    quantity = float(delivery.get("quantity", 0))
+                    quantity = self._delivery_qty(delivery)
                     lat = float(delivery.get("lat", DEPOT_LAT))
                     lng = float(delivery.get("lng", DEPOT_LON))
                     dist = _haversine_km(prev_lat, prev_lng, lat, lng)
                     arrival = solution.Value(time_dim.CumulVar(index))
                     departure = arrival + SERVICE_TIME_MINUTES
-                    earliest = int(delivery.get("earliest_time", SHIFT_START_MIN))
-                    latest = int(delivery.get("latest_time", SHIFT_END_MIN))
+                    earliest = max(int(delivery.get("earliest_time", SHIFT_START_MIN)), SHIFT_START_MIN)
+                    latest = min(int(delivery.get("latest_time", SHIFT_END_MIN)), SHIFT_END_MIN)
+                    if latest < earliest:
+                        latest = earliest
                     status = "EARLY" if arrival < earliest else ("LATE" if arrival > latest else "OK")
                     stops.append({
                         "client_id": delivery.get("id"),
@@ -970,10 +1154,10 @@ class VRPTWOptimizer:
                         "arrival_time": arrival,
                         "departure_time": departure,
                         "status": status,
-                        "quantity": int(quantity),
+                        "quantity": quantity,
                     })
                     total_distance += dist
-                    route_qty += int(quantity)
+                    route_qty += quantity
                     prev_lat, prev_lng = lat, lng
                     assigned_ids.add(delivery.get("id"))
                 index = solution.Value(routing.NextVar(index))

@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Truck, CheckCircle, BarChart3 } from 'lucide-react';
 import { trucks as initialTrucks } from '../../data/coficabData';
+import { useFleet } from '../../hooks/useFleet';
+import { updateTruckStatus } from '../services/api';
 
 const statsAnimation = {
   hidden: { opacity: 0, y: 16 },
@@ -19,11 +21,50 @@ const statusStyles = {
   'En maintenance': 'bg-[#fef3c7] text-[#b45309]',
 };
 
-export default function VehiclesPage() {
-  const [trucks, setTrucks] = useState(initialTrucks);
+const apiToStatus = {
+  DISPONIBLE: 'Disponible',
+  EN_MISSION: 'En route',
+  PANNE: 'En panne',
+  MAINTENANCE: 'En maintenance',
+};
 
-  const handleStatusChange = (truckId, status) => {
-    setTrucks((prev) => prev.map((truck) => (truck.id === truckId ? { ...truck, status } : truck)));
+const statusToApi = {
+  Disponible: 'DISPONIBLE',
+  'En route': 'EN_MISSION',
+  'En panne': 'PANNE',
+  'En maintenance': 'MAINTENANCE',
+};
+
+function normalizeTruck(truck) {
+  return {
+    id: truck.id,
+    plate_number: truck.plate_number,
+    type: truck.type,
+    capacity: truck.capacity ?? truck.capacite_kg ?? 0,
+    max_pallets: truck.max_pallets ?? truck.max_palettes ?? 0,
+    status: apiToStatus[truck.status] || truck.status || 'Disponible',
+  };
+}
+
+export default function VehiclesPage() {
+  const { trucks: apiTrucks, mutate } = useFleet();
+  const [trucks, setTrucks] = useState(initialTrucks.map(normalizeTruck));
+
+  useEffect(() => {
+    if (apiTrucks.length) {
+      setTrucks(apiTrucks.map(normalizeTruck));
+    }
+  }, [apiTrucks]);
+
+  const handleStatusChange = async (truckId, status) => {
+    const previous = trucks.find((truck) => String(truck.id) === String(truckId))?.status || 'Disponible';
+    setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status } : truck)));
+    try {
+      await updateTruckStatus(truckId, statusToApi[status] || status);
+      mutate?.();
+    } catch {
+      setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status: previous } : truck)));
+    }
   };
 
   const summary = useMemo(

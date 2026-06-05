@@ -93,7 +93,7 @@ export default function DailyPlanningPage() {
       })[0] || todayName;
       setSelectedDay((current) => (current && counts[current] ? current : defaultDay));
     } catch {
-      setError('Unable to load planning data from file. Showing last known state.');
+      setError('Unable to load planning data from the application. Showing last known state.');
       setAllDeliveries([]);
       setDayCounts({});
       setSelectedDay(todayName);
@@ -151,7 +151,7 @@ export default function DailyPlanningPage() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Daily Planning</p>
               <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Good morning, Ghada</h1>
-              <p className="mt-2 text-sm leading-6 text-[#6b6b7b]">Your delivery plan for the day, refreshed automatically from the planning file.</p>
+              <p className="mt-2 text-sm leading-6 text-[#6b6b7b]">Your delivery plan for the day, refreshed automatically from application data.</p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -329,7 +329,7 @@ export default function DailyPlanningPage() {
 
               {deliveries.length > 0 && !loading && (
                 <div className="border-t border-[#e8e5df] px-6 py-4 text-xs text-[#9e9eaa]">
-                  {deliveries.length} deliveries shown · Data from <span className="font-medium text-[#6b6b7b]">weekly planning/</span> folder · auto-refreshes every {REFRESH_INTERVAL}s
+                  {deliveries.length} deliveries shown · Data from <span className="font-medium text-[#6b6b7b]">application database</span> with workbook fallback · auto-refreshes every {REFRESH_INTERVAL}s
                 </div>
               )}
             </motion.div>

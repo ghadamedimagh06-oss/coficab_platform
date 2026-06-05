@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 import datetime
 
 from app.routes import (
@@ -90,9 +91,14 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:3003",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
+        "http://127.0.0.1:3003",
     ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,12 +135,38 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """System health check"""
-    db_status = "connected" if engine else "disconnected"
+    db = _database_health()
     return {
         "status": "healthy",
-        "database": db_status,
+        "database": db["status"],
+        "database_details": db,
         "timestamp": datetime.datetime.now().isoformat()
     }
+
+
+@app.get("/api/health/database")
+async def database_health_check():
+    return _database_health()
+
+
+def _database_health():
+    if not engine:
+        return {"status": "disconnected", "ok": False, "tables": [], "error": "engine unavailable"}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        required = {"camions", "chauffeurs", "clients", "demandes_local", "plan_version"}
+        missing = sorted(required - set(tables))
+        return {
+            "status": "connected" if not missing else "degraded",
+            "ok": not missing,
+            "table_count": len(tables),
+            "missing_tables": missing,
+        }
+    except Exception as exc:
+        return {"status": "disconnected", "ok": False, "tables": [], "error": str(exc)}
 
 
 if __name__ == "__main__":

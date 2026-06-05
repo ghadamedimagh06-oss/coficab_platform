@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agent4_monitor")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8000")
+TFM_API_URL = os.environ.get("TFM_API_URL", "").strip()
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
@@ -44,23 +45,60 @@ def publish_event(channel: str, payload: Optional[Dict] = None) -> None:
 
 
 def get_tracking_status() -> List[Dict]:
-    endpoints = [
+    endpoints = []
+    if TFM_API_URL:
+        endpoints.extend([
+            TFM_API_URL.rstrip("/"),
+            f"{TFM_API_URL.rstrip('/')}/tracking",
+            f"{TFM_API_URL.rstrip('/')}/api/tracking",
+        ])
+    endpoints.extend([
+        f"{BACKEND_URL}/api/tracking/map-data",
         f"{BACKEND_URL}/api/tracking/status",
         f"{BACKEND_URL}/api/data/transports",
-    ]
+    ])
 
     for endpoint in endpoints:
         try:
             response = requests.get(endpoint, timeout=20)
             response.raise_for_status()
             payload = response.json()
-            if isinstance(payload, list):
-                return payload
-            if isinstance(payload, dict) and payload.get("transports"):
-                return payload["transports"]
+            items = extract_tracking_items(payload)
+            if items:
+                return items
         except Exception as exc:
             logger.debug("Tracking endpoint failed %s: %s", endpoint, exc)
 
+    return []
+
+
+def extract_tracking_items(payload) -> List[Dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+
+    for key in ("tracking_data", "items", "transports", "data", "vehicles"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return [item for item in value.values() if isinstance(item, dict)]
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+
+    active = payload.get("active_missions")
+    if isinstance(active, list):
+        return [
+            {
+                "id": item.get("id"),
+                "transport_id": item.get("id"),
+                "status": item.get("status"),
+                "eta": item.get("next_eta"),
+                "distance_remaining": None,
+                "location": item.get("location"),
+            }
+            for item in active
+            if isinstance(item, dict)
+        ]
     return []
 
 

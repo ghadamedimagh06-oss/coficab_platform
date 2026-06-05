@@ -45,6 +45,10 @@ function put(path: string, payload: any) {
   return request(path, { method: 'PUT', body: JSON.stringify(payload) });
 }
 
+function patch(path: string, payload: any) {
+  return request(path, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
 export async function getKpi() {
   return get('/api/metrics/kpi');
 }
@@ -59,17 +63,29 @@ export async function getTransports() {
 }
 
 export async function getDailyPlanning(day: string) {
-  const data = await get(`/api/data/transports?day=${encodeURIComponent(day)}&limit=200&force_file=true`);
+  const data = await get(`/api/data/transports?day=${encodeURIComponent(day)}&limit=200`);
   return data.transports || data;
 }
 
 export async function getDailyPlanningFromFile() {
-  const data = await get('/api/data/transports?limit=1000&force_file=true');
+  const data = await get('/api/data/transports?limit=1000');
   return data.transports || data;
 }
 
 export async function getDailyPlanningFileResponse() {
-  return get('/api/data/transports?limit=1000&force_file=true');
+  return get('/api/data/transports?limit=1000');
+}
+
+export async function getFleetTrucks() {
+  return get('/api/fleet/trucks');
+}
+
+export async function getFleetDrivers() {
+  return get('/api/fleet/drivers');
+}
+
+export async function updateTruckStatus(truckId: number | string, status: string) {
+  return patch(`/api/fleet/trucks/${truckId}/status`, { status });
 }
 
 export async function getAgentStatus() {

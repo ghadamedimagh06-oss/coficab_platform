@@ -332,9 +332,12 @@ async def generate_planning(request: PlanningGenerateRequest):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @daily_router.post("/generate")
-async def generate_daily_plan(request: DailyGenerateRequest):
+async def generate_daily_plan(
+    request: DailyGenerateRequest,
+    db: Optional[Session] = Depends(get_db_optional),
+):
     try:
-        builder = DailyPlanBuilder(WEEKLY_DIR)
+        builder = DailyPlanBuilder(WEEKLY_DIR, trucks=_available_trucks_for_daily_plan(db))
         return builder.build(day=_parse_day(request.day), source_file=request.source_file)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -369,3 +372,31 @@ async def download_daily_plan(file_name: str):
 
 def _parse_day(raw: str) -> _date:
     return _date.fromisoformat(raw)
+
+
+def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dict[str, Any]]]:
+    if not db:
+        return None
+    try:
+        from app.models.camion import Camion, CamionStatus
+
+        rows = (
+            db.query(Camion)
+            .filter(Camion.status == CamionStatus.DISPONIBLE)
+            .order_by(Camion.max_palettes.desc(), Camion.id.asc())
+            .all()
+        )
+        if not rows:
+            return None
+        return [
+            {
+                "truck_id": truck.id,
+                "truck_label": truck.plate_number,
+                "capacity_positions": int(truck.max_palettes or 0),
+                "capacity_kg": float(truck.capacite_kg or 0),
+            }
+            for truck in rows
+            if (truck.max_palettes or 0) > 0
+        ] or None
+    except Exception:
+        return None

@@ -29,7 +29,7 @@ export type FleetUtilization = {
 };
 
 export function useFleet() {
-  const { data: trucks, error: trucksError, isLoading: trucksLoading } = useSWR<Truck[]>(
+  const { data: trucks, error: trucksError, isLoading: trucksLoading, mutate } = useSWR<Truck[]>(
     "/api/fleet/trucks",
     fetcher,
     { refreshInterval: 120_000 }
@@ -44,6 +44,7 @@ export function useFleet() {
     utilization,
     error: trucksError ?? utilError,
     isLoading: trucksLoading,
+    mutate,
   };
 }
 

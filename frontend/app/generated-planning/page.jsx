@@ -14,7 +14,8 @@ import {
   TrendingDown,
   Truck,
 } from 'lucide-react';
-import { trucks, getClientPosition } from '../../data/coficabData';
+import { getClientPosition, trucks as fallbackTrucks } from '../../data/coficabData';
+import { useFleet } from '../../hooks/useFleet';
 import { generatePlanning, getDailyPlanningFileResponse } from '../services/api';
 
 const container = {
@@ -85,6 +86,7 @@ function emptyPlan() {
 }
 
 export default function GeneratedPlanningPage() {
+  const { trucks: fleetTrucks } = useFleet();
   const [plan, setPlan] = useState(null);
   const [rows, setRows] = useState([]);
   const [days, setDays] = useState([]);
@@ -97,14 +99,19 @@ export default function GeneratedPlanningPage() {
   const sourceLabel = sourceMeta?.file_name || sourceMeta?.source_file || 'weekly planning workbook';
 
   const activeTrucks = useMemo(() => (
-    trucks
-      .filter((truck) => truck.status !== 'En panne' && truck.status !== 'En maintenance')
+    (fleetTrucks.length ? fleetTrucks : fallbackTrucks)
+      .filter((truck) => {
+        const status = truck.status;
+        return !['PANNE', 'MAINTENANCE', 'En panne', 'En maintenance'].includes(status);
+      })
       .map((truck) => ({
         id: truck.id,
         type: truck.type,
-        capacity: Number.isFinite(Number(truck.max_pallets)) ? Number(truck.max_pallets) : Number(truck.capacity),
+        capacity: Number.isFinite(Number(truck.max_palettes ?? truck.max_pallets))
+          ? Number(truck.max_palettes ?? truck.max_pallets)
+          : Number(truck.capacity ?? 33),
       }))
-  ), []);
+  ), [fleetTrucks]);
 
   async function buildPlan(sourceRows, day) {
     setLoading(true);

@@ -5,7 +5,6 @@ import {
   Home,
   CalendarDays,
   FileText,
-  BookOpen,
   Compass,
   Globe2,
   BarChart3,
@@ -23,7 +22,6 @@ const mainNavItems = [
   { icon: CalendarDays, label: 'Planning', href: '/planning' },
   { icon: FileText, label: 'Daily Planning', href: '/daily-planning' },
   { icon: Wand2, label: 'Generated Planning', href: '/generated-daily-planning' },
-  { icon: BookOpen, label: 'Ressources', href: '/ressources' },
   { icon: Compass, label: 'Map', href: '/map' },
 ];
 

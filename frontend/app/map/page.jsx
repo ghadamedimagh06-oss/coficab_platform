@@ -10,13 +10,14 @@ import { clients as initialClients, getClientPosition } from '../../data/coficab
 
 const TruckMap = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
 
-const mapClients = initialClients.map((client, index) => {
+const fallbackMapClients = initialClients.map((client, index) => {
   const [lat, lng] = getClientPosition(client.destination, index);
   return { ...client, lat, lng };
 });
 
 export default function MapPage() {
   const [tracking, setTracking] = useState([]);
+  const [mapClients, setMapClients] = useState(fallbackMapClients);
   const [chatMessages, setChatMessages] = useState([]);
 
   useEffect(() => {
@@ -25,6 +26,9 @@ export default function MapPage() {
         const live = await getLiveTracking();
         const items = live?.tracking_data ? Object.values(live.tracking_data) : live || [];
         setTracking(items);
+        if (Array.isArray(live?.clients) && live.clients.length) {
+          setMapClients(live.clients);
+        }
         setChatMessages((prev) => [
           'Real-time truck positions refreshed. Click a marker for ETA and status details.',
           ...prev,

@@ -10,6 +10,7 @@ from app.agents.monitor import SLA_TOLERANCE_MIN
 from app.models.demande import StatutDemande
 from app.models.plan import MissionDemande, PlanMission, StatutMission
 from app.models.transport_tracking import TransportTracking
+from app.models.client import Client
 from app.services.auth_service import require_role
 
 router = APIRouter()
@@ -23,8 +24,8 @@ class DeliveredIn(BaseModel):
 async def get_live_tracking(db: Session = Depends(get_db_optional)):
     """Return recent tracking records (last 100)."""
     if not db:
-        return {"tracking_data": [], "count": 0, "source": "offline"}
-    records = db.query(TransportTracking).order_by(TransportTracking.id.desc()).limit(100).all()
+        return {"tracking_data": [], "count": 0, "source": "offline", "clients": []}
+    records = _tracking_records(db)
     result = []
     for r in records:
         try:
@@ -45,6 +46,24 @@ async def get_live_tracking(db: Session = Depends(get_db_optional)):
         "count": len(result),
         "active_missions": active_missions,
         "mission_count": len(active_missions),
+        "clients": _client_markers(db),
+        "source": "database",
+    }
+
+
+@router.get("/status")
+async def get_tracking_status(db: Session = Depends(get_db_optional)):
+    """Compatibility endpoint for Agent 4 tracking polling."""
+    return await get_live_tracking(db)
+
+
+@router.get("/map-data")
+async def get_map_data(db: Session = Depends(get_db_optional)):
+    """Return the map-ready tracking/client payload from application data."""
+    payload = await get_live_tracking(db)
+    return {
+        **payload,
+        "source": payload.get("source", "database"),
     }
 
 
@@ -160,6 +179,32 @@ def _active_missions(db: Session) -> list[dict[str, Any]]:
         .all()
     )
     return [_mission_summary(mission) for mission in missions]
+
+
+def _tracking_records(db: Session) -> list[TransportTracking]:
+    return db.query(TransportTracking).order_by(TransportTracking.id.desc()).limit(100).all()
+
+
+def _client_markers(db: Session) -> list[dict[str, Any]]:
+    clients = (
+        db.query(Client)
+        .filter(Client.latitude.isnot(None), Client.longitude.isnot(None))
+        .order_by(Client.nom)
+        .limit(200)
+        .all()
+    )
+    return [
+        {
+            "id": client.id,
+            "customer": client.nom,
+            "destination": client.city or client.address or client.nom,
+            "lat": float(client.latitude),
+            "lng": float(client.longitude),
+            "latitude": float(client.latitude),
+            "longitude": float(client.longitude),
+        }
+        for client in clients
+    ]
 
 
 def _mission_status(mission: PlanMission) -> dict[str, Any]:
