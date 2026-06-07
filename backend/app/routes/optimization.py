@@ -43,6 +43,7 @@ class RouteOptimization(BaseModel):
 class DailyGenerateRequest(BaseModel):
     day: str
     source_file: Optional[str] = None
+    trucks: Optional[List[Dict[str, Any]]] = None
 
 
 class DailyExportRequest(BaseModel):
@@ -337,7 +338,8 @@ async def generate_daily_plan(
     db: Optional[Session] = Depends(get_db_optional),
 ):
     try:
-        builder = DailyPlanBuilder(WEEKLY_DIR, trucks=_available_trucks_for_daily_plan(db))
+        trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+        builder = DailyPlanBuilder(WEEKLY_DIR, trucks=trucks)
         return builder.build(day=_parse_day(request.day), source_file=request.source_file)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

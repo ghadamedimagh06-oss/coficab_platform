@@ -10,6 +10,13 @@ import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
 import PlanTable from '../../components/planning/PlanTable';
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
+import { trucks as fallbackTrucks } from '../../data/coficabData';
+import { useFleet } from '../../hooks/useFleet';
+import {
+  applyTruckStatusOverrides,
+  normalizeTruckStatus,
+  UNAVAILABLE_TRUCK_STATUSES,
+} from '../../utils/truckStatus';
 
 const item = {
   hidden: { opacity: 0, y: 20 },
@@ -134,7 +141,24 @@ function withManualMarkers(plan) {
   };
 }
 
+function toDailyTruckPayload(truck) {
+  const status = normalizeTruckStatus(truck.status);
+  if (UNAVAILABLE_TRUCK_STATUSES.has(status)) return null;
+
+  const capacityPositions = Number(truck.capacity_positions ?? truck.max_palettes ?? truck.max_pallets ?? 0);
+  const capacityKg = Number(truck.capacity_kg ?? truck.capacite_kg ?? truck.capacity ?? 0);
+  if (!capacityPositions) return null;
+
+  return {
+    truck_id: truck.id ?? truck.truck_id,
+    truck_label: truck.plate_number || truck.truck_label || `Truck ${truck.id ?? truck.truck_id}`,
+    capacity_positions: capacityPositions,
+    capacity_kg: capacityKg,
+  };
+}
+
 export default function GeneratedDailyPlanningPage() {
+  const { trucks: apiTrucks } = useFleet();
   const [day, setDay] = useState(todayIso());
   const [plan, setPlan] = useState(null);
   const [status, setStatus] = useState('idle');
@@ -149,11 +173,17 @@ export default function GeneratedDailyPlanningPage() {
     unassigned: plan?.unassigned?.length || 0,
   }), [plan]);
 
+  const activeTrucks = useMemo(() => (
+    applyTruckStatusOverrides(apiTrucks.length ? apiTrucks : fallbackTrucks)
+      .map(toDailyTruckPayload)
+      .filter(Boolean)
+  ), [apiTrucks]);
+
   async function regenerate(nextDay = day) {
     setStatus('generating');
     setError(null);
     try {
-      const nextPlan = await generateDailyPlan(nextDay);
+      const nextPlan = await generateDailyPlan(nextDay, undefined, activeTrucks);
       setPlan(withManualMarkers(nextPlan));
       setStatus('ready');
     } catch (err) {

@@ -6,33 +6,19 @@ import { Truck, CheckCircle, BarChart3 } from 'lucide-react';
 import { trucks as initialTrucks } from '../../data/coficabData';
 import { useFleet } from '../../hooks/useFleet';
 import { updateTruckStatus } from '../services/api';
+import {
+  applyTruckStatusOverrides,
+  canSyncTruckStatus,
+  normalizeTruckStatus,
+  TRUCK_STATUS_OPTIONS,
+  TRUCK_STATUS_STYLES,
+  TRUCK_STATUS_TO_API,
+  writeTruckStatusOverride,
+} from '../../utils/truckStatus';
 
 const statsAnimation = {
   hidden: { opacity: 0, y: 16 },
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
-};
-
-const statusOptions = ['Disponible', 'En route', 'En panne', 'En maintenance'];
-
-const statusStyles = {
-  Disponible: 'bg-[#ecfdf5] text-[#15803d]',
-  'En route': 'bg-[#eff6ff] text-[#2563eb]',
-  'En panne': 'bg-[#fee2e2] text-[#dc2626]',
-  'En maintenance': 'bg-[#fef3c7] text-[#b45309]',
-};
-
-const apiToStatus = {
-  DISPONIBLE: 'Disponible',
-  EN_MISSION: 'En route',
-  PANNE: 'En panne',
-  MAINTENANCE: 'En maintenance',
-};
-
-const statusToApi = {
-  Disponible: 'DISPONIBLE',
-  'En route': 'EN_MISSION',
-  'En panne': 'PANNE',
-  'En maintenance': 'MAINTENANCE',
 };
 
 function normalizeTruck(truck) {
@@ -42,36 +28,42 @@ function normalizeTruck(truck) {
     type: truck.type,
     capacity: truck.capacity ?? truck.capacite_kg ?? 0,
     max_pallets: truck.max_pallets ?? truck.max_palettes ?? 0,
-    status: apiToStatus[truck.status] || truck.status || 'Disponible',
+    status: normalizeTruckStatus(truck.status),
   };
 }
 
 export default function VehiclesPage() {
   const { trucks: apiTrucks, mutate } = useFleet();
-  const [trucks, setTrucks] = useState(initialTrucks.map(normalizeTruck));
+  const [trucks, setTrucks] = useState(() => applyTruckStatusOverrides(initialTrucks.map(normalizeTruck)));
 
   useEffect(() => {
     if (apiTrucks.length) {
-      setTrucks(apiTrucks.map(normalizeTruck));
+      setTrucks(applyTruckStatusOverrides(apiTrucks.map(normalizeTruck)));
     }
   }, [apiTrucks]);
 
   const handleStatusChange = async (truckId, status) => {
-    const previous = trucks.find((truck) => String(truck.id) === String(truckId))?.status || 'Disponible';
-    setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status } : truck)));
+    const nextStatus = normalizeTruckStatus(status);
+    writeTruckStatusOverride(truckId, nextStatus);
+    setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status: nextStatus } : truck)));
+
+    if (!canSyncTruckStatus(truckId)) {
+      return;
+    }
+
     try {
-      await updateTruckStatus(truckId, statusToApi[status] || status);
+      await updateTruckStatus(truckId, TRUCK_STATUS_TO_API[nextStatus] || nextStatus);
       mutate?.();
     } catch {
-      setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status: previous } : truck)));
+      // Manual status still stays visible when the database/API is offline.
     }
   };
 
   const summary = useMemo(
     () => ({
       total: trucks.length,
-      active: trucks.filter((truck) => truck.status === 'En route').length,
-      available: trucks.filter((truck) => truck.status === 'Disponible').length,
+      active: trucks.filter((truck) => truck.status === 'In transit').length,
+      available: trucks.filter((truck) => truck.status === 'Available').length,
     }),
     [trucks]
   );
@@ -140,9 +132,9 @@ export default function VehiclesPage() {
                 <select
                   value={truck.status}
                   onChange={(event) => handleStatusChange(truck.id, event.target.value)}
-                  className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold ${statusStyles[truck.status] || 'bg-white text-[#1a1a2e]'}`}
+                  className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-[#1a1a2e]'}`}
                 >
-                  {statusOptions.map((status) => (
+                  {TRUCK_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>{status}</option>
                   ))}
                 </select>

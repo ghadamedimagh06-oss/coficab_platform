@@ -71,6 +71,14 @@ temp/
 dump.rdb
 .env.*.local
 
+# Local delivery example files
+deleviry examples/
+delivery examples/
+
+# Microsoft Office temporary lock files
+~$*
+**/~$*
+
 # Database
 *.db
 *.sqlite

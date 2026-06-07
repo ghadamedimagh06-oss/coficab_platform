@@ -84,14 +84,14 @@ export function getClientPosition(destination, index = 0) {
 }
 
 export const trucks = [
-  { id: 'Camion001', plate_number: '2282TU131', type: 'Poids lourd', capacity: 10200, max_pallets: 14, assigned_driver: 'Chauf001', status: 'Disponible' },
-  { id: 'Camion002', plate_number: '9524TU238', type: 'Poids lourd', capacity: 10230, max_pallets: 14, assigned_driver: 'Chauf002', status: 'Disponible' },
-  { id: 'Camion003', plate_number: '5735TU217', type: 'Poids lourd', capacity: 9227, max_pallets: 14, assigned_driver: 'Chauf003', status: 'Disponible' },
-  { id: 'Camion004', plate_number: '4331TU175', type: 'Poids lourd', capacity: 9200, max_pallets: 14, assigned_driver: 'Chauf004', status: 'Disponible' },
-  { id: 'Camion005', plate_number: 'REM107627', type: 'Semi remorque', capacity: 24950, max_pallets: 24, assigned_driver: 'Chauf005', status: 'Disponible' },
-  { id: 'Camion006', plate_number: '626TU203', type: 'Tourisme', capacity: 7650, max_pallets: 14, assigned_driver: 'Chauf006', status: 'Disponible' },
-  { id: 'Camion007', plate_number: '7797TU218', type: 'Poids lourd', capacity: 925, max_pallets: 4, assigned_driver: 'Chauf007', status: 'Disponible' },
-  { id: 'Camion008', plate_number: '6502TU247', type: 'Poids lourd', capacity: 8500, max_pallets: 14, assigned_driver: null, status: 'Disponible' },
+  { id: 'Camion001', plate_number: '2282TU131', type: 'Poids lourd', capacity: 10200, max_pallets: 14, assigned_driver: 'Chauf001', status: 'Available' },
+  { id: 'Camion002', plate_number: '9524TU238', type: 'Poids lourd', capacity: 10230, max_pallets: 14, assigned_driver: 'Chauf002', status: 'Available' },
+  { id: 'Camion003', plate_number: '5735TU217', type: 'Poids lourd', capacity: 9227, max_pallets: 14, assigned_driver: 'Chauf003', status: 'Available' },
+  { id: 'Camion004', plate_number: '4331TU175', type: 'Poids lourd', capacity: 9200, max_pallets: 14, assigned_driver: 'Chauf004', status: 'Available' },
+  { id: 'Camion005', plate_number: 'REM107627', type: 'Semi remorque', capacity: 24950, max_pallets: 24, assigned_driver: 'Chauf005', status: 'Available' },
+  { id: 'Camion006', plate_number: '626TU203', type: 'Tourisme', capacity: 7650, max_pallets: 14, assigned_driver: 'Chauf006', status: 'Available' },
+  { id: 'Camion007', plate_number: '7797TU218', type: 'Poids lourd', capacity: 925, max_pallets: 4, assigned_driver: 'Chauf007', status: 'Available' },
+  { id: 'Camion008', plate_number: '6502TU247', type: 'Poids lourd', capacity: 8500, max_pallets: 14, assigned_driver: null, status: 'Available' },
 ];
 
 export const drivers = [

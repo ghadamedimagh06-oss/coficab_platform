@@ -9,31 +9,18 @@ import IconBubble from '../../components/icons/IconBubble';
 import { drivers as initialDrivers, trucks as initialTrucks } from '../../data/coficabData';
 import { useDrivers, useFleet } from '../../hooks/useFleet';
 import { updateTruckStatus } from '../services/api';
+import {
+  applyTruckStatusOverrides,
+  canSyncTruckStatus,
+  normalizeTruckStatus,
+  TRUCK_STATUS_OPTIONS,
+  TRUCK_STATUS_STYLES,
+  TRUCK_STATUS_TO_API,
+  writeTruckStatusOverride,
+} from '../../utils/truckStatus';
 
 const statusOptions = ['Active', 'En pause', 'En route'];
 const shiftOptions = ['Jour', 'Nuit'];
-const truckStatusOptions = ['Disponible', 'En route', 'En panne', 'En maintenance'];
-
-const apiToTruckStatus = {
-  DISPONIBLE: 'Disponible',
-  EN_MISSION: 'En route',
-  PANNE: 'En panne',
-  MAINTENANCE: 'En maintenance',
-};
-
-const truckStatusToApi = {
-  Disponible: 'DISPONIBLE',
-  'En route': 'EN_MISSION',
-  'En panne': 'PANNE',
-  'En maintenance': 'MAINTENANCE',
-};
-
-const truckStatusStyles = {
-  Disponible: 'bg-[#ecfdf5] text-[#15803d]',
-  'En route': 'bg-[#eff6ff] text-[#2563eb]',
-  'En panne': 'bg-[#fee2e2] text-[#dc2626]',
-  'En maintenance': 'bg-[#fef3c7] text-[#b45309]',
-};
 
 function normalizeTruck(truck) {
   return {
@@ -43,7 +30,7 @@ function normalizeTruck(truck) {
     capacity: truck.capacity ?? truck.capacite_kg ?? 0,
     max_pallets: truck.max_pallets ?? truck.max_palettes ?? 0,
     assigned_driver: truck.assigned_driver ?? truck.chauffeur_defaut_id ?? null,
-    status: apiToTruckStatus[truck.status] || truck.status || 'Disponible',
+    status: normalizeTruckStatus(truck.status),
   };
 }
 
@@ -76,11 +63,11 @@ export default function RessourcesPage() {
     'La page Ressources est prête. Gérez l’affectation chauffeurs / camions et les statuts en un seul endroit.',
   ]);
   const [drivers, setDrivers] = useState(initialDrivers.map(normalizeDriver));
-  const [trucks, setTrucks] = useState(initialTrucks.map(normalizeTruck));
+  const [trucks, setTrucks] = useState(() => applyTruckStatusOverrides(initialTrucks.map(normalizeTruck)));
 
   useEffect(() => {
     if (apiTrucks.length) {
-      setTrucks(apiTrucks.map(normalizeTruck));
+      setTrucks(applyTruckStatusOverrides(apiTrucks.map(normalizeTruck)));
     }
   }, [apiTrucks]);
 
@@ -102,10 +89,10 @@ export default function RessourcesPage() {
   const truckSummary = useMemo(
     () => ({
       total: trucks.length,
-      disponible: trucks.filter((truck) => truck.status === 'Disponible').length,
-      enPanne: trucks.filter((truck) => truck.status === 'En panne').length,
-      enMaintenance: trucks.filter((truck) => truck.status === 'En maintenance').length,
-      enRoute: trucks.filter((truck) => truck.status === 'En route').length,
+      available: trucks.filter((truck) => truck.status === 'Available').length,
+      brokenDown: trucks.filter((truck) => truck.status === 'Broken down').length,
+      maintenance: trucks.filter((truck) => truck.status === 'Maintenance').length,
+      inTransit: trucks.filter((truck) => truck.status === 'In transit').length,
       assigned: trucks.filter((truck) => truck.assigned_driver).length,
     }),
     [trucks]
@@ -122,15 +109,20 @@ export default function RessourcesPage() {
   };
 
   const handleTruckStatusChange = async (truckId, status) => {
-    const previous = trucks.find((truck) => String(truck.id) === String(truckId))?.status || 'Disponible';
-    setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status } : truck)));
-    setChatMessages((prev) => [`Statut de ${truckId} mis a jour : ${status}.`, ...prev.slice(0, 4)]);
+    const nextStatus = normalizeTruckStatus(status);
+    writeTruckStatusOverride(truckId, nextStatus);
+    setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status: nextStatus } : truck)));
+    setChatMessages((prev) => [`Truck ${truckId} status updated: ${nextStatus}.`, ...prev.slice(0, 4)]);
+
+    if (!canSyncTruckStatus(truckId)) {
+      return;
+    }
+
     try {
-      await updateTruckStatus(truckId, truckStatusToApi[status] || status);
+      await updateTruckStatus(truckId, TRUCK_STATUS_TO_API[nextStatus] || nextStatus);
       mutateFleet?.();
     } catch {
-      setTrucks((prev) => prev.map((truck) => (String(truck.id) === String(truckId) ? { ...truck, status: previous } : truck)));
-      setChatMessages((prev) => [`Impossible de synchroniser ${truckId} avec la base de donnees.`, ...prev.slice(0, 4)]);
+      setChatMessages((prev) => [`Truck ${truckId} was updated locally; database sync is unavailable.`, ...prev.slice(0, 4)]);
     }
   };
 
@@ -163,7 +155,7 @@ export default function RessourcesPage() {
   };
 
   const availableDrivers = drivers.filter((driver) => !driver.assigned_truck);
-  const availableTrucks = trucks.filter((truck) => !truck.assigned_driver);
+  const availableTrucks = trucks.filter((truck) => !truck.assigned_driver && truck.status === 'Available');
 
   return (
     <div className="p-8 min-h-screen bg-[#eef2f7]">
@@ -204,8 +196,8 @@ export default function RessourcesPage() {
             whileHover={{ y: -3, boxShadow: '0 4px 20px rgba(15,23,42,0.12)' }}
             className="rounded-[1.75rem] bg-white p-6 border border-[#e5e7eb] shadow-sm"
           >
-            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">Disponible</p>
-            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.disponible}</p>
+            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">Available</p>
+            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.available}</p>
             <p className="mt-3 text-sm text-[#6b7280]">Camions prêts pour départ immédiat.</p>
           </motion.div>
 
@@ -214,8 +206,8 @@ export default function RessourcesPage() {
             whileHover={{ y: -3, boxShadow: '0 4px 20px rgba(15,23,42,0.12)' }}
             className="rounded-[1.75rem] bg-white p-6 border border-[#e5e7eb] shadow-sm"
           >
-            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">En panne</p>
-            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.enPanne}</p>
+            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">Broken down</p>
+            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.brokenDown}</p>
             <p className="mt-3 text-sm text-[#6b7280]">Camions nécessitant une intervention.</p>
           </motion.div>
 
@@ -224,8 +216,8 @@ export default function RessourcesPage() {
             whileHover={{ y: -3, boxShadow: '0 4px 20px rgba(15,23,42,0.12)' }}
             className="rounded-[1.75rem] bg-white p-6 border border-[#e5e7eb] shadow-sm"
           >
-            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">En maintenance</p>
-            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.enMaintenance}</p>
+            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">Maintenance</p>
+            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.maintenance}</p>
             <p className="mt-3 text-sm text-[#6b7280]">Entretien et vérifications en cours.</p>
           </motion.div>
 
@@ -234,8 +226,8 @@ export default function RessourcesPage() {
             whileHover={{ y: -3, boxShadow: '0 4px 20px rgba(15,23,42,0.12)' }}
             className="rounded-[1.75rem] bg-white p-6 border border-[#e5e7eb] shadow-sm"
           >
-            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">En route</p>
-            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.enRoute}</p>
+            <p className="text-sm uppercase tracking-[0.18em] text-[#6b7280]">In transit</p>
+            <p className="mt-4 text-4xl font-semibold text-[#111827]">{truckSummary.inTransit}</p>
             <p className="mt-3 text-sm text-[#6b7280]">Camions actifs sur la route.</p>
           </motion.div>
         </motion.div>
@@ -344,9 +336,9 @@ export default function RessourcesPage() {
                 <h2 className="text-2xl font-semibold text-[#111827]">Camions</h2>
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <span className="rounded-full bg-[#fef3c7] px-3 py-1 text-sm font-semibold text-[#b45309]">{truckSummary.enPanne} en panne</span>
-                <span className="rounded-full bg-[#eff6ff] px-3 py-1 text-sm font-semibold text-[#1d4ed8]">{truckSummary.enRoute} en route</span>
-                <span className="rounded-full bg-[#f0fdf4] px-3 py-1 text-sm font-semibold text-[#15803d]">{truckSummary.disponible} disponibles</span>
+                <span className="rounded-full bg-[#fef3c7] px-3 py-1 text-sm font-semibold text-[#b45309]">{truckSummary.brokenDown} broken down</span>
+                <span className="rounded-full bg-[#eff6ff] px-3 py-1 text-sm font-semibold text-[#1d4ed8]">{truckSummary.inTransit} in transit</span>
+                <span className="rounded-full bg-[#f0fdf4] px-3 py-1 text-sm font-semibold text-[#15803d]">{truckSummary.available} available</span>
               </div>
             </div>
             <div className="overflow-hidden rounded-[1.5rem] border border-[#e5e7eb]">
@@ -379,9 +371,9 @@ export default function RessourcesPage() {
                       <select
                         value={truck.status}
                         onChange={(event) => handleTruckStatusChange(truck.id, event.target.value)}
-                        className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-[#7c3aed] ${truckStatusStyles[truck.status] || 'bg-white text-[#1a1a2e]'}`}
+                        className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-[#7c3aed] ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-[#1a1a2e]'}`}
                       >
-                        {truckStatusOptions.map((status) => (
+                        {TRUCK_STATUS_OPTIONS.map((status) => (
                           <option key={status} value={status}>{status}</option>
                         ))}
                       </select>

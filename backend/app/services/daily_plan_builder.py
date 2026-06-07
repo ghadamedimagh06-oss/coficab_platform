@@ -75,7 +75,7 @@ class DailyPlanBuilder:
         self.source_dir = source_dir
         self.cfg = cfg or DailyPlanConfig()
         self.geo = geo or GeoService()
-        self.truck_templates = trucks or DEFAULT_TRUCKS
+        self.truck_templates = DEFAULT_TRUCKS if trucks is None else trucks
 
     # ------------------------------------------------------------------ build
     def build(self, day: date, source_file: Optional[str] = None) -> dict[str, Any]:
@@ -109,13 +109,15 @@ class DailyPlanBuilder:
         # set these aside up front so they don't consume a large truck that a
         # servable delivery needs (a 33-pos drop must not steal the 24-truck a
         # 16-pos drop could use).
-        max_truck_cap = max(t["capacity_positions"] for t in trucks)
-        max_truck_kg = max(t["capacity_kg"] for t in trucks)
+        max_truck_cap = max((t["capacity_positions"] for t in trucks), default=-1)
+        max_truck_kg = max((t["capacity_kg"] for t in trucks), default=-1)
         servable: list[dict[str, Any]] = []
         for d in routable:
             qty_pos = float(d.get("quantity_positions") or 0)
             qty_kg = float(d.get("quantity_kg") or 0)
-            if qty_pos > max_truck_cap:
+            if not trucks:
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": "No available trucks"})
+            elif qty_pos > max_truck_cap:
                 unassigned.append({
                     **self._clean_stop(d),
                     "unassigned_reason": (

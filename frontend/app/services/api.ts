@@ -104,10 +104,11 @@ export async function generatePlanning(payload: any) {
   return post('/api/optimization/planning/generate', payload);
 }
 
-export async function generateDailyPlan(day: string, sourceFile?: string) {
+export async function generateDailyPlan(day: string, sourceFile?: string, trucks?: any[]) {
   return post('/api/planning/daily/generate', {
     day,
     source_file: sourceFile,
+    trucks,
   });
 }
 

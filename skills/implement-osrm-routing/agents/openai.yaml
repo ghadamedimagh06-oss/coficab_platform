@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement OSRM Routing"
+  short_description: "Wire OSRM road routing into planning"
+  default_prompt: "Use $implement-osrm-routing to replace approximate delivery distance and ETA calculations with OSRM road routing."

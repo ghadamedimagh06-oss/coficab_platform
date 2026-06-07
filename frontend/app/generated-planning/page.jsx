@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { getClientPosition, trucks as fallbackTrucks } from '../../data/coficabData';
 import { useFleet } from '../../hooks/useFleet';
+import { applyTruckStatusOverrides, normalizeTruckStatus, UNAVAILABLE_TRUCK_STATUSES } from '../../utils/truckStatus';
 import { generatePlanning, getDailyPlanningFileResponse } from '../services/api';
 
 const container = {
@@ -99,10 +100,10 @@ export default function GeneratedPlanningPage() {
   const sourceLabel = sourceMeta?.file_name || sourceMeta?.source_file || 'weekly planning workbook';
 
   const activeTrucks = useMemo(() => (
-    (fleetTrucks.length ? fleetTrucks : fallbackTrucks)
+    applyTruckStatusOverrides(fleetTrucks.length ? fleetTrucks : fallbackTrucks)
       .filter((truck) => {
-        const status = truck.status;
-        return !['PANNE', 'MAINTENANCE', 'En panne', 'En maintenance'].includes(status);
+        const status = normalizeTruckStatus(truck.status);
+        return !UNAVAILABLE_TRUCK_STATUSES.has(status);
       })
       .map((truck) => ({
         id: truck.id,
