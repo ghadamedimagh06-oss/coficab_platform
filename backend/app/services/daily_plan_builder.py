@@ -420,29 +420,50 @@ class DailyPlanBuilder:
         if not parts:
             return [delivery]
 
-        total_pos = sum(p for p, _ in parts) or 1
         base_kg = float(delivery.get("quantity_kg") or 0)
         base_id = delivery.get("id") or 0
+        original_client = delivery.get("client") or ""
+        orig_pos = int(round(float(delivery.get("quantity_positions") or 0)))
+        site_labels = [label for _, label in parts]
+        explicit = [int(p) for p, _ in parts]
 
-        # Build a human-readable explanation so planners see WHY (and HOW) the
-        # delivery was divided. This is traceability only — it does not affect
-        # the optimisation.
-        orig_pos = int(delivery.get("quantity_positions") or total_pos)
+        # QUANTITY CONSERVATION (critical): the parts must sum to EXACTLY the
+        # original positions — a split must never lose or create positions.
+        # Honour the comment's split but let the last part absorb the remainder
+        # (33 -> 24 + 9, never 24 + 8). If the comment's numbers exceed the
+        # original, scale them down proportionally.
+        sizes = explicit[:]
+        if orig_pos > 0:
+            sizes[-1] = orig_pos - sum(explicit[:-1])
+            if sizes[-1] <= 0:
+                total = sum(explicit) or 1
+                sizes = [max(1, round(orig_pos * p / total)) for p in explicit]
+                sizes[-1] = orig_pos - sum(sizes[:-1])
+            if sum(sizes) != orig_pos:  # safeguard against rounding drift
+                sizes[-1] += orig_pos - sum(sizes)
+        total_pos = sum(sizes) or 1
         max_cap = int(max((t["capacity_positions"] for t in self.truck_templates), default=0))
-        labels = [f"{int(p)} positions" for p, _ in parts]
-        qty_phrase = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+
+        # Friendly, planner-facing explanation listing each resulting drop.
+        resulting = [f"{sizes[i]} positions ({site_labels[i].title()})" for i in range(len(sizes))]
+        resulting_phrase = (
+            resulting[0] if len(resulting) == 1
+            else ", ".join(resulting[:-1]) + " and " + resulting[-1]
+        )
         explanation = (
-            f"Auto-split applied: delivery contained {orig_pos} positions, exceeding the "
-            f"maximum truck capacity of {max_cap} positions. Split into {qty_phrase}."
+            f"Delivery automatically split because {orig_pos} positions exceed the maximum "
+            f"truck capacity of {max_cap} positions. Resulting deliveries: {resulting_phrase}."
         )
 
         subs: list[dict[str, Any]] = []
-        for i, (pos, label) in enumerate(parts, start=1):
-            city = self._split_city(label) or (delivery.get("client") or "")
+        for i, label in enumerate(site_labels, start=1):
+            pos = sizes[i - 1]
+            city = self._split_city(label) or original_client
             subs.append({
                 **delivery,
                 "id": (int(base_id) * 100 + i) if str(base_id).isdigit() else f"{base_id}-{i}",
-                "client": f"{delivery['client']} ({label.title()})" if label else delivery["client"],
+                "client": f"{original_client} ({label.title()})" if label else original_client,
+                "original_client": original_client,
                 "geocode_as": city,
                 "quantity_positions": float(pos),
                 "position_count": float(pos),
@@ -450,13 +471,20 @@ class DailyPlanBuilder:
                 "_split_parent": base_id,
                 # --- Explainability / traceability of the automatic split ---
                 "is_split": True,
+                "split_reason": "CAPACITY_OVERFLOW",
                 "split_parent_id": base_id,
                 "split_part": i,
-                "split_total_parts": len(parts),
+                "split_total_parts": len(site_labels),
                 "split_positions": int(pos),
                 "planning_comment": explanation,
             })
-        log.info("DailyPlanBuilder: split '%s' into %s", delivery.get("client"), parts)
+
+        # Safeguard: never lose or create positions in a split.
+        produced = sum(s["split_positions"] for s in subs)
+        if orig_pos > 0 and produced != orig_pos:
+            log.error("Split of '%s' broke quantity conservation: %s != %s",
+                      original_client, produced, orig_pos)
+        log.info("DailyPlanBuilder: split '%s' (%s pos) -> %s", original_client, orig_pos, sizes)
         return subs
 
     @staticmethod
@@ -1002,8 +1030,9 @@ class DailyPlanBuilder:
             "constraints", "raw", "lat", "lon", "distance_km", "resolved_location",
             "travel_min", "unassigned_reason",
             # Split explainability / traceability:
-            "is_split", "split_parent_id", "split_part", "split_total_parts",
-            "split_positions", "planning_comment",
+            "is_split", "split_reason", "split_parent_id", "split_part",
+            "split_total_parts", "split_positions", "planning_comment",
+            "original_client",
         )
         return {k: delivery[k] for k in keep if k in delivery}
 

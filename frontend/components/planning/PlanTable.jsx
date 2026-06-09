@@ -32,13 +32,13 @@ function Badge({ value, styles }) {
 // Shown on deliveries the optimizer auto-split. The full explanation (original
 // positions, truck capacity, resulting parts) is on hover via the title.
 function SplitBadge({ row }) {
-  const label = row.split_total_parts ? `Split ${row.split_part}/${row.split_total_parts}` : 'Split';
+  const counter = row.split_total_parts ? ` ${row.split_part}/${row.split_total_parts}` : '';
   return (
     <span
       title={row.planning_comment || 'Auto-split delivery'}
-      className="shrink-0 cursor-help rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200"
+      className="shrink-0 cursor-help rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-300"
     >
-      {label}
+      🔀 Auto-split{counter}
     </span>
   );
 }
