@@ -4,11 +4,11 @@
 -- Admin user (password: admin123)
 -- bcrypt hash for "admin123"
 INSERT INTO users (username, email, password_hash, role)
-VALUES ('admin', 'admin@coficab.local', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'admin')
+VALUES ('admin', 'admin@coficab.local', '$2b$12$QZvfuHmEbhuaHK8Bq.didOopBtpGTT7yDy/Qq8plM5JzvkXXA6ehy', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO users (username, email, password_hash, role)
-VALUES ('planner', 'planner@coficab.local', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'planner')
+VALUES ('planner', 'planner@coficab.local', '$2b$12$QZvfuHmEbhuaHK8Bq.didOopBtpGTT7yDy/Qq8plM5JzvkXXA6ehy', 'planner')
 ON CONFLICT (username) DO NOTHING;
 
 -- Trucks
