@@ -145,26 +145,26 @@ class DailyPlanBuilder:
             for i, d in enumerate(servable):
                 d["_mi"] = i + 1
 
-            # Step 4: assign deliveries to trucks (pins honoured, rest clustered).
-            groups = self._assign_to_trucks(servable, trucks)
-
-            # Step 5: order + schedule each truck.
-            overflow_all: list[dict[str, Any]] = []
-            for truck in trucks:
-                items = groups.get(truck["truck_id"], [])
-                if not items:
-                    continue
-                overflow_all.extend(self._schedule_truck(truck, items, dur_min))
-
-            # Step 6: rescue pass. A truck that finished its zone early (or stayed
-            # idle) can still run an extra depot→drop→depot trip. Place each
-            # overflowed delivery on a truck that can legally carry it (positions
-            # AND weight) and complete the round trip inside the working day and
-            # the customer's time window. This stops servable drops being thrown
-            # away while owned trucks sit idle.
-            for d in self._rescue_overflow(trucks, overflow_all):
-                reason = d.get("unassigned_reason") or "Exceeds working hours"
-                unassigned.append({**self._clean_stop(d), "unassigned_reason": reason})
+            # Steps 4-6: think globally first. Try several fleet-assignment
+            # strategies, schedule + rescue each on its own fleet, score them with
+            # the weighted waste cost, and keep the cheapest. The zone baseline is
+            # always one of the candidates, so the optimiser can never come out
+            # worse than before.
+            candidates = []
+            for name, assign_fn in (
+                ("zones", self._assign_to_trucks),
+                ("packed", self._assign_insertion),
+            ):
+                cand_trucks, cand_unassigned = self._run_strategy(servable, dur_min, assign_fn)
+                cost = self._plan_cost(cand_trucks, cand_unassigned)
+                candidates.append((cost, name, cand_trucks, cand_unassigned))
+            best_cost, best_name, trucks, best_unassigned = min(candidates, key=lambda c: c[0])
+            log.info(
+                "DailyPlanBuilder: '%s' assignment won (cost=%.0f) among %s",
+                best_name, best_cost,
+                {n: round(c) for c, n, *_ in candidates},
+            )
+            unassigned.extend(best_unassigned)
 
         clean_trucks = [self._clean_truck(t) for t in trucks]
 
@@ -188,6 +188,205 @@ class DailyPlanBuilder:
             },
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
+            "diagnostics": self._diagnostics(trucks, unassigned, routable, self.truck_templates),
+        }
+
+    # --------------------------------------------------- global fleet packing
+    # Business objective (iteration 1): minimise total transport waste, not just
+    # blindly hit 80%. We try several global assignment strategies, schedule
+    # each, and score with a weighted cost; a truck may depart under 80% only if
+    # no cheaper consolidation exists.
+    UTIL_TARGET = 0.80          # a truck "should" depart at least this full
+    MAX_DETOUR_KM = 130.0       # max straight-line pull to consolidate a drop
+
+    # Cost weights. Service coverage is lexicographically above everything else:
+    # any feasible plan serving all customers beats any plan with unassigned
+    # drops, and an urgent drop must never be sacrificed for utilisation.
+    _W_UNASSIGNED = 1_000_000.0
+    _W_UNASSIGNED_URGENT = 100_000_000.0
+    _W_TRUCK = 1_500.0          # each dispatched truck is expensive
+    _W_UNDERUTIL = 800.0        # penalty per (0.8 - util) of an under-full trip
+    _W_KM = 1.0
+    _W_TIME = 0.5
+
+    @staticmethod
+    def _is_urgent(d: dict[str, Any]) -> bool:
+        return str(d.get("priority") or "").strip().lower() == "urgent"
+
+    def _feasible_trucks(self, d, trucks):
+        """Trucks that can legally carry this drop by BOTH positions and kg."""
+        dp, dk = self._pos(d), self._kg(d)
+        return [t for t in trucks if t["capacity_positions"] >= dp and t["capacity_kg"] >= dk]
+
+    @staticmethod
+    def _pos(d: dict[str, Any]) -> float:
+        return float(d.get("quantity_positions") or d.get("position_count") or 0)
+
+    @staticmethod
+    def _kg(d: dict[str, Any]) -> float:
+        return float(d.get("quantity_kg") or 0)
+
+    def _run_strategy(self, servable, dur_min, assign_fn):
+        """Assign with `assign_fn`, then schedule + rescue on a fresh fleet."""
+        trucks = [self._fresh_truck(t) for t in self.truck_templates]
+        groups = assign_fn(servable, trucks)
+        overflow_all: list[dict[str, Any]] = []
+        for truck in trucks:
+            items = groups.get(truck["truck_id"], [])
+            if items:
+                overflow_all.extend(self._schedule_truck(truck, items, dur_min))
+        unassigned: list[dict[str, Any]] = []
+        for d in self._rescue_overflow(trucks, overflow_all):
+            reason = d.get("unassigned_reason") or "Exceeds working hours"
+            unassigned.append({**self._clean_stop(d), "unassigned_reason": reason})
+        return trucks, unassigned
+
+    def _plan_cost(self, trucks, unassigned) -> float:
+        """Weighted transport-waste score (lower is better)."""
+        used = [t for t in trucks if t.get("trips")]
+        total_travel_min = 0.0
+        underutil = 0.0
+        for t in used:
+            cap_p = float(t["capacity_positions"]) or 1.0
+            cap_k = float(t["capacity_kg"]) or 1.0
+            for trip in t["trips"]:
+                stops = trip.get("stops", [])
+                if not stops:
+                    continue
+                pos = sum(self._pos(s) for s in stops)
+                kg = sum(self._kg(s) for s in stops)
+                util = max(pos / cap_p, kg / cap_k)
+                if util < self.UTIL_TARGET:
+                    underutil += (self.UTIL_TARGET - util)
+                total_travel_min += sum(float(s.get("travel_min") or 0) for s in stops)
+        total_km = total_travel_min / 60.0 * self.cfg.avg_speed_kmh
+        unassigned_pen = sum(
+            self._W_UNASSIGNED_URGENT if self._is_urgent(u) else self._W_UNASSIGNED
+            for u in unassigned
+        )
+        return (
+            unassigned_pen
+            + self._W_TRUCK * len(used)
+            + self._W_UNDERUTIL * underutil
+            + self._W_KM * total_km
+            + self._W_TIME * total_travel_min
+        )
+
+    def _assign_insertion(self, servable, trucks):
+        """Global packing: place each drop (largest first) on the nearest truck
+        already working within an acceptable detour that can carry it; otherwise
+        open the smallest adequate idle truck. Multi-trip is left to the
+        scheduler, so big drops needing the 24-pallet truck can still share it."""
+        by_id = {t["truck_id"]: t for t in trucks}
+        groups: dict[int, list[dict[str, Any]]] = {t["truck_id"]: [] for t in trucks}
+        free: list[dict[str, Any]] = []
+        for d in servable:
+            req = d["constraints"].get("required_truck_id")
+            if req and req in by_id:
+                groups[req].append(d)
+            else:
+                free.append(d)
+        used = {tid for tid, ds in groups.items() if ds}
+
+        # Priority order: lock the most-constrained drops first (few feasible
+        # trucks), then urgent, then biggest — so a delivery that fits only one
+        # truck claims it before packing spends it on something flexible.
+        def _order_key(d):
+            return (
+                len(self._feasible_trucks(d, trucks)) or 99,
+                0 if self._is_urgent(d) else PRIORITY_WEIGHT.get(
+                    str(d.get("priority") or "normal").lower(), 2
+                ),
+                -self._pos(d),
+                -self._kg(d),
+            )
+
+        for d in sorted(free, key=_order_key):
+            dp, dk = self._pos(d), self._kg(d)
+            fits = self._feasible_trucks(d, trucks) or list(trucks)
+
+            # 1) nearest already-working truck within detour that can carry it
+            chosen, best_near = None, None
+            for t in fits:
+                g = groups[t["truck_id"]]
+                if not g:
+                    continue
+                c_lat = sum(x["lat"] for x in g) / len(g)
+                c_lon = sum(x["lon"] for x in g) / len(g)
+                near = _haversine_km(c_lat, c_lon, d["lat"], d["lon"])
+                if near <= self.MAX_DETOUR_KM and (best_near is None or near < best_near):
+                    chosen, best_near = t, near
+
+            # 2) else open the smallest adequate idle truck (right-size)
+            if chosen is None:
+                idle = sorted(
+                    (t for t in fits if t["truck_id"] not in used),
+                    key=lambda t: (t["capacity_positions"], t["capacity_kg"]),
+                )
+                chosen = idle[0] if idle else min(
+                    fits, key=lambda t: (t["capacity_positions"], t["capacity_kg"])
+                )
+
+            groups[chosen["truck_id"]].append(d)
+            used.add(chosen["truck_id"])
+        return groups
+
+    def _diagnostics(self, trucks, unassigned, considered, fleet):
+        """Operator visibility: urgent assignments, fleet bottlenecks, under-full
+        departures, and the exact constraint behind every unassigned drop."""
+        assigned_to: dict[str, str] = {}
+        for t in trucks:
+            for trip in t.get("trips", []):
+                for s in trip.get("stops", []):
+                    assigned_to[str(s.get("client"))] = t["truck_label"]
+
+        urgent = [
+            {"client": d.get("client"), "truck": assigned_to.get(str(d.get("client")), "UNASSIGNED")}
+            for d in considered if self._is_urgent(d)
+        ]
+        single, two_or_fewer = [], []
+        for d in considered:
+            feas = self._feasible_trucks(d, fleet)
+            if len(feas) == 1:
+                single.append({
+                    "client": d.get("client"), "only_truck": feas[0]["truck_label"],
+                    "positions": self._pos(d), "kg": self._kg(d),
+                })
+            if len(feas) <= 2:
+                two_or_fewer.append({
+                    "client": d.get("client"),
+                    "feasible_trucks": [t["truck_label"] for t in feas],
+                })
+
+        under = []
+        for t in trucks:
+            cap_p = float(t["capacity_positions"]) or 1.0
+            cap_k = float(t["capacity_kg"]) or 1.0
+            for trip in t.get("trips", []):
+                stops = trip.get("stops", [])
+                if not stops:
+                    continue
+                pos = sum(self._pos(s) for s in stops)
+                kg = sum(self._kg(s) for s in stops)
+                util = max(pos / cap_p, kg / cap_k)
+                if util < self.UTIL_TARGET:
+                    under.append({
+                        "truck": t["truck_label"], "trip": trip.get("trip_id"),
+                        "utilization_pct": round(util * 100),
+                        "reason": "no remaining compatible drop fit within capacity and the consolidation detour limit",
+                    })
+
+        unassigned_diag = [
+            {"client": u.get("client"), "positions": self._pos(u), "kg": self._kg(u),
+             "urgent": self._is_urgent(u), "constraint": u.get("unassigned_reason")}
+            for u in unassigned
+        ]
+        return {
+            "urgent_deliveries": urgent,
+            "single_feasible_truck": single,
+            "two_or_fewer_feasible_trucks": two_or_fewer,
+            "under_80pct_departures": under,
+            "unassigned": unassigned_diag,
         }
 
     # ------------------------------------------------------------ travel time
