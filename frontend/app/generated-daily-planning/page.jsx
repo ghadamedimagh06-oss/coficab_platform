@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, Wand2 } from 'lucide-react';
-import { exportDailyPlan, generateDailyPlan } from '../services/api';
+import { exportDailyPlan, generateDailyPlan, recalculateDailyPlan } from '../services/api';
 import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
 import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
@@ -170,6 +170,7 @@ export default function GeneratedDailyPlanningPage() {
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const busy = status === 'generating' || status === 'recalculating';
 
   const stats = useMemo(() => ({
     deliveries: countDeliveries(plan),
@@ -200,6 +201,19 @@ export default function GeneratedDailyPlanningPage() {
   useEffect(() => {
     regenerate(day);
   }, []);
+
+  async function applyRecalculatedPlan(nextPlan) {
+    setPlan(withManualMarkers(nextPlan));
+    setStatus('recalculating');
+    try {
+      const recalculated = await recalculateDailyPlan(withManualMarkers(nextPlan));
+      setPlan(withManualMarkers(recalculated));
+      setStatus('ready');
+    } catch (err) {
+      setError(err?.response?.data?.detail || err.message || 'Unable to recalculate the route with OSRM.');
+      setStatus('ready');
+    }
+  }
 
   function moveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {
     if (!deliveryId || !plan) return;
@@ -242,7 +256,7 @@ export default function GeneratedDailyPlanningPage() {
     }
 
     setError(null);
-    setPlan({
+    const nextPlan = {
       ...sourceCleared,
       trucks: sourceCleared.trucks.map((truck) => {
         const stops = flattenStops(truck).sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
@@ -256,7 +270,8 @@ export default function GeneratedDailyPlanningPage() {
           Math.min(normalizedTargetMinute, toMinutes(stops[0]?.etd || movedWithTarget.etd)),
         );
       }),
-    });
+    };
+    applyRecalculatedPlan(nextPlan);
   }
 
   function resizeDelivery(deliveryId, nextEtd, nextEta) {
@@ -282,7 +297,7 @@ export default function GeneratedDailyPlanningPage() {
     }
 
     setError(null);
-    setPlan({
+    const nextPlan = {
       ...plan,
       trucks: plan.trucks.map((truck) => {
         const stops = flattenStops(truck).map((stop) => (
@@ -292,7 +307,8 @@ export default function GeneratedDailyPlanningPage() {
         ));
         return normalizeTruckTrips({ ...truck, trips: buildLaneTrip(truck.truck_id, stops) });
       }),
-    });
+    };
+    applyRecalculatedPlan(nextPlan);
   }
 
   function cancelDelivery(deliveryId) {
@@ -319,9 +335,10 @@ export default function GeneratedDailyPlanningPage() {
       constraints: { required_date: day },
       raw: {},
     };
-    setPlan((current) => ({
-      ...current,
-      trucks: current.trucks.map((truck) => {
+    if (!plan) return;
+    const nextPlan = {
+      ...plan,
+      trucks: plan.trucks.map((truck) => {
         if (String(truck.truck_id) !== String(form.truck_id)) return truck;
         const stops = flattenStops(truck);
         const reflowed = reflowStops([...stops, delivery].sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd)), toMinutes(stops[0]?.etd || delivery.etd));
@@ -330,7 +347,8 @@ export default function GeneratedDailyPlanningPage() {
           trips: buildLaneTrip(truck.truck_id, reflowed),
         };
       }),
-    }));
+    };
+    applyRecalculatedPlan(nextPlan);
   }
 
   function addMarker(targetTruckId, targetMinute) {
@@ -402,6 +420,9 @@ export default function GeneratedDailyPlanningPage() {
             <p className="mt-2 text-sm text-[#6b6b7b]">
               Auto-generated from {plan?.source_file || 'weekly planning'} {plan?.generated_at ? `at ${new Date(plan.generated_at).toLocaleTimeString()}` : ''}
             </p>
+            {status === 'recalculating' && (
+              <p className="mt-1 text-xs font-semibold text-[#0f766e]">Recalculating OSRM route legs...</p>
+            )}
             {plan?.selection && (
               <p className="mt-1 text-xs text-[#6b6b7b]">
                 Using {plan.selection.matched_day || plan.selection.requested_day} rows from the workbook for {plan.selection.requested_date}.
@@ -424,7 +445,7 @@ export default function GeneratedDailyPlanningPage() {
             <button
               type="button"
               onClick={() => regenerate(day)}
-              disabled={status === 'generating'}
+              disabled={busy}
               className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
             >
               <RefreshCcw size={16} />
@@ -433,13 +454,13 @@ export default function GeneratedDailyPlanningPage() {
             <button
               type="button"
               onClick={() => setModalOpen(true)}
-              disabled={!plan || status === 'generating'}
+              disabled={!plan || busy}
               className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
             >
               <Plus size={16} />
               Add delivery
             </button>
-            <ExportButton exporting={exporting} disabled={!plan?.source_file || status === 'generating'} onExport={handleExport} />
+            <ExportButton exporting={exporting} disabled={!plan?.source_file || busy} onExport={handleExport} />
           </div>
         </motion.div>
 

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date as _date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -51,6 +52,10 @@ class DailyGenerateRequest(BaseModel):
 class DailyExportRequest(BaseModel):
     source_file: str
     day: str
+    plan: Dict[str, Any]
+
+
+class DailyRecalculateRequest(BaseModel):
     plan: Dict[str, Any]
 
 
@@ -367,6 +372,16 @@ async def generate_daily_plan(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@daily_router.post("/recalculate")
+async def recalculate_daily_plan(request: DailyRecalculateRequest):
+    try:
+        return _recalculate_daily_plan_routes(request.plan)
+    except OSRMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @daily_router.post("/export")
 async def export_daily_plan(request: DailyExportRequest):
     try:
@@ -396,6 +411,163 @@ async def download_daily_plan(file_name: str):
 
 def _parse_day(raw: str) -> _date:
     return _date.fromisoformat(raw)
+
+
+def _recalculate_daily_plan_routes(plan: Dict[str, Any]) -> Dict[str, Any]:
+    recalculated = deepcopy(plan)
+    osrm = OSRMService()
+    depot = _plan_depot(recalculated)
+    work_start = _minutes((recalculated.get("work_window") or {}).get("start")) or 6 * 60
+
+    for truck in recalculated.get("trucks") or []:
+        for trip in truck.get("trips") or []:
+            stops = trip.get("stops") or []
+            if not stops:
+                continue
+
+            coords = []
+            missing = []
+            for stop in stops:
+                coord = _stop_coordinate(stop)
+                if coord is None:
+                    missing.append(stop.get("client") or stop.get("id") or "stop")
+                else:
+                    coords.append(coord)
+
+            if missing:
+                _mark_route_pending(trip, f"Missing coordinates for {', '.join(map(str, missing))}")
+                continue
+
+            try:
+                route = osrm.route([depot] + coords + [depot])
+            except OSRMError as exc:
+                _mark_route_pending(trip, str(exc), status="unrouteable")
+                continue
+
+            legs = route.get("legs") or []
+            if len(legs) < len(stops) + 1:
+                _mark_route_pending(trip, "OSRM route response did not include all route legs", status="unrouteable")
+                continue
+
+            first_anchor = _minutes(stops[0].get("etd"))
+            first_travel = int(legs[0].get("travel_min") or 0)
+            depart_min = _minutes(trip.get("depart_at"))
+            if first_anchor is not None:
+                depart_min = max(work_start, first_anchor - first_travel)
+            elif depart_min is None:
+                depart_min = work_start
+
+            cursor = depart_min
+            total_service = 0
+            for index, stop in enumerate(stops):
+                leg = legs[index]
+                travel = int(leg.get("travel_min") or 0)
+                arrival = cursor + travel
+                waiting = 0
+
+                window = (stop.get("constraints") or {}).get("time_window")
+                if isinstance(window, list) and len(window) == 2:
+                    win_start = _minutes(window[0])
+                    if win_start is not None and arrival < win_start:
+                        waiting = win_start - arrival
+                        arrival = win_start
+
+                service = _handling_minutes(stop)
+                departure = arrival + service
+                total_service += service
+
+                stop["etd"] = _clock(arrival)
+                stop["eta"] = _clock(departure)
+                stop["travel_min"] = travel
+                stop["service_min"] = service
+                stop["waiting_min"] = waiting
+                stop["distance_km"] = round(float(leg.get("distance_km") or 0), 1)
+                cursor = departure
+
+            return_leg = legs[len(stops)]
+            return_travel = int(return_leg.get("travel_min") or 0)
+            trip["depart_at"] = _clock(depart_min)
+            trip["return_at"] = _clock(cursor + return_travel)
+            trip["return_travel_min"] = return_travel
+            trip["total_distance_km"] = route["total_distance_km"]
+            trip["total_travel_min"] = route["total_travel_min"]
+            trip["total_service_min"] = total_service
+            trip["total_duration_min"] = route["total_travel_min"] + total_service
+            trip["geometry"] = route.get("geometry")
+            trip["legs"] = legs
+            trip["route_status"] = "osrm"
+            trip.pop("route_error", None)
+
+    return recalculated
+
+
+def _plan_depot(plan: Dict[str, Any]) -> tuple[float, float]:
+    depot = plan.get("depot") or {}
+    lat = depot.get("lat")
+    lon = depot.get("lon")
+    if lat is not None and lon is not None:
+        return float(lat), float(lon)
+    return GeoService().depot()
+
+
+def _stop_coordinate(stop: Dict[str, Any]) -> Optional[tuple[float, float]]:
+    lat = stop.get("lat")
+    lon = stop.get("lon", stop.get("lng"))
+    if lat is None or lon is None:
+        return None
+    return float(lat), float(lon)
+
+
+def _handling_minutes(stop: Dict[str, Any]) -> int:
+    override = stop.get("handling_minutes") or stop.get("service_minutes")
+    if override is not None:
+        try:
+            return max(0, int(round(float(override))))
+        except (TypeError, ValueError):
+            pass
+    existing = stop.get("service_min")
+    if existing is not None:
+        try:
+            return max(0, int(round(float(existing))))
+        except (TypeError, ValueError):
+            pass
+    positions = stop.get("quantity_positions", stop.get("position_count", 0))
+    try:
+        return max(0, int(round(float(positions or 0) * 5.0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mark_route_pending(trip: Dict[str, Any], reason: str, status: str = "manual_pending") -> None:
+    trip["route_status"] = status
+    trip["route_error"] = reason
+    for key in (
+        "total_distance_km",
+        "total_travel_min",
+        "total_service_min",
+        "total_duration_min",
+        "geometry",
+        "legs",
+    ):
+        trip.pop(key, None)
+
+
+def _minutes(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        hours, minutes = text.split(":")[:2]
+        return int(hours) * 60 + int(minutes)
+    except (ValueError, TypeError):
+        return None
+
+
+def _clock(minutes: int) -> str:
+    minutes = max(0, min(int(round(minutes)), 23 * 60 + 59))
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dict[str, Any]]]:

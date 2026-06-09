@@ -112,6 +112,10 @@ export async function generateDailyPlan(day: string, sourceFile?: string, trucks
   });
 }
 
+export async function recalculateDailyPlan(plan: any) {
+  return post('/api/planning/daily/recalculate', { plan });
+}
+
 export async function exportDailyPlan(payload: any) {
   const result = await post('/api/planning/daily/export', payload);
   return {
