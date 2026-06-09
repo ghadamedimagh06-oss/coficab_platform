@@ -1033,7 +1033,6 @@ class DailyPlanBuilder:
         eta = self._format_time(row.get("eta"))
         if constraints.get("time_window"):
             etd, eta = constraints["time_window"]
-        gross_weight = self._weight_from_row(row)
         positions = float(row.get("position_count") or row.get("quantity") or 0)
         return {
             "id": int(row.get("row_number") or 0),
@@ -1042,7 +1041,9 @@ class DailyPlanBuilder:
             "end_location": row.get("end_location") or row.get("client") or "Unknown destination",
             "quantity_positions": positions,
             "position_count": positions,
-            "quantity_kg": gross_weight,
+            # Capacity is positions-only by business rule — the workbook's kg
+            # values are unreliable, so weight is not modelled and never binds.
+            "quantity_kg": 0.0,
             "etd": etd,
             "eta": eta,
             "priority": row.get("priority") or "normal",
