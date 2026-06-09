@@ -423,6 +423,19 @@ class DailyPlanBuilder:
         total_pos = sum(p for p, _ in parts) or 1
         base_kg = float(delivery.get("quantity_kg") or 0)
         base_id = delivery.get("id") or 0
+
+        # Build a human-readable explanation so planners see WHY (and HOW) the
+        # delivery was divided. This is traceability only — it does not affect
+        # the optimisation.
+        orig_pos = int(delivery.get("quantity_positions") or total_pos)
+        max_cap = int(max((t["capacity_positions"] for t in self.truck_templates), default=0))
+        labels = [f"{int(p)} positions" for p, _ in parts]
+        qty_phrase = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        explanation = (
+            f"Auto-split applied: delivery contained {orig_pos} positions, exceeding the "
+            f"maximum truck capacity of {max_cap} positions. Split into {qty_phrase}."
+        )
+
         subs: list[dict[str, Any]] = []
         for i, (pos, label) in enumerate(parts, start=1):
             city = self._split_city(label) or (delivery.get("client") or "")
@@ -435,6 +448,13 @@ class DailyPlanBuilder:
                 "position_count": float(pos),
                 "quantity_kg": round(base_kg * pos / total_pos, 1),
                 "_split_parent": base_id,
+                # --- Explainability / traceability of the automatic split ---
+                "is_split": True,
+                "split_parent_id": base_id,
+                "split_part": i,
+                "split_total_parts": len(parts),
+                "split_positions": int(pos),
+                "planning_comment": explanation,
             })
         log.info("DailyPlanBuilder: split '%s' into %s", delivery.get("client"), parts)
         return subs
@@ -981,6 +1001,9 @@ class DailyPlanBuilder:
             "position_count", "quantity_kg", "etd", "eta", "priority", "status",
             "constraints", "raw", "lat", "lon", "distance_km", "resolved_location",
             "travel_min", "unassigned_reason",
+            # Split explainability / traceability:
+            "is_split", "split_parent_id", "split_part", "split_total_parts",
+            "split_positions", "planning_comment",
         )
         return {k: delivery[k] for k in keep if k in delivery}
 

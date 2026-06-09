@@ -29,6 +29,20 @@ function Badge({ value, styles }) {
   );
 }
 
+// Shown on deliveries the optimizer auto-split. The full explanation (original
+// positions, truck capacity, resulting parts) is on hover via the title.
+function SplitBadge({ row }) {
+  const label = row.split_total_parts ? `Split ${row.split_part}/${row.split_total_parts}` : 'Split';
+  return (
+    <span
+      title={row.planning_comment || 'Auto-split delivery'}
+      className="shrink-0 cursor-help rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200"
+    >
+      {label}
+    </span>
+  );
+}
+
 // Flatten plan into export-shaped rows, grouped truck→trip→stop then unassigned.
 function buildRows(plan) {
   if (!plan) return [];
@@ -66,7 +80,11 @@ function buildRows(plan) {
           position_count: stop.quantity_positions ?? stop.position_count,
           gross_weight_kg: stop.quantity_kg,
           priority: stop.priority || 'normal',
-          comments: constraints.notes || constraints.comment_constraint || raw.notes || '',
+          comments: stop.planning_comment || constraints.notes || constraints.comment_constraint || raw.notes || '',
+          is_split: !!stop.is_split,
+          planning_comment: stop.planning_comment || '',
+          split_part: stop.split_part,
+          split_total_parts: stop.split_total_parts,
           travel_min: stop.travel_min,
           service_min: stop.service_min,
           distance_km: stop.distance_km,
@@ -99,7 +117,11 @@ function buildRows(plan) {
       position_count: stop.quantity_positions ?? stop.position_count,
       gross_weight_kg: stop.quantity_kg,
       priority: stop.priority || 'normal',
-      comments: stop.unassigned_reason || constraints.comment_constraint || '',
+      comments: stop.unassigned_reason || stop.planning_comment || constraints.comment_constraint || '',
+      is_split: !!stop.is_split,
+      planning_comment: stop.planning_comment || '',
+      split_part: stop.split_part,
+      split_total_parts: stop.split_total_parts,
       travel_min: null,
       service_min: null,
       distance_km: stop.distance_km,
@@ -216,7 +238,10 @@ export default function PlanTable({ plan, onExport, exporting }) {
                   </TD>
                   <TD className="text-[#6b6b7b]">{row.driver}</TD>
                   <TD className="max-w-[14rem] font-medium">
-                    <span className="block truncate" title={row.client}>{row.client}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate" title={row.client}>{row.client}</span>
+                      {row.is_split && <SplitBadge row={row} />}
+                    </span>
                   </TD>
                   <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
                     <span className="block truncate" title={row.end_location}>{row.end_location}</span>
@@ -295,7 +320,10 @@ export default function PlanTable({ plan, onExport, exporting }) {
                       <TD className="text-xs text-[#9b9bab]">—</TD>
                       <TD className="text-[#6b6b7b]">—</TD>
                       <TD className="max-w-[14rem] font-medium text-red-700">
-                        <span className="block truncate" title={row.client}>{row.client}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate" title={row.client}>{row.client}</span>
+                          {row.is_split && <SplitBadge row={row} />}
+                        </span>
                       </TD>
                       <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
                         <span className="block truncate" title={row.end_location}>{row.end_location}</span>
