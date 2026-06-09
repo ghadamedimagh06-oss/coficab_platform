@@ -11,24 +11,29 @@ INSERT INTO users (username, email, password_hash, role)
 VALUES ('planner', 'planner@coficab.local', '$2b$12$QZvfuHmEbhuaHK8Bq.didOopBtpGTT7yDy/Qq8plM5JzvkXXA6ehy', 'planner')
 ON CONFLICT (username) DO NOTHING;
 
--- Trucks
-INSERT INTO camions (plate_number, type, capacite_kg, max_palettes, status, consommation_base_l_100km)
+-- Trucks (real COFICAB fleet)
+INSERT INTO camions (plate_number, type, capacite_kg, max_palettes, status)
 VALUES
-  ('TN-001-AB', 'SEMI',     24000, 33, 'DISPONIBLE', 32.5),
-  ('TN-002-AB', 'PORTEUR',  12000, 18, 'DISPONIBLE', 24.0),
-  ('TN-003-AB', 'FOURGON',   3500,  8, 'DISPONIBLE', 12.0),
-  ('TN-004-AB', 'TAUTLINER',20000, 30, 'DISPONIBLE', 30.0),
-  ('TN-005-AB', 'SEMI',     24000, 33, 'DISPONIBLE', 32.5)
+  ('2282TU131', 'PORTEUR', 10200, 14, 'DISPONIBLE'),
+  ('9524TU238', 'PORTEUR', 10230, 14, 'DISPONIBLE'),
+  ('5735TU217', 'PORTEUR',  9227, 14, 'DISPONIBLE'),
+  ('4331TU175', 'PORTEUR',  9200, 14, 'DISPONIBLE'),
+  ('REM107627', 'SEMI',    24950, 24, 'DISPONIBLE'),
+  ('626TU203',  'FOURGON',  7650, 14, 'DISPONIBLE'),
+  ('7797TU218', 'PORTEUR',   925,  4, 'DISPONIBLE'),
+  ('6502TU247', 'PORTEUR',  8500, 14, 'DISPONIBLE')
 ON CONFLICT (plate_number) DO NOTHING;
 
--- Drivers
+-- Drivers (real COFICAB drivers)
 INSERT INTO chauffeurs (id, full_name, phone, permis_type, permis_numero, status, shift_start, shift_end)
 VALUES
-  (1001, 'Mohamed Ben Ali',   '+216 20 123 456', 'CE', 'CE-001-2020', 'ACTIF', '06:00', '18:00'),
-  (1002, 'Ahmed Gharbi',      '+216 25 234 567', 'CE', 'CE-002-2019', 'ACTIF', '06:00', '18:00'),
-  (1003, 'Hichem Mansouri',   '+216 22 345 678', 'C',  'C-003-2021',  'ACTIF', '07:00', '17:00'),
-  (1004, 'Nabil Trabelsi',    '+216 29 456 789', 'CE', 'CE-004-2018', 'CONGE', '06:00', '18:00'),
-  (1005, 'Slim Bouguerra',    '+216 21 567 890', 'C',  'C-005-2022',  'ACTIF', '08:00', '20:00')
+  (1, 'Ala',     '+216 20 000 001', 'C', 'A001', 'ACTIF', '06:00', '18:00'),
+  (2, 'Bilel',   '+216 20 000 002', 'C', 'A002', 'ACTIF', '06:00', '18:00'),
+  (3, 'Hbib',    '+216 20 000 003', 'C', 'A003', 'ACTIF', '18:00', '06:00'),
+  (4, 'Houssem', '+216 20 000 004', 'C', 'A004', 'ACTIF', '06:00', '18:00'),
+  (5, 'Karim',   '+216 20 000 005', 'C', 'A005', 'ACTIF', '06:00', '18:00'),
+  (6, 'Mehrez',  '+216 20 000 006', 'C', 'A006', 'ACTIF', '18:00', '06:00'),
+  (7, 'Ridha',   '+216 20 000 007', 'C', 'A007', 'ACTIF', '06:00', '18:00')
 ON CONFLICT (id) DO NOTHING;
 
 -- Clients
@@ -44,10 +49,18 @@ VALUES
   (108, 'PKC Group',             'Industrial Zone',           'Gafsa',      'TN', 34.4250, 8.7842,  '08:00', '17:00')
 ON CONFLICT (id) DO NOTHING;
 
--- Assign default trucks to drivers
-UPDATE camions SET chauffeur_defaut_id = 1001 WHERE plate_number = 'TN-001-AB';
-UPDATE camions SET chauffeur_defaut_id = 1002 WHERE plate_number = 'TN-002-AB';
-UPDATE camions SET chauffeur_defaut_id = 1003 WHERE plate_number = 'TN-003-AB';
-UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = 'TN-001-AB') WHERE id = 1001;
-UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = 'TN-002-AB') WHERE id = 1002;
-UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = 'TN-003-AB') WHERE id = 1003;
+-- Link drivers <-> their default trucks
+UPDATE camions SET chauffeur_defaut_id = 1 WHERE plate_number = '2282TU131';
+UPDATE camions SET chauffeur_defaut_id = 2 WHERE plate_number = '9524TU238';
+UPDATE camions SET chauffeur_defaut_id = 3 WHERE plate_number = '5735TU217';
+UPDATE camions SET chauffeur_defaut_id = 4 WHERE plate_number = '4331TU175';
+UPDATE camions SET chauffeur_defaut_id = 5 WHERE plate_number = 'REM107627';
+UPDATE camions SET chauffeur_defaut_id = 6 WHERE plate_number = '626TU203';
+UPDATE camions SET chauffeur_defaut_id = 7 WHERE plate_number = '7797TU218';
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '2282TU131') WHERE id = 1;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '9524TU238') WHERE id = 2;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '5735TU217') WHERE id = 3;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '4331TU175') WHERE id = 4;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = 'REM107627') WHERE id = 5;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '626TU203') WHERE id = 6;
+UPDATE chauffeurs SET camion_defaut_id = (SELECT id FROM camions WHERE plate_number = '7797TU218') WHERE id = 7;
