@@ -7,11 +7,62 @@ import pytest
 
 from app.services.daily_plan_builder import DailyPlanBuilder
 from app.services.excel_exporter import export_plan_to_xlsx
+from app.services.osrm_service import OSRMTable
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WEEKLY_DIR = ROOT / "weekly planning"
 SOURCE_FILE = WEEKLY_DIR / "Weekly Delivery planning W0526.xlsx"
+
+
+class FakeOSRM:
+    @staticmethod
+    def _meters(a, b):
+        # Deterministic local stand-in for OSRM in tests.
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 * 111_000 * 1.3
+
+    def table(self, coordinates):
+        distances = []
+        durations = []
+        for a in coordinates:
+            dist_row = []
+            dur_row = []
+            for b in coordinates:
+                meters = self._meters(a, b)
+                dist_row.append(meters)
+                dur_row.append(meters / 1000 / 55 * 3600)
+            distances.append(dist_row)
+            durations.append(dur_row)
+        return OSRMTable(durations_sec=durations, distances_m=distances)
+
+    def route(self, coordinates):
+        legs = []
+        total_m = 0.0
+        total_s = 0.0
+        for a, b in zip(coordinates, coordinates[1:]):
+            meters = self._meters(a, b)
+            seconds = meters / 1000 / 55 * 3600
+            total_m += meters
+            total_s += seconds
+            legs.append({
+                "distance_m": meters,
+                "distance_km": round(meters / 1000, 3),
+                "duration_sec": seconds,
+                "travel_min": int(round(seconds / 60)),
+                "steps": [],
+            })
+        return {
+            "distance_m": total_m,
+            "total_distance_km": round(total_m / 1000, 3),
+            "duration_sec": total_s,
+            "total_travel_min": int(round(total_s / 60)),
+            "geometry": {"type": "LineString", "coordinates": [[lon, lat] for lat, lon in coordinates]},
+            "legs": legs,
+        }
+
+
+def _builder():
+    return DailyPlanBuilder(WEEKLY_DIR, osrm=FakeOSRM())
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -33,7 +84,7 @@ def _minutes(value):
 
 
 def test_daily_plan_builder_assigns_real_workbook_rows():
-    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    plan = _builder().build(date(2026, 5, 26))
 
     assigned_count = sum(
         len(trip["stops"])
@@ -49,7 +100,7 @@ def test_daily_plan_builder_assigns_real_workbook_rows():
 
 
 def test_daily_plan_builder_does_not_parallelize_one_truck():
-    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    plan = _builder().build(date(2026, 5, 26))
 
     for truck in plan["trucks"]:
         previous_trip_return = None
@@ -78,7 +129,7 @@ def test_no_trip_exceeds_truck_capacity_or_working_hours():
     work_end = 20 * 60  # 20:00, matches DailyPlanConfig.work_end
 
     for day in (date(2026, 5, 25), date(2026, 5, 26), date(2026, 5, 28)):
-        plan = DailyPlanBuilder(WEEKLY_DIR).build(day)
+        plan = _builder().build(day)
         by_id = {t["truck_id"]: t for t in plan["trucks"]}
 
         for truck in plan["trucks"]:
@@ -115,7 +166,7 @@ def test_no_trip_exceeds_truck_capacity_or_working_hours():
 
 def test_export_round_trip_preserves_source_and_writes_edited_rows(tmp_path):
     source_hash = sha256(SOURCE_FILE.read_bytes()).hexdigest()
-    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    plan = _builder().build(date(2026, 5, 26))
     edited_stop, trip = _first_assigned_stop(plan)
     edited_row = edited_stop["raw"]["excel_row_index"]
 

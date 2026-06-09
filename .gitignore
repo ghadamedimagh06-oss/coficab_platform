@@ -68,6 +68,7 @@ htmlcov/
 shared_folder/
 uploads/
 temp/
+osrm-data/
 dump.rdb
 .env.*.local
 

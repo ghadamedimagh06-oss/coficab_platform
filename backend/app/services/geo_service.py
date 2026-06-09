@@ -3,12 +3,10 @@
 Turns a free-text customer name from the weekly-planning workbook into a
 destination, real road distance from the depot, and coordinates:
 
-  * The client directory (app/data/clients_directory.json, generated from the
-    frontend Clients page) is authoritative for the destination and its real
-    road km from the depot.
-  * Coordinates are geocoded online from the (normalised) destination city via
-    Nominatim (no API key), since the directory's embedded coordinates are
-    unreliable. Results are cached on disk so repeated builds are instant.
+  * The client directory (app/data/clients_directory.json) is authoritative for
+    delivery site coordinates and the legacy depot distance metadata.
+  * Nominatim is used only as a fallback when a directory entry has no
+    coordinates.
 
 Customers not in the directory fall back to resolving a Tunisian locality from
 the name (city tokens + a supplemental table seeded from the real mappings in
@@ -275,21 +273,19 @@ class GeoService:
           {"is_export": True}                        — foreign / export site
           None                                       — could not be located
 
-        The client directory (frontend Clients page) is authoritative: when a
-        customer is listed there we use its destination coordinates and its real
-        road distance ``km``. Online geocoding is only a fallback for customers
-        not in the directory.
+        The client directory is authoritative: when a customer is listed there
+        we use its stored delivery-site coordinates. Online geocoding is only a
+        fallback for missing directory coordinates or customers not listed there.
         """
         entry = self.lookup_client(customer)
         if entry:
-            # Distance comes from the directory (authoritative); coordinates are
-            # geocoded from the normalised destination city because the table's
-            # embedded coordinates are unreliable.
             dest = entry["destination"]
-            query = DESTINATION_QUERY.get(_strip_accents(dest).upper().strip(), f"{dest}, Tunisia")
-            coords = self.geocode(query)
-            if not coords and entry.get("lat") is not None and entry.get("lon") is not None:
-                coords = (float(entry["lat"]), float(entry["lon"]))  # last resort
+            coords = None
+            if entry.get("lat") is not None and entry.get("lon") is not None:
+                coords = (float(entry["lat"]), float(entry["lon"]))
+            if not coords:
+                query = DESTINATION_QUERY.get(_strip_accents(dest).upper().strip(), f"{dest}, Tunisia")
+                coords = self.geocode(query)
             if coords:
                 return {
                     "lat": coords[0], "lon": coords[1],

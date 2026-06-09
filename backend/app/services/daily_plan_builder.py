@@ -27,9 +27,9 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-from app.services.geo_service import GeoService, _haversine_km, ROAD_WINDING_FACTOR
+from app.services.geo_service import GeoService
+from app.services.osrm_service import OSRMError, OSRMService
 from app.services.planning_service import PlanningService
-from app.services.vrptw_optimizer import cluster_zones
 
 log = logging.getLogger(__name__)
 
@@ -57,11 +57,10 @@ except ImportError:
 class DailyPlanConfig:
     work_start: str = "06:00"      # depots open early for long hauls
     work_end: str = "20:00"
-    service_minutes: int = 20      # minimum on-site setup/(un)loading time
-    service_minutes_per_position: float = 3.0
-    max_service_minutes: int = 120
+    service_minutes: int = 0
+    service_minutes_per_position: float = 5.0
+    max_service_minutes: int = 240
     reload_minutes: int = 30       # back at depot between trips of one truck
-    avg_speed_kmh: float = 55.0    # loaded-truck average over Tunisian roads
 
 
 class DailyPlanBuilder:
@@ -70,11 +69,13 @@ class DailyPlanBuilder:
         source_dir: Path,
         cfg: Optional[DailyPlanConfig] = None,
         geo: Optional[GeoService] = None,
+        osrm: Optional[OSRMService] = None,
         trucks: Optional[list[dict[str, Any]]] = None,
     ):
         self.source_dir = source_dir
         self.cfg = cfg or DailyPlanConfig()
         self.geo = geo or GeoService()
+        self.osrm = osrm or OSRMService()
         self.truck_templates = DEFAULT_TRUCKS if trucks is None else trucks
 
     # ------------------------------------------------------------------ build
@@ -141,12 +142,12 @@ class DailyPlanBuilder:
             # road km from the client directory; client↔client legs (same zone,
             # usually short) use straight-line distance with a road factor. Time
             # is derived consistently from distance ÷ average truck speed.
-            dur_min = self._build_matrix(servable, depot)
+            dur_min, dist_km = self._build_matrix(servable, depot)
             for i, d in enumerate(servable):
                 d["_mi"] = i + 1
 
             # Step 4: assign deliveries to trucks (pins honoured, rest clustered).
-            groups = self._assign_to_trucks(servable, trucks)
+            groups = self._assign_to_trucks(servable, trucks, dist_km)
 
             # Step 5: order + schedule each truck.
             overflow_all: list[dict[str, Any]] = []
@@ -154,7 +155,7 @@ class DailyPlanBuilder:
                 items = groups.get(truck["truck_id"], [])
                 if not items:
                     continue
-                overflow_all.extend(self._schedule_truck(truck, items, dur_min))
+                overflow_all.extend(self._schedule_truck(truck, items, dur_min, depot))
 
             # Step 6: rescue pass. A truck that finished its zone early (or stayed
             # idle) can still run an extra depot→drop→depot trip. Place each
@@ -162,7 +163,7 @@ class DailyPlanBuilder:
             # AND weight) and complete the round trip inside the working day and
             # the customer's time window. This stops servable drops being thrown
             # away while owned trucks sit idle.
-            for d in self._rescue_overflow(trucks, overflow_all):
+            for d in self._rescue_overflow(trucks, overflow_all, depot):
                 reason = d.get("unassigned_reason") or "Exceeds working hours"
                 unassigned.append({**self._clean_stop(d), "unassigned_reason": reason})
 
@@ -173,7 +174,7 @@ class DailyPlanBuilder:
             "day": day.isoformat(),
             "source_file": source_path.name,
             "generated_at": datetime.utcnow().isoformat() + "Z",
-            "algorithm": "clustered VRPTW scheduler with OR-Tools time-window ordering",
+            "algorithm": "OSRM-backed VRPTW scheduler with OR-Tools stop ordering",
             "depot": {"lat": depot[0], "lon": depot[1]},
             "work_window": {"start": self.cfg.work_start, "end": self.cfg.work_end},
             "selection": selection,
@@ -193,7 +194,7 @@ class DailyPlanBuilder:
     # ------------------------------------------------------------ travel time
     def _build_matrix(
         self, routable: list[dict[str, Any]], depot: tuple[float, float]
-    ) -> list[list[float]]:
+    ) -> tuple[list[list[float]], list[list[float]]]:
         """Symmetric travel-time matrix (minutes), node 0 = depot.
 
         Depot↔client legs use the directory's real road km; client↔client legs
@@ -201,36 +202,29 @@ class DailyPlanBuilder:
         distance ÷ average truck speed, so displayed km and scheduled time stay
         consistent (and we never trust a possibly-wrong coordinate for the
         depot distance when the table already gives the real km)."""
-        speed = self.cfg.avg_speed_kmh
-        n = len(routable)
-        depot_km: list[float] = []
-        for d in routable:
-            table_km = d.get("_table_km")
-            km = (
-                float(table_km) if table_km is not None
-                else _haversine_km(depot[0], depot[1], d["lat"], d["lon"]) * ROAD_WINDING_FACTOR
-            )
-            depot_km.append(km)
-            d["distance_km"] = round(km, 1)
+        coordinates = [depot] + [(d["lat"], d["lon"]) for d in routable]
+        try:
+            table = self.osrm.table(coordinates)
+        except OSRMError:
+            raise
+        except Exception as exc:
+            raise OSRMError(f"OSRM matrix build failed: {exc}") from exc
 
-        size = n + 1
-        dur = [[0.0] * size for _ in range(size)]
-        for i in range(n):
-            t = depot_km[i] / speed * 60.0
-            dur[0][i + 1] = dur[i + 1][0] = t
-        for i in range(n):
-            for j in range(i + 1, n):
-                km = _haversine_km(
-                    routable[i]["lat"], routable[i]["lon"],
-                    routable[j]["lat"], routable[j]["lon"],
-                ) * ROAD_WINDING_FACTOR
-                t = km / speed * 60.0
-                dur[i + 1][j + 1] = dur[j + 1][i + 1] = t
-        return dur
+        dur_min = table.durations_min
+        dist_km = table.distances_km
+        for i, d in enumerate(routable, start=1):
+            d["distance_km"] = round(dist_km[0][i], 1)
+            d["travel_min"] = int(round(dur_min[0][i]))
+            d["depot_distance_km"] = d["distance_km"]
+            d["depot_travel_min"] = d["travel_min"]
+        return dur_min, dist_km
 
     # -------------------------------------------------------- truck assignment
     def _assign_to_trucks(
-        self, routable: list[dict[str, Any]], trucks: list[dict[str, Any]]
+        self,
+        routable: list[dict[str, Any]],
+        trucks: list[dict[str, Any]],
+        dist_km: list[list[float]],
     ) -> dict[int, list[dict[str, Any]]]:
         """Split deliveries across trucks: pinned ones honoured, the rest
         partitioned into compact geographic zones — one zone per truck.
@@ -253,11 +247,8 @@ class DailyPlanBuilder:
         if not free:
             return groups
 
-        # Reserve trucks that already carry a pinned load less aggressively:
-        # cluster across all trucks, then prefer empty trucks for new zones.
-        latlons = [(d["lat"], d["lon"]) for d in free]
         k = min(len(trucks), len(free))
-        raw = [zone for zone in cluster_zones(latlons, k=k) if zone]
+        raw = self._road_synergy_groups(free, k, dist_km)
 
         # Largest (heaviest) zone goes to the largest-capacity truck so a big
         # region needs the fewest trips. The rented truck (id 999) is kept as a
@@ -279,11 +270,7 @@ class DailyPlanBuilder:
             # truck size needed), then total positions as a tie-breaker.
             return (max(pos, default=0.0), max(kg, default=0.0), sum(pos))
 
-        zones_by_demand = sorted(
-            ([free[i] for i in zone] for zone in raw),
-            key=zone_demand,
-            reverse=True,
-        )
+        zones_by_demand = sorted(raw, key=zone_demand, reverse=True)
 
         # Capacity-feasibility-aware assignment: take zones biggest-demand first
         # and give each the best still-free truck that can physically carry its
@@ -308,6 +295,55 @@ class DailyPlanBuilder:
             available.remove(choice)
         return groups
 
+    def _road_synergy_groups(
+        self,
+        deliveries: list[dict[str, Any]],
+        k: int,
+        dist_km: list[list[float]],
+    ) -> list[list[dict[str, Any]]]:
+        if not deliveries:
+            return []
+        if k <= 1:
+            return [list(deliveries)]
+
+        remaining = list(deliveries)
+        seeds: list[dict[str, Any]] = []
+        first = max(remaining, key=lambda d: dist_km[0][d["_mi"]])
+        seeds.append(first)
+        remaining.remove(first)
+        while remaining and len(seeds) < k:
+            nxt = max(
+                remaining,
+                key=lambda d: min(dist_km[d["_mi"]][seed["_mi"]] for seed in seeds),
+            )
+            seeds.append(nxt)
+            remaining.remove(nxt)
+
+        groups = [[seed] for seed in seeds]
+        for delivery in sorted(remaining, key=lambda d: dist_km[0][d["_mi"]], reverse=True):
+            best_group = min(
+                groups,
+                key=lambda group: self._best_insertion_cost(group, delivery, dist_km),
+            )
+            best_group.append(delivery)
+        return groups
+
+    @staticmethod
+    def _best_insertion_cost(
+        group: list[dict[str, Any]],
+        delivery: dict[str, Any],
+        dist_km: list[list[float]],
+    ) -> float:
+        node = delivery["_mi"]
+        route = [0] + [d["_mi"] for d in group] + [0]
+        best = float("inf")
+        for idx in range(len(route) - 1):
+            before = route[idx]
+            after = route[idx + 1]
+            cost = dist_km[before][node] + dist_km[node][after] - dist_km[before][after]
+            best = min(best, cost)
+        return best
+
     # ------------------------------------------------------------- scheduling
     # A forced wait longer than this means it is cheaper (and more realistic)
     # for the truck to drive back to the depot and run a second trip later.
@@ -317,7 +353,11 @@ class DailyPlanBuilder:
     RENTED_TRUCK_ID = 999
 
     def _schedule_truck(
-        self, truck: dict[str, Any], items: list[dict[str, Any]], dur_min: list[list[float]]
+        self,
+        truck: dict[str, Any],
+        items: list[dict[str, Any]],
+        dur_min: list[list[float]],
+        depot: tuple[float, float],
     ) -> list[dict[str, Any]]:
         """Order the truck's stops, then walk them into depot-rooted trips,
         opening a new trip when capacity is full or a time window forces a long
@@ -354,11 +394,14 @@ class DailyPlanBuilder:
                 t = float(cursor)
                 depart_at = float(cursor)
                 return
+            stops = list(trip_stops)
+            route_payload = self._route_payload(depot, stops)
             truck["trips"].append({
                 "trip_id": f"{truck['truck_id']}-{len(truck['trips']) + 1}",
                 "depart_at": self._clock(int(round(depart_at))),
                 "return_at": self._clock(int(round(return_at))),
-                "stops": list(trip_stops),
+                "stops": stops,
+                **route_payload,
             })
             cursor = return_at + self.cfg.reload_minutes
             trip_stops = []
@@ -438,6 +481,8 @@ class DailyPlanBuilder:
                 "eta": self._clock(int(round(service_end))),
                 "travel_min": int(round(dur_min[prev][mi])),
                 "service_min": int(round(service)),
+                "depot_travel_min": d.get("depot_travel_min"),
+                "depot_distance_km": d.get("depot_distance_km"),
             })
             t = service_end
             prev = mi
@@ -448,7 +493,10 @@ class DailyPlanBuilder:
         return overflow
 
     def _rescue_overflow(
-        self, trucks: list[dict[str, Any]], overflow: list[dict[str, Any]]
+        self,
+        trucks: list[dict[str, Any]],
+        overflow: list[dict[str, Any]],
+        depot: tuple[float, float],
     ) -> list[dict[str, Any]]:
         """Try to place each overflowed delivery on a truck with spare time.
 
@@ -462,7 +510,6 @@ class DailyPlanBuilder:
         that still could not be placed."""
         work_start = self._minutes(self.cfg.work_start)
         work_end = self._minutes(self.cfg.work_end)
-        speed = self.cfg.avg_speed_kmh
 
         def free_at(truck: dict[str, Any]) -> int:
             if truck["trips"]:
@@ -478,11 +525,14 @@ class DailyPlanBuilder:
         for d in ordered:
             qty = float(d.get("quantity_positions") or 0)
             qty_kg = float(d.get("quantity_kg") or 0)
-            km = d.get("distance_km")
+            km = d.get("depot_distance_km", d.get("distance_km"))
             if km is None:
                 still.append(d)
                 continue
-            leg = float(km) / speed * 60.0
+            leg = float(d.get("depot_travel_min") or d.get("travel_min") or 0)
+            if leg <= 0:
+                still.append(d)
+                continue
             service = self._service_minutes(d)
             window = d.get("constraints", {}).get("time_window")
             win_start = self._minutes(window[0]) if window else None
@@ -513,17 +563,19 @@ class DailyPlanBuilder:
                     continue
                 if win_end is not None and arrival > win_end:
                     continue
+                stops = [{
+                    **self._clean_stop(d),
+                    "etd": self._clock(int(round(arrival))),
+                    "eta": self._clock(int(round(service_end))),
+                    "travel_min": int(round(leg)),
+                    "service_min": int(round(service)),
+                }]
                 t["trips"].append({
                     "trip_id": f"{t['truck_id']}-{len(t['trips']) + 1}",
                     "depart_at": self._clock(int(round(start))),
                     "return_at": self._clock(int(round(return_at))),
-                    "stops": [{
-                        **self._clean_stop(d),
-                        "etd": self._clock(int(round(arrival))),
-                        "eta": self._clock(int(round(service_end))),
-                        "travel_min": int(round(leg)),
-                        "service_min": int(round(service)),
-                    }],
+                    "stops": stops,
+                    **self._route_payload(depot, stops),
                 })
                 placed = True
                 break
@@ -532,9 +584,39 @@ class DailyPlanBuilder:
         return still
 
     def _service_minutes(self, delivery: dict[str, Any]) -> int:
+        override = delivery.get("handling_minutes") or delivery.get("service_minutes")
+        if override is not None:
+            try:
+                return max(0, int(round(float(override))))
+            except (TypeError, ValueError):
+                pass
         positions = float(delivery.get("quantity_positions") or delivery.get("position_count") or 0)
         computed = self.cfg.service_minutes + positions * self.cfg.service_minutes_per_position
         return int(round(min(self.cfg.max_service_minutes, max(self.cfg.service_minutes, computed))))
+
+    def _route_payload(
+        self,
+        depot: tuple[float, float],
+        stops: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not stops:
+            return {}
+        coords = [depot] + [(float(s["lat"]), float(s["lon"])) for s in stops] + [depot]
+        route = self.osrm.route(coords)
+        service_total = sum(int(s.get("service_min") or 0) for s in stops)
+        legs = route.get("legs") or []
+        for idx, stop in enumerate(stops):
+            if idx < len(legs):
+                stop["travel_min"] = legs[idx]["travel_min"]
+                stop["distance_km"] = round(legs[idx]["distance_km"], 1)
+        return {
+            "total_distance_km": route["total_distance_km"],
+            "total_travel_min": route["total_travel_min"],
+            "total_service_min": service_total,
+            "total_duration_min": route["total_travel_min"] + service_total,
+            "geometry": route.get("geometry"),
+            "legs": legs,
+        }
 
     def _order_stops(
         self, items: list[dict[str, Any]], dur_min: list[list[float]]
@@ -705,7 +787,7 @@ class DailyPlanBuilder:
             "id", "client", "start_location", "end_location", "quantity_positions",
             "position_count", "quantity_kg", "etd", "eta", "priority", "status",
             "constraints", "raw", "lat", "lon", "distance_km", "resolved_location",
-            "travel_min", "unassigned_reason",
+            "travel_min", "depot_travel_min", "depot_distance_km", "unassigned_reason",
         )
         return {k: delivery[k] for k in keep if k in delivery}
 

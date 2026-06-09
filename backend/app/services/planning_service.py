@@ -88,7 +88,7 @@ class PlanningService:
         etd = PlanningService._constraint_time(row.get("etd"))
         eta = PlanningService._constraint_time(row.get("eta"))
         if etd and eta:
-            constraints["time_window"] = [etd, eta]
+            constraints["requested_slot"] = [etd, eta]
 
         vehicle = str(row.get("vehicle") or "").strip()
         if vehicle:

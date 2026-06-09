@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db, get_db_optional
 from app.services.daily_plan_builder import DailyPlanBuilder
 from app.services.excel_exporter import export_plan_to_xlsx
+from app.services.geo_service import GeoService
+from app.services.osrm_service import OSRMError, OSRMService
 from app.services.vrptw_optimizer import (
     VRPTWOptimizer,
     VrptwOptimizer,
@@ -289,14 +291,34 @@ def update_weights(payload: WeightsPayload):
 
 @router.post("/route")
 async def optimize_route(request: RouteOptimization):
+    try:
+        depot = GeoService().depot()
+        stops = [_delivery_coordinate(delivery) for delivery in request.deliveries]
+        if not stops:
+            raise ValueError("At least one delivery with coordinates is required")
+        route = OSRMService().route([depot] + stops + [depot])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSRMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     return {
         "status": "optimized",
-        "original_distance": 1000,
-        "optimized_distance": 850,
-        "savings_percent": 15,
         "deliveries": len(request.deliveries),
         "trucks": len(request.trucks),
+        "route": route,
+        "optimized_distance": route["total_distance_km"],
+        "optimized_travel_min": route["total_travel_min"],
     }
+
+
+def _delivery_coordinate(delivery: Dict[str, Any]) -> tuple[float, float]:
+    lat = delivery.get("lat")
+    lon = delivery.get("lon", delivery.get("lng"))
+    if lat is None or lon is None:
+        label = delivery.get("client") or delivery.get("customer") or delivery.get("id") or "delivery"
+        raise ValueError(f"Missing coordinates for {label}")
+    return float(lat), float(lon)
 
 
 @router.post("/planning/generate")

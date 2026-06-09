@@ -70,6 +70,11 @@ function buildRows(plan) {
           travel_min: stop.travel_min,
           service_min: stop.service_min,
           distance_km: stop.distance_km,
+          trip_total_distance_km: trip.total_distance_km,
+          trip_total_travel_min: trip.total_travel_min,
+          trip_total_service_min: trip.total_service_min,
+          trip_total_duration_min: trip.total_duration_min,
+          route_status: trip.route_status || (trip.total_distance_km == null ? 'manual_pending' : 'osrm'),
           _unassigned: false,
         });
       });
@@ -103,6 +108,11 @@ function buildRows(plan) {
       travel_min: null,
       service_min: null,
       distance_km: stop.distance_km,
+      trip_total_distance_km: null,
+      trip_total_travel_min: null,
+      trip_total_service_min: null,
+      trip_total_duration_min: null,
+      route_status: null,
       _unassigned: true,
     });
   });
@@ -168,13 +178,15 @@ export default function PlanTable({ plan, onExport, exporting }) {
               <TH>N°</TH>
               <TH>Truck</TH>
               <TH>Trip</TH>
+              <TH>Route total</TH>
               <TH>Driver</TH>
               <TH>Client</TH>
               <TH>Destination</TH>
               <TH>ETD</TH>
               <TH>ETA</TH>
               <TH>Travel</TH>
-              <TH>Dist km</TH>
+              <TH>Service</TH>
+              <TH>Leg km</TH>
               <TH>Positions</TH>
               <TH>Gross kg</TH>
               <TH>Priority</TH>
@@ -214,6 +226,17 @@ export default function PlanTable({ plan, onExport, exporting }) {
                       </span>
                     ) : '—'}
                   </TD>
+                  <TD className="text-xs text-[#6b6b7b]">
+                    {row._firstInTrip ? (
+                      row.route_status === 'osrm' ? (
+                        <span title={`${row.trip_total_travel_min || 0} min travel + ${row.trip_total_service_min || 0} min service`}>
+                          {Number(row.trip_total_distance_km || 0).toFixed(1)} km · {fmt(row.trip_total_duration_min)} min
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-amber-600">Pending</span>
+                      )
+                    ) : ''}
+                  </TD>
                   <TD className="text-[#6b6b7b]">{row.driver}</TD>
                   <TD className="max-w-[14rem] font-medium">
                     <span className="block truncate" title={row.client}>{row.client}</span>
@@ -225,6 +248,9 @@ export default function PlanTable({ plan, onExport, exporting }) {
                   <TD className="tabular-nums font-medium text-[#6b6b7b]">{row.eta}</TD>
                   <TD className="tabular-nums text-[#6b6b7b]">
                     {row.travel_min != null ? `${row.travel_min} min` : '—'}
+                  </TD>
+                  <TD className="tabular-nums text-[#6b6b7b]">
+                    {row.service_min != null ? `${row.service_min} min` : '—'}
                   </TD>
                   <TD className="tabular-nums text-[#6b6b7b]">
                     {row.distance_km != null ? row.distance_km : '—'}
@@ -260,6 +286,8 @@ export default function PlanTable({ plan, onExport, exporting }) {
                 <TD />
                 <TD />
                 <TD />
+                <TD />
+                <TD />
                 <TD className="tabular-nums text-[#1a1a2e]">{fmt(totalPos)}</TD>
                 <TD className="tabular-nums text-[#1a1a2e]">{fmt(Math.round(totalKg))}</TD>
                 <TD />
@@ -272,7 +300,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
             {unassigned.length > 0 && (
               <>
                 <tr>
-                  <td colSpan={16} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
+                  <td colSpan={18} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.18em] text-red-600">
                       Needs dispatcher review — {unassigned.length} unassigned
                     </span>
@@ -293,6 +321,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                         </span>
                       </TD>
                       <TD className="text-xs text-[#9b9bab]">—</TD>
+                      <TD className="text-xs text-[#9b9bab]">—</TD>
                       <TD className="text-[#6b6b7b]">—</TD>
                       <TD className="max-w-[14rem] font-medium text-red-700">
                         <span className="block truncate" title={row.client}>{row.client}</span>
@@ -302,6 +331,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                       </TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.etd}</TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.eta}</TD>
+                      <TD>—</TD>
                       <TD>—</TD>
                       <TD className="tabular-nums text-[#6b6b7b]">
                         {row.distance_km != null ? row.distance_km : '—'}

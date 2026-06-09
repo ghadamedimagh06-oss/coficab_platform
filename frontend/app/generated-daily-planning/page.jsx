@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, Wand2 } from 'lucide-react';
 import { exportDailyPlan, generateDailyPlan } from '../services/api';
@@ -9,6 +10,7 @@ import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
 import PlanTable from '../../components/planning/PlanTable';
+import RouteSummary from '../../components/planning/RouteSummary';
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
 import { trucks as fallbackTrucks } from '../../data/coficabData';
 import { useFleet } from '../../hooks/useFleet';
@@ -17,6 +19,8 @@ import {
   normalizeTruckStatus,
   UNAVAILABLE_TRUCK_STATUSES,
 } from '../../utils/truckStatus';
+
+const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
 
 const item = {
   hidden: { opacity: 0, y: 20 },
@@ -107,6 +111,7 @@ function buildLaneTrip(truckId, stops) {
       trip_id: `${truckId}-trip-${index + 1}`,
       depart_at: toClock(Math.max(WORK_START, firstStart - 15)),
       return_at: toClock(Math.min(WORK_END, lastEnd + 15)),
+      route_status: 'manual_pending',
       stops: tripStops,
     };
   });
@@ -466,6 +471,13 @@ export default function GeneratedDailyPlanningPage() {
             </div>
           ))}
         </motion.div>
+
+        {plan && (
+          <motion.div variants={item} className="space-y-6">
+            <RouteSummary plan={plan} />
+            <RouteMap plan={plan} />
+          </motion.div>
+        )}
 
         {(plan?.unassigned || []).length > 0 && (
           <div className="rounded-[1.75rem] border border-red-200 bg-red-50 p-5">
