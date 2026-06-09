@@ -227,6 +227,9 @@ class DailyPlanBuilder:
     # from splitting unless it genuinely lowers the total cost.
     _W_SPLIT_CUSTOMER = 250.0   # per customer that gets split
     _W_SPLIT_STOP = 120.0       # per extra stop a split creates
+    # Split comments are EXACT business quantities: warn on any mismatch beyond
+    # this tolerance (0 = flag every discrepancy) instead of silently rescaling.
+    SPLIT_QTY_TOLERANCE = 0
 
     @staticmethod
     def _is_urgent(d: dict[str, Any]) -> bool:
@@ -444,6 +447,25 @@ class DailyPlanBuilder:
         total_pos = sum(sizes) or 1
         max_cap = int(max((t["capacity_positions"] for t in self.truck_templates), default=0))
 
+        # Split comments are treated as EXACT business quantities. If the comment
+        # total does not match the delivery total (beyond a small tolerance) we
+        # still conserve positions, but raise a warning so a workbook typo is
+        # surfaced to the planner instead of being silently absorbed.
+        comment_total = sum(explicit)
+        discrepancy = orig_pos - comment_total
+        split_warning = None
+        if orig_pos > 0 and abs(discrepancy) > self.SPLIT_QTY_TOLERANCE:
+            split_warning = (
+                f"Quantity mismatch: the split comment totals {comment_total} positions but the "
+                f"delivery has {orig_pos}. Please check the source workbook — the "
+                f"{abs(discrepancy)}-position difference was applied to {site_labels[-1].title()} "
+                f"to keep the total correct."
+            )
+            log.warning(
+                "DailyPlanBuilder: split of '%s' quantity mismatch (comment=%s, delivery=%s)",
+                original_client, comment_total, orig_pos,
+            )
+
         # Friendly, planner-facing explanation listing each resulting drop.
         resulting = [f"{sizes[i]} positions ({site_labels[i].title()})" for i in range(len(sizes))]
         resulting_phrase = (
@@ -454,6 +476,8 @@ class DailyPlanBuilder:
             f"Delivery automatically split because {orig_pos} positions exceed the maximum "
             f"truck capacity of {max_cap} positions. Resulting deliveries: {resulting_phrase}."
         )
+        if split_warning:
+            explanation = f"{explanation} ⚠ {split_warning}"
 
         subs: list[dict[str, Any]] = []
         for i, label in enumerate(site_labels, start=1):
@@ -478,6 +502,7 @@ class DailyPlanBuilder:
                 "split_total_parts": len(site_labels),
                 "split_positions": int(pos),
                 "planning_comment": explanation,
+                "split_warning": split_warning,
             })
 
         # Safeguard: never lose or create positions in a split.
@@ -1033,7 +1058,7 @@ class DailyPlanBuilder:
             # Split explainability / traceability:
             "is_split", "split_reason", "split_parent_id", "split_part",
             "split_total_parts", "split_positions", "planning_comment",
-            "original_client", "split_label",
+            "original_client", "split_label", "split_warning",
         )
         return {k: delivery[k] for k in keep if k in delivery}
 

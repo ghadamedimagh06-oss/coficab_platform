@@ -33,12 +33,16 @@ function Badge({ value, styles }) {
 // positions, truck capacity, resulting parts) is on hover via the title.
 function SplitBadge({ row }) {
   const counter = row.split_total_parts ? ` ${row.split_part}/${row.split_total_parts}` : '';
+  const warn = !!row.split_warning;
+  const cls = warn
+    ? 'bg-red-100 text-red-800 ring-1 ring-red-300'
+    : 'bg-amber-100 text-amber-800 ring-1 ring-amber-300';
   return (
     <span
-      title={row.planning_comment || 'Auto-split delivery'}
-      className="shrink-0 cursor-help rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-amber-300"
+      title={warn ? `⚠ ${row.split_warning}` : (row.planning_comment || 'Auto-split delivery')}
+      className={`shrink-0 cursor-help rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}
     >
-      🔀 Auto-split{counter}
+      {warn ? '⚠' : '🔀'} Auto-split{counter}
     </span>
   );
 }
@@ -83,6 +87,7 @@ function buildRows(plan) {
           comments: stop.planning_comment || constraints.notes || constraints.comment_constraint || raw.notes || '',
           is_split: !!stop.is_split,
           planning_comment: stop.planning_comment || '',
+          split_warning: stop.split_warning || null,
           split_part: stop.split_part,
           split_total_parts: stop.split_total_parts,
           travel_min: stop.travel_min,
@@ -120,6 +125,7 @@ function buildRows(plan) {
       comments: stop.unassigned_reason || stop.planning_comment || constraints.comment_constraint || '',
       is_split: !!stop.is_split,
       planning_comment: stop.planning_comment || '',
+      split_warning: stop.split_warning || null,
       split_part: stop.split_part,
       split_total_parts: stop.split_total_parts,
       travel_min: null,
