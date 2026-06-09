@@ -464,6 +464,7 @@ class DailyPlanBuilder:
                 "id": (int(base_id) * 100 + i) if str(base_id).isdigit() else f"{base_id}-{i}",
                 "client": f"{original_client} ({label.title()})" if label else original_client,
                 "original_client": original_client,
+                "split_label": label.title() if label else None,
                 "geocode_as": city,
                 "quantity_positions": float(pos),
                 "position_count": float(pos),
@@ -1032,7 +1033,7 @@ class DailyPlanBuilder:
             # Split explainability / traceability:
             "is_split", "split_reason", "split_parent_id", "split_part",
             "split_total_parts", "split_positions", "planning_comment",
-            "original_client",
+            "original_client", "split_label",
         )
         return {k: delivery[k] for k in keep if k in delivery}
 
