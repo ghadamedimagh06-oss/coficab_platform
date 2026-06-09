@@ -22,6 +22,7 @@ with a reason rather than being given a fake slot.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -84,87 +85,39 @@ class DailyPlanBuilder:
         rows, selection = self._filter_rows(plan_data["rows"], day)
         delivery_rows = [row for row in rows if row.get("client")]
         deliveries = [self._delivery_from_row(row, day) for row in delivery_rows]
+        # Mark URGENT drops from their comment so the urgent rules can fire.
+        for d in deliveries:
+            if "urgent" in str((d.get("raw") or {}).get("notes") or "").lower():
+                d["priority"] = "urgent"
 
         depot = self.geo.depot()
-        unassigned: list[dict[str, Any]] = []
-        routable: list[dict[str, Any]] = []
 
-        # Step 2: resolve every customer (client directory first, then geocode).
-        for delivery in deliveries:
-            loc = self.geo.locate(delivery["client"])
-            if loc is None:
-                unassigned.append({**delivery, "unassigned_reason": f"Could not locate “{delivery['client']}”"})
-                continue
-            if loc.get("is_export"):
-                unassigned.append({**delivery, "unassigned_reason": "Export / foreign site — not a domestic truck run"})
-                continue
-            delivery["lat"], delivery["lon"] = loc["lat"], loc["lon"]
-            delivery["resolved_location"] = loc["label"]
-            delivery["_table_km"] = loc.get("km")  # authoritative depot distance
-            routable.append(delivery)
-
-        trucks = [self._fresh_truck(t) for t in self.truck_templates]
-
-        # A single delivery larger than the biggest truck can never be loaded —
-        # set these aside up front so they don't consume a large truck that a
-        # servable delivery needs (a 33-pos drop must not steal the 24-truck a
-        # 16-pos drop could use).
-        max_truck_cap = max((t["capacity_positions"] for t in trucks), default=-1)
-        max_truck_kg = max((t["capacity_kg"] for t in trucks), default=-1)
-        servable: list[dict[str, Any]] = []
-        for d in routable:
-            qty_pos = float(d.get("quantity_positions") or 0)
-            qty_kg = float(d.get("quantity_kg") or 0)
-            if not trucks:
-                unassigned.append({**self._clean_stop(d), "unassigned_reason": "No available trucks"})
-            elif qty_pos > max_truck_cap:
-                unassigned.append({
-                    **self._clean_stop(d),
-                    "unassigned_reason": (
-                        f"{int(qty_pos)} positions exceeds the largest "
-                        f"truck ({max_truck_cap}) — needs a delivery split"
-                    ),
-                })
-            elif qty_kg > max_truck_kg:
-                unassigned.append({
-                    **self._clean_stop(d),
-                    "unassigned_reason": (
-                        f"{int(qty_kg)} kg exceeds the largest truck "
-                        f"({int(max_truck_kg)} kg) — needs a delivery split"
-                    ),
-                })
-            else:
-                servable.append(d)
-
-        if servable:
-            # Step 3: travel-time matrix. Depot↔client legs use the authoritative
-            # road km from the client directory; client↔client legs (same zone,
-            # usually short) use straight-line distance with a road factor. Time
-            # is derived consistently from distance ÷ average truck speed.
-            dur_min = self._build_matrix(servable, depot)
-            for i, d in enumerate(servable):
-                d["_mi"] = i + 1
-
-            # Steps 4-6: think globally first. Try several fleet-assignment
-            # strategies, schedule + rescue each on its own fleet, score them with
-            # the weighted waste cost, and keep the cheapest. The zone baseline is
-            # always one of the candidates, so the optimiser can never come out
-            # worse than before.
-            candidates = []
-            for name, assign_fn in (
-                ("zones", self._assign_to_trucks),
-                ("packed", self._assign_insertion),
-            ):
-                cand_trucks, cand_unassigned = self._run_strategy(servable, dur_min, assign_fn)
-                cost = self._plan_cost(cand_trucks, cand_unassigned)
-                candidates.append((cost, name, cand_trucks, cand_unassigned))
-            best_cost, best_name, trucks, best_unassigned = min(candidates, key=lambda c: c[0])
-            log.info(
-                "DailyPlanBuilder: '%s' assignment won (cost=%.0f) among %s",
-                best_name, best_cost,
-                {n: round(c) for c, n, *_ in candidates},
+        # Splitting is a DECISION VARIABLE, not preprocessing. Generate demand
+        # variants but do not mutate the input: solve the unsplit baseline AND a
+        # split-enabled variant fully and independently, score the FINAL plans
+        # (with a penalty per split so it is never "free"), and keep the cheapest.
+        # The unsplit baseline is always in the running, so enabling splits can
+        # never degrade the operational plan.
+        base_variant = list(deliveries)
+        split_variant = [sub for d in deliveries for sub in self._maybe_split(d)]
+        variants: list[tuple[str, list, float]] = [("baseline", base_variant, 0.0)]
+        split_parents = {d["_split_parent"] for d in split_variant if d.get("_split_parent") is not None}
+        if split_parents:
+            extra_stops = max(0, len(split_variant) - len(base_variant))
+            split_penalty = (
+                self._W_SPLIT_CUSTOMER * len(split_parents) + self._W_SPLIT_STOP * extra_stops
             )
-            unassigned.extend(best_unassigned)
+            variants.append(("split", split_variant, split_penalty))
+
+        solved = []
+        for vname, vdeliveries, vpenalty in variants:
+            v_trucks, v_unassigned, v_routable, v_cost = self._evaluate(vdeliveries, depot)
+            solved.append((v_cost + vpenalty, vname, v_trucks, v_unassigned, v_routable))
+        total_cost, variant_name, trucks, unassigned, routable = min(solved, key=lambda s: s[0])
+        log.info(
+            "DailyPlanBuilder: variant '%s' won (cost=%.0f) among %s",
+            variant_name, total_cost, {s[1]: round(s[0]) for s in solved},
+        )
 
         clean_trucks = [self._clean_truck(t) for t in trucks]
 
@@ -173,23 +126,85 @@ class DailyPlanBuilder:
             "day": day.isoformat(),
             "source_file": source_path.name,
             "generated_at": datetime.utcnow().isoformat() + "Z",
-            "algorithm": "clustered VRPTW scheduler with OR-Tools time-window ordering",
+            "algorithm": "global VRPTW: demand variants + cost-scored fleet candidates",
             "depot": {"lat": depot[0], "lon": depot[1]},
             "work_window": {"start": self.cfg.work_start, "end": self.cfg.work_end},
             "selection": selection,
+            "variant": variant_name,
             "summary": {
                 "source_rows": len(plan_data["rows"]),
                 "selected_rows": len(rows),
                 "selected_delivery_rows": len(delivery_rows),
                 "deliveries_considered": len(deliveries),
                 "deliveries_routed": len(routable),
-                "total_positions": int(sum(d.get("quantity_positions") or 0 for d in deliveries)),
-                "total_gross_weight_kg": round(sum(d.get("quantity_kg") or 0 for d in deliveries), 2),
+                "total_positions": int(sum(self._pos(d) for d in routable)),
+                "total_gross_weight_kg": round(sum(self._kg(d) for d in routable), 2),
             },
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
             "diagnostics": self._diagnostics(trucks, unassigned, routable, self.truck_templates),
         }
+
+    def _evaluate(self, deliveries, depot):
+        """Solve one demand variant end-to-end: resolve → feasibility filter →
+        cost-scored fleet candidates → schedule. Returns
+        (trucks, unassigned, routable, final_cost). The unsplit/oversize and
+        unlocatable drops are all included in the final cost, so variants are
+        compared on their true delivered service, not just the routed part."""
+        unassigned: list[dict[str, Any]] = []
+        routable: list[dict[str, Any]] = []
+
+        # Resolve every customer (client directory first, then geocode).
+        for delivery in deliveries:
+            loc = self.geo.locate(delivery.get("geocode_as") or delivery["client"])
+            if loc is None:
+                unassigned.append({**delivery, "unassigned_reason": f"Could not locate “{delivery['client']}”"})
+                continue
+            if loc.get("is_export"):
+                unassigned.append({**delivery, "unassigned_reason": "Export / foreign site — not a domestic truck run"})
+                continue
+            delivery["lat"], delivery["lon"] = loc["lat"], loc["lon"]
+            delivery["resolved_location"] = loc["label"]
+            delivery["_table_km"] = loc.get("km")
+            routable.append(delivery)
+
+        trucks = [self._fresh_truck(t) for t in self.truck_templates]
+
+        # Hard capacity: a drop larger than the biggest truck cannot load at all.
+        max_truck_cap = max((t["capacity_positions"] for t in trucks), default=-1)
+        max_truck_kg = max((t["capacity_kg"] for t in trucks), default=-1)
+        servable: list[dict[str, Any]] = []
+        for d in routable:
+            qty_pos = self._pos(d)
+            qty_kg = self._kg(d)
+            if not trucks:
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": "No available trucks"})
+            elif qty_pos > max_truck_cap:
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": (
+                    f"{int(qty_pos)} positions exceeds the largest truck "
+                    f"({max_truck_cap}) — needs a delivery split")})
+            elif qty_kg > max_truck_kg:
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": (
+                    f"{int(qty_kg)} kg exceeds the largest truck "
+                    f"({int(max_truck_kg)} kg) — needs a delivery split")})
+            else:
+                servable.append(d)
+
+        if servable:
+            dur_min = self._build_matrix(servable, depot)
+            for i, d in enumerate(servable):
+                d["_mi"] = i + 1
+            candidates = []
+            for name, assign_fn in (
+                ("zones", self._assign_to_trucks),
+                ("packed", self._assign_insertion),
+            ):
+                ct, cu = self._run_strategy(servable, dur_min, assign_fn)
+                candidates.append((self._plan_cost(ct, cu), name, ct, cu))
+            _, _, trucks, best_unassigned = min(candidates, key=lambda c: c[0])
+            unassigned.extend(best_unassigned)
+
+        return trucks, unassigned, routable, self._plan_cost(trucks, unassigned)
 
     # --------------------------------------------------- global fleet packing
     # Business objective (iteration 1): minimise total transport waste, not just
@@ -208,6 +223,10 @@ class DailyPlanBuilder:
     _W_UNDERUTIL = 800.0        # penalty per (0.8 - util) of an under-full trip
     _W_KM = 1.0
     _W_TIME = 0.5
+    # Splitting is a structural trade-off, never free — these keep the optimiser
+    # from splitting unless it genuinely lowers the total cost.
+    _W_SPLIT_CUSTOMER = 250.0   # per customer that gets split
+    _W_SPLIT_STOP = 120.0       # per extra stop a split creates
 
     @staticmethod
     def _is_urgent(d: dict[str, Any]) -> bool:
@@ -388,6 +407,63 @@ class DailyPlanBuilder:
             "under_80pct_departures": under,
             "unassigned": unassigned_diag,
         }
+
+    # --------------------------------------------------------- delivery splits
+    def _maybe_split(self, delivery: dict[str, Any]) -> list[dict[str, Any]]:
+        """Split a multi-site drop described in its comment into one sub-delivery
+        per site, e.g. "24pos beja1 8pos beja 2" -> 24-pos Béja-1 + 8-pos Béja-2.
+        Each piece keeps the client identity but routes to its own city so the
+        pieces can ride different trucks. Returns [delivery] when nothing splits."""
+        raw = delivery.get("raw") or {}
+        comment = raw.get("notes") or raw.get("comment") or delivery.get("commentaire") or ""
+        parts = self._parse_split_comment(comment)
+        if not parts:
+            return [delivery]
+
+        total_pos = sum(p for p, _ in parts) or 1
+        base_kg = float(delivery.get("quantity_kg") or 0)
+        base_id = delivery.get("id") or 0
+        subs: list[dict[str, Any]] = []
+        for i, (pos, label) in enumerate(parts, start=1):
+            city = self._split_city(label) or (delivery.get("client") or "")
+            subs.append({
+                **delivery,
+                "id": (int(base_id) * 100 + i) if str(base_id).isdigit() else f"{base_id}-{i}",
+                "client": f"{delivery['client']} ({label.title()})" if label else delivery["client"],
+                "geocode_as": city,
+                "quantity_positions": float(pos),
+                "position_count": float(pos),
+                "quantity_kg": round(base_kg * pos / total_pos, 1),
+                "_split_parent": base_id,
+            })
+        log.info("DailyPlanBuilder: split '%s' into %s", delivery.get("client"), parts)
+        return subs
+
+    @staticmethod
+    def _parse_split_comment(comment: Any) -> Optional[list[tuple[int, str]]]:
+        """Parse "24pos beja1 8pos beja 2" -> [(24, 'beja1'), (8, 'beja 2')]."""
+        text = str(comment or "").strip().lower()
+        if "pos" not in text:
+            return None
+        toks = re.split(r"(\d+)\s*pos\b", text)
+        parts: list[tuple[int, str]] = []
+        i = 1
+        while i < len(toks):
+            try:
+                n = int(toks[i])
+            except (TypeError, ValueError):
+                i += 1
+                continue
+            label = toks[i + 1].strip() if i + 1 < len(toks) else ""
+            if n > 0:
+                parts.append((n, label))
+            i += 2
+        return parts if len(parts) >= 2 else None
+
+    @staticmethod
+    def _split_city(label: str) -> str:
+        """'beja1' / 'beja 2' -> 'Beja' (strip the trailing site number)."""
+        return re.sub(r"[\s\d]+$", "", str(label or "")).strip().title()
 
     # ------------------------------------------------------------ travel time
     def _build_matrix(
