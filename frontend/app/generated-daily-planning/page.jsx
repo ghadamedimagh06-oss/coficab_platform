@@ -482,7 +482,10 @@ export default function GeneratedDailyPlanningPage() {
                     {delivery.quantity_kg ? ` - ${formatNumber(delivery.quantity_kg)} kg` : ''}
                   </p>
                   {delivery.constraints?.comment_constraint && (
-                    <p className="mt-2 text-xs font-semibold text-red-600">{delivery.constraints.comment_constraint}</p>
+                    <p className="mt-2 inline-flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800 ring-1 ring-amber-200">
+                      <span className="font-semibold uppercase tracking-wide">Note</span>
+                      <span className="font-medium">{delivery.constraints.comment_constraint}</span>
+                    </p>
                   )}
                 </div>
               ))}

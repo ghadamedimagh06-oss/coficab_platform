@@ -87,7 +87,18 @@ export default function GanttBoard({
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-4 text-xs text-[#6b6b7b]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-1.5 rounded-sm bg-[#ef4444]" /> Urgent
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-1.5 rounded-sm bg-[#f59e0b]" /> Locked (Excel constraint)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-sm border border-[#d8d3ca] bg-[#bbf7d0]" /> Colour = client
+          </span>
+        </div>
         <MarkerTool />
       </div>
       <div className="overflow-x-auto rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm">

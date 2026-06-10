@@ -72,7 +72,7 @@ export default function TruckLane({ truck, markers = [], onResizeDelivery, onCan
   const packed = packedStops(allStops);
   const truckMarkers = markers.filter((marker) => String(marker.truck_id) === String(truck.truck_id));
   const rowCount = Math.max(1, packed.reduce((max, stop) => Math.max(max, stop._row + 1), 1));
-  const laneHeight = Math.max(118, rowCount * 94 + 24);
+  const laneHeight = Math.max(124, rowCount * 104 + 24);
   const minutesPerPixel = laneWidth ? WORK_MINUTES / laneWidth : 1;
 
   return (
@@ -105,12 +105,12 @@ export default function TruckLane({ truck, markers = [], onResizeDelivery, onCan
             {packed.map((delivery) => (
                 <div
                   key={delivery.id}
-                  className="absolute h-20"
+                  className="absolute h-[88px]"
                   style={{
                     left: `${Math.max(0, delivery._left)}%`,
-                    top: `${12 + delivery._row * 94}px`,
+                    top: `${12 + delivery._row * 104}px`,
                     width: `${Math.min(delivery._width, 100 - Math.max(0, delivery._left))}%`,
-                    minWidth: 108,
+                    minWidth: 148,
                   }}
                 >
                   <DeliveryBlock

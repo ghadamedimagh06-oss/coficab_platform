@@ -22,8 +22,16 @@ function resizeTimes(delivery, edge, deltaMinutes) {
 
 export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore, minutesPerPixel = 1, compact = false }) {
   const locked = delivery.constraints?.required_truck_id || delivery.constraints?.time_window;
+  const urgent = String(delivery.priority || '').toLowerCase() === 'urgent';
   const positions = Number(delivery.quantity_positions || delivery.position_count || 0);
   const weight = Number(delivery.quantity_kg || 0);
+  const accent = delivery.status === 'cancelled'
+    ? null
+    : urgent
+      ? '#ef4444'
+      : locked
+        ? '#f59e0b'
+        : null;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `delivery-${delivery.id}`,
     data: { deliveryId: delivery.id, delivery },
@@ -66,7 +74,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
         event.preventDefault();
         delivery.status === 'cancelled' ? onRestore(delivery.id) : onCancel(delivery.id);
       }}
-      className={`relative h-full min-w-0 rounded-2xl border px-4 py-3 text-sm shadow-sm transition ${
+      className={`relative flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border pl-4 pr-2.5 py-2 text-sm shadow-sm transition ${
         delivery.status === 'cancelled'
           ? 'border-slate-300 bg-slate-100 text-slate-500 opacity-70'
           : 'border-[#d8d3ca] text-[#1a1a2e] hover:-translate-y-0.5 hover:shadow-md'
@@ -76,8 +84,14 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
         touchAction: 'none',
         ...dragStyle,
       }}
-      title={`${delivery.client} ${delivery.etd || ''}-${delivery.eta || ''}`}
+      title={`${delivery.client} · ${delivery.etd || '--'}–${delivery.eta || '--'} · ${positions} pos${urgent ? ' · URGENT' : ''}${locked ? ' · locked' : ''}`}
     >
+      {accent && (
+        <span
+          className="pointer-events-none absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl"
+          style={{ backgroundColor: accent }}
+        />
+      )}
       {delivery.status !== 'cancelled' && (
         <>
           <button
@@ -100,30 +114,44 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
           </button>
         </>
       )}
-      <div className="flex items-start justify-between gap-2">
-        <span className={`overflow-hidden break-words font-semibold leading-tight ${compact ? 'max-h-10' : 'max-h-14'}`}>{delivery.client}</span>
-        {locked && delivery.status !== 'cancelled' ? (
-          <span className="shrink-0 rounded-full p-1" title="Hard constraint from Excel">
-            <Lock size={12} />
-          </span>
-        ) : (
-          <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              delivery.status === 'cancelled' ? onRestore(delivery.id) : onCancel(delivery.id);
-            }}
-            className="shrink-0 rounded-full p-1 hover:bg-white/50"
-            title={delivery.status === 'cancelled' ? 'Restore delivery' : 'Cancel delivery'}
-          >
-            {delivery.status === 'cancelled' ? <RotateCcw size={12} /> : <X size={12} />}
-          </button>
-        )}
+      <div className="flex items-start justify-between gap-1">
+        <span
+          className="min-w-0 break-words text-[13px] font-semibold leading-tight"
+          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+        >
+          {delivery.client}
+        </span>
+        <span className="flex shrink-0 items-center gap-0.5">
+          {urgent && delivery.status !== 'cancelled' && (
+            <span className="rounded bg-red-500 px-1 py-0.5 text-[9px] font-bold uppercase leading-none text-white" title="Urgent delivery">
+              !
+            </span>
+          )}
+          {locked && delivery.status !== 'cancelled' ? (
+            <span className="rounded-full p-0.5 text-amber-600" title="Hard constraint from Excel (locked time / truck)">
+              <Lock size={12} />
+            </span>
+          ) : (
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                delivery.status === 'cancelled' ? onRestore(delivery.id) : onCancel(delivery.id);
+              }}
+              className="rounded-full p-0.5 hover:bg-white/60"
+              title={delivery.status === 'cancelled' ? 'Restore delivery' : 'Cancel delivery'}
+            >
+              {delivery.status === 'cancelled' ? <RotateCcw size={12} /> : <X size={12} />}
+            </button>
+          )}
+        </span>
       </div>
-      <div className="mt-2 text-xs text-[#6b6b7b]">{delivery.etd || '--'} to {delivery.eta || '--'}</div>
-      <div className="mt-1 text-xs text-[#6b6b7b]">
-        {positions.toLocaleString()} pos{weight ? ` / ${weight.toLocaleString()} kg` : ''}
+      <div className="mt-auto pt-1 leading-tight">
+        <div className="text-[11px] tabular-nums text-[#6b6b7b]">{delivery.etd || '--'} – {delivery.eta || '--'}</div>
+        <div className="text-[11px] font-semibold text-[#4b4b5b]">
+          {positions.toLocaleString()} pos{weight ? ` · ${weight.toLocaleString()} kg` : ''}
+        </div>
       </div>
     </div>
   );

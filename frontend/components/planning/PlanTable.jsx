@@ -159,6 +159,10 @@ export default function PlanTable({ plan, onExport, exporting }) {
 
   const totalPos = assigned.reduce((s, r) => s + Number(r.position_count || 0), 0);
   const totalKg  = assigned.reduce((s, r) => s + Number(r.gross_weight_kg || 0), 0);
+  // Positions-only model: weight is 0 across the board, so the kg column/summary
+  // are noise. Only show them if the workbook actually carries weight data.
+  const anyWeight = rows.some((r) => Number(r.gross_weight_kg || 0) > 0);
+  const colCount = anyWeight ? 16 : 15;
 
   return (
     <div className="mt-8 space-y-4">
@@ -170,7 +174,8 @@ export default function PlanTable({ plan, onExport, exporting }) {
             Export-ready plan table
           </h2>
           <p className="mt-0.5 text-xs text-[#6b6b7b]">
-            {assigned.length} deliveries · {fmt(totalPos)} positions · {fmt(Math.round(totalKg))} kg loaded
+            {assigned.length} deliveries · {fmt(totalPos)} positions
+            {anyWeight && ` · ${fmt(Math.round(totalKg))} kg loaded`}
             {unassigned.length > 0 && ` · ${unassigned.length} unassigned`}
           </p>
         </div>
@@ -204,7 +209,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
               <TH>Travel</TH>
               <TH>Dist km</TH>
               <TH>Positions</TH>
-              <TH>Gross kg</TH>
+              {anyWeight && <TH>Gross kg</TH>}
               <TH>Priority</TH>
               <TH>Status</TH>
               <TH className="rounded-tr-[2rem] pr-6">Comments / Reason</TH>
@@ -261,7 +266,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                     {row.distance_km != null ? row.distance_km : '—'}
                   </TD>
                   <TD className="tabular-nums font-semibold">{fmt(row.position_count)}</TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>
+                  {anyWeight && <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>}
                   <TD>
                     <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                       {row.priority}
@@ -292,7 +297,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                 <TD />
                 <TD />
                 <TD className="tabular-nums text-[#1a1a2e]">{fmt(totalPos)}</TD>
-                <TD className="tabular-nums text-[#1a1a2e]">{fmt(Math.round(totalKg))}</TD>
+                {anyWeight && <TD className="tabular-nums text-[#1a1a2e]">{fmt(Math.round(totalKg))}</TD>}
                 <TD />
                 <TD />
                 <TD className="pr-6" />
@@ -303,7 +308,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
             {unassigned.length > 0 && (
               <>
                 <tr>
-                  <td colSpan={16} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
+                  <td colSpan={colCount} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.18em] text-red-600">
                       Needs dispatcher review — {unassigned.length} unassigned
                     </span>
@@ -341,7 +346,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                         {row.distance_km != null ? row.distance_km : '—'}
                       </TD>
                       <TD className="tabular-nums font-semibold text-red-700">{fmt(row.position_count)}</TD>
-                      <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>
+                      {anyWeight && <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>}
                       <TD>
                         <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                           {row.priority}
