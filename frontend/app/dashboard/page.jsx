@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -9,19 +8,15 @@ import {
   Route,
   AlertTriangle,
   BarChart3,
-  TrendingUp,
-  TrendingDown,
-  Download,
-  Plus,
-  MoreHorizontal,
   ChevronRight,
-  Leaf,
+  Boxes,
   Bell,
   Clock,
+  Gauge,
+  Scale,
+  RefreshCcw,
 } from 'lucide-react';
 import {
-  AreaChart,
-  Area,
   Bar,
   Line,
   XAxis,
@@ -35,54 +30,17 @@ import {
   ComposedChart,
 } from 'recharts';
 import StatusBadge from '../../components/shared/StatusBadge';
-import {
-  efficiencySegments,
-  fleetData,
-  timelineEvents,
-  alerts,
-  donutCenterText,
-} from '../../data/dashboardData';
 import { clients as initialClients, getClientPosition } from '../../data/coficabData';
-import { useKpi } from '../../hooks/useKpi';
-import { useWeeklyDeliveries } from '../../hooks/useWeeklyDeliveries';
-
-const KPI_CARD_MAP = {
-  'R4-06': { id: 'otif',  icon: 'truck',          iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed' },
-  'R4-02': { id: 'otd',   icon: 'route',           iconBg: 'rgba(59,130,246,0.1)', iconColor: '#3b82f6' },
-  'R4-13': { id: 'fuel',  icon: 'alert-triangle',  iconBg: 'rgba(249,115,22,0.1)', iconColor: '#f97316' },
-  'R4':    { id: 'load',  icon: 'bar-chart-3',     iconBg: 'rgba(20,184,166,0.1)', iconColor: '#14b8a6' },
-};
-
-function toCardShape(kpi) {
-  const meta = KPI_CARD_MAP[kpi.code] ?? { id: kpi.code, icon: 'bar-chart-3', iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed' };
-  const val = kpi.value !== null && kpi.value !== undefined
-    ? (kpi.unit === '%' ? `${kpi.value.toFixed(1)}%`
-      : kpi.unit === '€/T' ? `${kpi.value.toFixed(1)} €/T`
-      : kpi.unit === 'EUR' ? `${kpi.value.toFixed(0)} €`
-      : `${kpi.value}`)
-    : '—';
-  return {
-    id: meta.id,
-    label: kpi.label,
-    value: val,
-    icon: meta.icon,
-    iconBg: meta.iconBg,
-    iconColor: meta.iconColor,
-    trend: kpi.trend ?? 0,
-    trendLabel: 'vs last month',
-    sparklineData: [],
-  };
-}
-
-function toWeeklyShape(row) {
-  return { day: row.week, delivered: row.delivered, planned: row.total };
-}
+import { useDailyDashboard } from '../../hooks/useDailyDashboard';
 
 const TruckMapPreview = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
 
 const iconMap = {
   truck: Truck,
   route: Route,
+  clock: Clock,
+  gauge: Gauge,
+  weight: Scale,
   'alert-triangle': AlertTriangle,
   'bar-chart-3': BarChart3,
 };
@@ -91,6 +49,24 @@ const alertIconMap = {
   'alert-triangle': AlertTriangle,
   clock: Clock,
   info: Bell,
+};
+
+// Accent colour per official KPI, and the traffic-light band → hex.
+const KPI_ACCENT = {
+  otif: { bg: 'rgba(124,58,237,0.1)', color: '#7c3aed' },
+  otd: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6' },
+  load: { bg: 'rgba(20,184,166,0.1)', color: '#14b8a6' },
+  weight: { bg: 'rgba(249,115,22,0.1)', color: '#f97316' },
+};
+const BAND_COLOR = { green: '#22c55e', yellow: '#f59e0b', red: '#ef4444', grey: '#9e9ea4' };
+const BAND_LABEL = { green: 'on target', yellow: 'watch', red: 'below target', grey: 'no data' };
+const KPI_PLACEHOLDERS = [{ id: 'otif' }, { id: 'otd' }, { id: 'load' }, { id: 'weight' }];
+
+// Map backend trip status → StatusBadge / timeline colours.
+const STATUS_MAP = {
+  completed: 'completed',
+  in_transit: 'in-transit',
+  pending: 'scheduled',
 };
 
 const container = {
@@ -103,6 +79,17 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
     return (
@@ -112,7 +99,7 @@ function CustomTooltip({ active, payload, label }) {
           <div key={index} className="flex items-center gap-2 text-xs">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
             <span className="text-[#6b6b7b]">{entry.name}:</span>
-            <span className="font-semibold text-[#1a1a2e]">{entry.value}</span>
+            <span className="font-semibold text-[#1a1a2e]">{entry.value} pos</span>
           </div>
         ))}
       </div>
@@ -122,34 +109,19 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function DashboardPage() {
-  const [period, setPeriod] = useState('Week');
-  const { kpis, isLoading: kpiLoading } = useKpi();
-  const { weeks } = useWeeklyDeliveries(7);
+  const { dashboard, isLoading, mutate } = useDailyDashboard();
 
-  // KPI stat cards — show only the 4 that have a card mapping
-  const kpiData = kpis
-    .filter((k) => k.code in KPI_CARD_MAP)
-    .map(toCardShape);
-  // Fall back to loading placeholders while fetching
-  const displayKpis = kpiData.length > 0 ? kpiData : [
-    { id: 'otif', label: 'OTIF', value: '—', icon: 'truck', iconBg: 'rgba(124,58,237,0.1)', iconColor: '#7c3aed', trend: 0, trendLabel: '…', sparklineData: [] },
-    { id: 'otd',  label: 'OTD',  value: '—', icon: 'route', iconBg: 'rgba(59,130,246,0.1)', iconColor: '#3b82f6', trend: 0, trendLabel: '…', sparklineData: [] },
-    { id: 'fuel', label: 'Fuel Efficiency', value: '—', icon: 'alert-triangle', iconBg: 'rgba(249,115,22,0.1)', iconColor: '#f97316', trend: 0, trendLabel: '…', sparklineData: [] },
-    { id: 'load', label: 'Load Efficiency', value: '—', icon: 'bar-chart-3', iconBg: 'rgba(20,184,166,0.1)', iconColor: '#14b8a6', trend: 0, trendLabel: '…', sparklineData: [] },
-  ];
+  const kpis = dashboard?.kpis ?? [];
+  const totals = dashboard?.totals ?? {};
+  const fleet = dashboard?.fleet ?? [];
+  const efficiency = dashboard?.efficiency ?? [];
+  const activity = dashboard?.activity ?? [];
+  const alerts = dashboard?.alerts ?? [];
+  const weeklyData = dashboard?.weekly ?? [];
 
-  // Weekly chart — fall back to empty mock shape while loading
-  const weeklyData = weeks.length > 0
-    ? weeks.map(toWeeklyShape)
-    : [
-        { day: 'Mon', delivered: 0, planned: 0 },
-        { day: 'Tue', delivered: 0, planned: 0 },
-        { day: 'Wed', delivered: 0, planned: 0 },
-        { day: 'Thu', delivered: 0, planned: 0 },
-        { day: 'Fri', delivered: 0, planned: 0 },
-        { day: 'Sat', delivered: 0, planned: 0 },
-        { day: 'Sun', delivered: 0, planned: 0 },
-      ];
+  const planDate = dashboard?.day
+    ? new Date(`${dashboard.day}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    : '…';
 
   return (
     <div className="p-8 min-h-screen bg-[#f8f7f3]">
@@ -160,39 +132,47 @@ export default function DashboardPage() {
       >
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Operations dashboard</p>
-          <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Good morning, Ghada</h1>
-          <p className="mt-2 text-sm text-[#6b6b7b]">Wednesday, May 20, 2026 · Overview of fleet, routes and delivery performance.</p>
+          <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">{greeting()}, Ghada</h1>
+          <p className="mt-2 text-sm text-[#6b6b7b]">
+            {planDate} · Live from {dashboard?.source_file || 'the weekly planning'} — fleet, routes and delivery performance.
+          </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          {['Week', 'Month', 'Year'].map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setPeriod(option)}
-              className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                period === option
-                  ? 'bg-[#7c3aed] text-white shadow-sm'
-                  : 'bg-white text-[#6b6b7b] border border-[#e8e5df] hover:bg-[#f5f3ff]'
-              }`}
-            >
-              {option}
-            </button>
-          ))}
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e] hover:bg-[#faf8f5] transition">
-            <Download size={16} />
-            Export
+          <button
+            type="button"
+            onClick={() => mutate()}
+            className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e] hover:bg-[#faf8f5] transition"
+          >
+            <RefreshCcw size={16} className={isLoading ? 'animate-spin' : ''} />
+            Refresh
           </button>
-          <button className="inline-flex items-center gap-2 rounded-2xl bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition shadow-sm">
-            <Plus size={16} />
-            New Route
-          </button>
+          <Link
+            href="/generated-daily-planning"
+            className="inline-flex items-center gap-2 rounded-2xl bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white hover:bg-[#6d28d9] transition shadow-sm"
+          >
+            <Route size={16} />
+            Open planning
+          </Link>
         </div>
       </motion.div>
 
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-[#1a1a2e]">Performance KPIs</h2>
+        {dashboard?.kpi_period && (
+          <span className="text-xs text-[#6b6b7b]">
+            Average over {dashboard.kpi_period.days} day(s) · {dashboard.kpi_period.month}
+            <span className="text-[#c4c2bd]"> ({dashboard.kpi_period.range})</span>
+          </span>
+        )}
+      </div>
       <motion.div variants={container} initial="hidden" animate="show" className="grid gap-6 xl:grid-cols-4 mb-8">
-        {displayKpis.map((kpi) => {
+        {(kpis.length ? kpis : KPI_PLACEHOLDERS).map((kpi) => {
+          const accent = KPI_ACCENT[kpi.id] || KPI_ACCENT.otif;
           const Icon = iconMap[kpi.icon] || BarChart3;
-          const isPositive = kpi.trend >= 0;
+          const band = BAND_COLOR[kpi.color] || BAND_COLOR.grey;
+          const hasValue = kpi.value !== null && kpi.value !== undefined;
+          const display = hasValue ? `${kpi.value}${kpi.unit === '%' ? '%' : ''}` : '—';
+          const unitSuffix = kpi.unit && kpi.unit !== '%' ? kpi.unit : '';
           return (
             <motion.div
               key={kpi.id}
@@ -201,35 +181,31 @@ export default function DashboardPage() {
               className="bg-white rounded-2xl p-6 border border-[#e8e5df] cursor-pointer transition-shadow"
             >
               <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: kpi.iconBg }}>
-                  <Icon size={20} color={kpi.iconColor} />
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: accent.bg }}>
+                  <Icon size={20} color={accent.color} />
                 </div>
-                <button className="text-[#9e9ea4] hover:text-[#6b6b7b]"><MoreHorizontal size={18} /></button>
-              </div>
-              <p className="text-sm text-[#6b6b7b] mb-1">{kpi.label}</p>
-              <p className="text-4xl font-bold text-[#1a1a2e] mb-3">{kpi.value}</p>
-              <div className="h-10 mb-3">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={kpi.sparklineData.map((value, index) => ({ value, index }))}>
-                    <defs>
-                      <linearGradient id={`grad-${kpi.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={kpi.iconColor} stopOpacity={0.2} />
-                        <stop offset="100%" stopColor={kpi.iconColor} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="value" stroke={kpi.iconColor} strokeWidth={2} fill={`url(#grad-${kpi.id})`} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {isPositive ? (
-                  <TrendingUp size={14} className="text-[#22c55e]" />
-                ) : (
-                  <TrendingDown size={14} className="text-[#ef4444]" />
+                {hasValue && (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                    style={{ backgroundColor: `${band}1a`, color: band }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: band }} />
+                    {BAND_LABEL[kpi.color] || ''}
+                  </span>
                 )}
-                <span className="text-sm font-medium text-[#22c55e]">{isPositive ? '+' : ''}{kpi.trend}%</span>
-                <span className="text-xs text-[#9e9aa4]">{kpi.trendLabel}</span>
               </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-[#6b6b7b]">{kpi.label || '…'}</p>
+                {kpi.code && <span className="text-[10px] font-semibold text-[#c4c2bd]">{kpi.code}</span>}
+              </div>
+              <p className="mt-1 text-4xl font-bold text-[#1a1a2e]">
+                {display}
+                {unitSuffix && <span className="ml-1 text-base font-semibold text-[#9e9ea4]">{unitSuffix}</span>}
+              </p>
+              <p className="mt-2 text-xs text-[#9e9ea4]">
+                {hasValue && kpi.target != null ? `Target ${kpi.target}${kpi.unit === '%' ? '%' : ` ${kpi.unit}`} · ` : ''}
+                {kpi.hint || 'planned from today’s schedule'}
+              </p>
             </motion.div>
           );
         })}
@@ -246,7 +222,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-base font-semibold text-[#1a1a2e]">Weekly Delivery Analytics</h3>
-                <p className="text-sm text-[#6b6b7b]">Deliveries vs. Planned</p>
+                <p className="text-sm text-[#6b6b7b]">Delivered vs. planned positions (Mon–Sun)</p>
               </div>
             </div>
             <div className="h-64">
@@ -254,7 +230,7 @@ export default function DashboardPage() {
                 <ComposedChart data={weeklyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
                   <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#9e9ea4', fontSize: 12 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9e9ea4', fontSize: 12 }} domain={[0, 200]} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9e9ea4', fontSize: 12 }} domain={[0, 'auto']} />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar dataKey="delivered" fill="#7c3aed" radius={[4, 4, 0, 0]} name="Delivered" barSize={28} />
                   <Line type="monotone" dataKey="planned" stroke="#f97316" strokeWidth={2.5} dot={{ r: 4, fill: '#f97316', strokeWidth: 0 }} name="Planned" />
@@ -268,7 +244,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#f97316]" />
-                <span className="text-sm text-[#6b6b7b]">Planned</span>
+                <span className="text-sm text-[#6b6b7b]">Planned (demand)</span>
               </div>
             </div>
           </motion.div>
@@ -284,22 +260,27 @@ export default function DashboardPage() {
                 <p className="text-sm text-[#6b6b7b]">Fleet health</p>
                 <h2 className="text-2xl font-semibold text-[#1a1a2e]">Vehicle utilization</h2>
               </div>
-              <button className="text-sm font-semibold text-[#7c3aed] hover:text-[#5b21b6]">View reports</button>
+              <Link href="/vehicles" className="text-sm font-semibold text-[#7c3aed] hover:text-[#5b21b6]">View fleet</Link>
             </div>
             <div className="space-y-4">
-              {fleetData.map((vehicle) => {
+              {fleet.length === 0 && (
+                <p className="text-sm text-[#9e9ea4]">{isLoading ? 'Loading plan…' : 'No trucks dispatched for this day.'}</p>
+              )}
+              {fleet.map((vehicle) => {
                 const fillColor = vehicle.utilization >= 90 ? '#22c55e' : vehicle.utilization >= 80 ? '#f59e0b' : '#ef4444';
                 return (
                   <div key={vehicle.name} className="space-y-2">
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p className="font-semibold text-[#1a1a2e]">{vehicle.name}</p>
-                        <p className="text-sm text-[#6b6b7b] mt-1">{vehicle.type}</p>
+                        <p className="text-sm text-[#6b6b7b] mt-1">
+                          {vehicle.type} · {vehicle.trips} trip(s) · {vehicle.positions}/{vehicle.capacity} pos
+                        </p>
                       </div>
                       <p className="text-sm font-semibold" style={{ color: fillColor }}>{vehicle.utilization}%</p>
                     </div>
                     <div className="h-2 rounded-full bg-[#f0ede8] overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${vehicle.utilization}%`, backgroundColor: fillColor }} />
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, vehicle.utilization)}%`, backgroundColor: fillColor }} />
                     </div>
                   </div>
                 );
@@ -315,57 +296,49 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-base font-semibold text-[#1a1a2e]">Recent Route Activity</h3>
-              <button className="text-sm text-[#7c3aed] font-medium hover:underline">
+              <Link href="/generated-daily-planning" className="text-sm text-[#7c3aed] font-medium hover:underline">
                 View All <ChevronRight size={14} className="inline" />
-              </button>
+              </Link>
             </div>
             <div className="space-y-4">
-              {timelineEvents.map((event, index) => (
-                <motion.div
-                  key={event.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 + 0.3 }}
-                  className="flex gap-4 relative"
-                >
-                  {index < timelineEvents.length - 1 && (
-                    <div className="absolute left-[7px] top-6 w-0.5 h-full bg-[#e8e5df]" />
-                  )}
-                  <div className="flex flex-col items-center">
-                    <div
-                      className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-1"
-                      style={{
-                        backgroundColor:
-                          event.status === 'completed'
-                            ? '#22c55e'
-                            : event.status === 'in-transit'
-                            ? '#3b82f6'
-                            : event.status === 'delayed'
-                            ? '#ef4444'
-                            : '#7c3aed',
-                        borderColor:
-                          event.status === 'completed'
-                            ? '#dcfce7'
-                            : event.status === 'in-transit'
-                            ? '#dbeafe'
-                            : event.status === 'delayed'
-                            ? '#fee2e2'
-                            : '#f5f3ff',
-                      }}
-                    />
-                  </div>
-                  <div className="flex-1 pb-5">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <span className="text-sm font-semibold text-[#1a1a2e]">{event.route}</span>
-                        <p className="text-sm text-[#6b6b7b] mt-0.5">{event.description}</p>
-                        <p className="text-xs text-[#9e9aa4] mt-1">{event.time}</p>
-                      </div>
-                      <StatusBadge status={event.status === 'in-transit' ? 'in_transit' : event.status === 'completed' ? 'completed' : 'pending'} size="sm" />
+              {activity.length === 0 && (
+                <p className="text-sm text-[#9e9ea4]">{isLoading ? 'Loading trips…' : 'No trips for this day.'}</p>
+              )}
+              {activity.map((event, index) => {
+                const mapped = STATUS_MAP[event.status] || 'scheduled';
+                return (
+                  <motion.div
+                    key={event.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.03 + 0.2 }}
+                    className="flex gap-4 relative"
+                  >
+                    {index < activity.length - 1 && (
+                      <div className="absolute left-[7px] top-6 w-0.5 h-full bg-[#e8e5df]" />
+                    )}
+                    <div className="flex flex-col items-center">
+                      <div
+                        className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-1"
+                        style={{
+                          backgroundColor: mapped === 'completed' ? '#22c55e' : mapped === 'in-transit' ? '#3b82f6' : '#7c3aed',
+                          borderColor: mapped === 'completed' ? '#dcfce7' : mapped === 'in-transit' ? '#dbeafe' : '#f5f3ff',
+                        }}
+                      />
                     </div>
-                  </div>
-                </motion.div>
-              ))}
+                    <div className="flex-1 pb-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-[#1a1a2e]">{event.route}</span>
+                          <p className="text-sm text-[#6b6b7b] mt-0.5">{event.description}</p>
+                          <p className="text-xs text-[#9e9aa4] mt-1">{event.time}</p>
+                        </div>
+                        <StatusBadge status={mapped} size="sm" />
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
         </div>
@@ -379,16 +352,14 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-semibold text-[#1a1a2e]">Route Efficiency</h3>
-              <button className="text-[#9e9aa4] hover:text-[#6b6b7b]">
-                <Download size={16} />
-              </button>
+              <span className="text-xs text-[#9e9aa4]">by trip fill</span>
             </div>
             <div className="flex flex-col items-center">
               <div className="relative w-48 h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={efficiencySegments}
+                      data={efficiency.length ? efficiency : [{ name: 'n/a', value: 100, color: '#e8e5df' }]}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -398,19 +369,19 @@ export default function DashboardPage() {
                       startAngle={90}
                       endAngle={-270}
                     >
-                      {efficiencySegments.map((entry, index) => (
+                      {(efficiency.length ? efficiency : [{ color: '#e8e5df' }]).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                       ))}
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-3xl font-bold text-[#1a1a2e]">{donutCenterText.value}</span>
-                  <span className="text-xs text-[#9e9aa4]">{donutCenterText.label}</span>
+                  <span className="text-3xl font-bold text-[#1a1a2e]">{dashboard ? `${dashboard.efficiency_score}%` : '—'}</span>
+                  <span className="text-xs text-[#9e9aa4]">Avg. fill</span>
                 </div>
               </div>
               <div className="flex items-center gap-4 mt-4 flex-wrap justify-center">
-                {efficiencySegments.map((seg) => (
+                {efficiency.map((seg) => (
                   <div key={seg.name} className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: seg.color }} />
                     <span className="text-xs text-[#6b6b7b]">{seg.name} {seg.value}%</span>
@@ -430,7 +401,7 @@ export default function DashboardPage() {
               <h3 className="text-base font-semibold text-[#1a1a2e]">Live Route Map</h3>
               <span className="flex items-center gap-1.5 text-xs">
                 <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
-                <span className="text-[#6b6b7b]">12 Active</span>
+                <span className="text-[#6b6b7b]">{formatNumber(totals.active_trucks)} Active</span>
               </span>
             </div>
             <div className="px-5 pb-5">
@@ -451,9 +422,6 @@ export default function DashboardPage() {
               <div className="flex items-center gap-1.5 text-xs text-[#6b6b7b]">
                 <span className="w-2 h-2 rounded-full bg-[#f97316]" /> Standard
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-[#6b6b7b]">
-                <span className="w-2 h-2 rounded-full bg-[#ef4444]" /> Delayed
-              </div>
               <Link href="/map" className="ml-auto text-xs text-[#7c3aed] font-medium hover:underline">
                 View Full Map →
               </Link>
@@ -466,25 +434,23 @@ export default function DashboardPage() {
             transition={{ duration: 0.4, delay: 0.15 }}
             className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
           >
-            <h3 className="text-base font-semibold text-[#1a1a2e] mb-4">CO₂ Reduction</h3>
+            <h3 className="text-base font-semibold text-[#1a1a2e] mb-4">Transport today</h3>
             <div className="flex flex-col items-center text-center">
               <div className="w-12 h-12 rounded-xl bg-[#14b8a6]/10 flex items-center justify-center mb-3">
-                <Leaf size={24} className="text-[#14b8a6]" />
+                <Boxes size={24} className="text-[#14b8a6]" />
               </div>
-              <p className="text-2xl font-bold text-[#14b8a6]">2.4 tonnes</p>
-              <p className="text-sm text-[#6b6b7b] mb-4">saved this month</p>
-              <div className="w-full h-2 bg-[#f0ede8] rounded-full overflow-hidden mb-2">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: '78%' }}
-                  transition={{ duration: 1, ease: 'easeOut' }}
-                  className="h-full bg-[#14b8a6] rounded-full"
-                />
+              <p className="text-2xl font-bold text-[#14b8a6]">{formatNumber(totals.tonnes)} t</p>
+              <p className="text-sm text-[#6b6b7b] mb-4">gross weight over {formatNumber(totals.distance_km)} km</p>
+              <div className="grid grid-cols-2 gap-3 w-full">
+                <div className="rounded-xl bg-[#f8f7f3] p-3">
+                  <p className="text-lg font-semibold text-[#1a1a2e]">{formatNumber(totals.positions_planned)}</p>
+                  <p className="text-xs text-[#9e9aa4]">positions</p>
+                </div>
+                <div className="rounded-xl bg-[#f8f7f3] p-3">
+                  <p className="text-lg font-semibold text-[#1a1a2e]">{formatNumber(totals.premium_trips)}</p>
+                  <p className="text-xs text-[#9e9aa4]">premium (rented) trips</p>
+                </div>
               </div>
-              <p className="text-xs text-[#9e9aa4] mb-4">78% of monthly target</p>
-              <p className="text-sm text-[#6b6b7b] italic">
-                Equivalent to planting <span className="font-semibold text-[#14b8a6]">120 trees</span>
-              </p>
             </div>
           </motion.div>
 
@@ -495,29 +461,30 @@ export default function DashboardPage() {
             className="bg-white rounded-2xl p-6 border border-[#e8e5df]"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-[#1a1a2e]">Real-time Alerts</h3>
-              <span className="text-xs font-semibold bg-[#f97316] text-white rounded-md px-2 py-0.5">3</span>
+              <h3 className="text-base font-semibold text-[#1a1a2e]">Planning Alerts</h3>
+              <span className="text-xs font-semibold bg-[#f97316] text-white rounded-md px-2 py-0.5">{alerts.length}</span>
             </div>
             <div className="space-y-3">
+              {alerts.length === 0 && (
+                <p className="text-sm text-[#9e9ea4]">{isLoading ? 'Loading…' : 'No alerts — every delivery is assigned and on target.'}</p>
+              )}
               {alerts.map((alert) => {
                 const AlertIcon = alertIconMap[alert.icon] || Bell;
+                const accent = alert.severity === 'critical' ? '#ef4444' : alert.severity === 'warning' ? '#f59e0b' : '#3b82f6';
+                const bg = alert.severity === 'critical' ? '#fef2f2' : alert.severity === 'warning' ? '#fffbeb' : '#eff6ff';
                 return (
                   <motion.div
                     key={alert.id}
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="p-3 rounded-xl border-l-[3px]"
-                    style={{
-                      backgroundColor: alert.bgColor,
-                      borderLeftColor: alert.borderColor,
-                    }}
+                    style={{ backgroundColor: bg, borderLeftColor: accent }}
                   >
                     <div className="flex items-start gap-3">
-                      <AlertIcon size={18} style={{ color: alert.borderColor }} className="flex-shrink-0 mt-0.5" />
+                      <AlertIcon size={18} style={{ color: accent }} className="flex-shrink-0 mt-0.5" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-[#1a1a2e]">{alert.title}</p>
                         <p className="text-xs text-[#6b6b7b] mt-0.5">{alert.description}</p>
-                        <p className="text-xs text-[#9e9aa4] mt-1">{alert.time}</p>
                       </div>
                     </div>
                   </motion.div>

@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_optional
-from app.services.daily_plan_builder import DailyPlanBuilder
+from app.services.daily_plan_builder import DailyPlanBuilder, DailyPlanConfig
+from app.services import dashboard_service
 from app.services.excel_exporter import export_plan_to_xlsx
 from app.services.vrptw_optimizer import (
     VRPTWOptimizer,
@@ -341,6 +342,62 @@ async def generate_daily_plan(
         trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
         builder = DailyPlanBuilder(WEEKLY_DIR, trucks=trucks)
         return builder.build(day=_parse_day(request.day), source_file=request.source_file)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# Small in-process cache for the dashboard: period_dashboard rebuilds 7 daily
+# plans, so without this every poll (and every browser) re-runs the optimiser.
+# Keyed by (day, fleet, workbook file+mtime) so it auto-invalidates when the
+# workbook changes; TTL bounds staleness from anything else.
+_DASH_CACHE: dict[tuple, tuple[float, dict]] = {}
+_DASH_TTL_SECONDS = 120
+
+
+def _weekly_source_signature() -> tuple:
+    """Name + mtime of the newest weekly workbook, so edits bust the cache."""
+    try:
+        files = [p for p in WEEKLY_DIR.glob("*.xlsx") if not p.name.startswith("~$")]
+        newest = max(files, key=lambda p: p.stat().st_mtime)
+        return (newest.name, newest.stat().st_mtime_ns)
+    except (ValueError, OSError):
+        return ("none", 0)
+
+
+@daily_router.get("/dashboard")
+async def daily_dashboard(
+    day: Optional[str] = None,
+    db: Optional[Session] = Depends(get_db_optional),
+):
+    """Operations-dashboard metrics derived from the generated daily plan:
+    KPI cards (period averages), fleet health, route-efficiency donut, recent
+    activity, alerts, and a Mon→Sun trend — all real, offline-capable, cached."""
+    import time
+
+    try:
+        ref_day = _parse_day(day) if day else _date.today()
+        trucks = _available_trucks_for_daily_plan(db)
+
+        cache_key = (ref_day.isoformat(), repr(trucks), _weekly_source_signature())
+        cached = _DASH_CACHE.get(cache_key)
+        now = time.time()
+        if cached and now - cached[0] < _DASH_TTL_SECONDS:
+            return cached[1]
+
+        # Dashboard aggregates a whole week, so use the fast greedy ordering
+        # (OR-Tools is reserved for the single-day planning screen).
+        builder = DailyPlanBuilder(
+            WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=False), trucks=trucks
+        )
+        result = dashboard_service.period_dashboard(
+            lambda d: builder.build(day=d), ref_day, builder.cfg.avg_speed_kmh
+        )
+        payload = {"day": ref_day.isoformat(), **result}
+
+        if len(_DASH_CACHE) > 32:  # keep the cache from growing unbounded
+            _DASH_CACHE.clear()
+        _DASH_CACHE[cache_key] = (now, payload)
+        return payload
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
