@@ -4,8 +4,12 @@
 // same window or long trips get clipped.
 
 export const WORK_START = 6 * 60;   // 06:00
-export const WORK_END = 20 * 60;    // 20:00
-export const WORK_MINUTES = WORK_END - WORK_START; // 840
+// The axis runs to midnight: trucks must DEPART by the cut-off, but a far-zone
+// trip can drive back in the evening, so arrivals/returns may land well after
+// 20:00 (e.g. Ksar Hellal returning ~23:35). The window must span them or those
+// late legs get clamped onto the right edge.
+export const WORK_END = 24 * 60;    // 24:00 (midnight)
+export const WORK_MINUTES = WORK_END - WORK_START; // 1080
 export const SNAP_MINUTES = 15;
 
 // Hour ticks shown on the axis (06,07,...,20).

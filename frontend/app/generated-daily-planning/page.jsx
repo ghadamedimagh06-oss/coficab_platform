@@ -64,7 +64,8 @@ function mutateDelivery(plan, deliveryId, mapper) {
 }
 
 function deliveryDuration(delivery) {
-  return Math.max(30, toMinutes(delivery.eta) - toMinutes(delivery.etd) || 45);
+  const span = toMinutes(delivery.eta) - toMinutes(delivery.etd);
+  return Math.max(30, span || 45);
 }
 
 function flattenStops(truck) {
@@ -159,9 +160,14 @@ function toDailyTruckPayload(truck) {
 
 export default function GeneratedDailyPlanningPage() {
   const { trucks: apiTrucks } = useFleet();
-  const [day, setDay] = useState(todayIso());
+  // Start empty so server and client first-render match; the real date is set
+  // after mount (avoids a Date-driven hydration mismatch).
+  const [day, setDay] = useState('');
   const [plan, setPlan] = useState(null);
-  const [status, setStatus] = useState('idle');
+  // Start in the loading state so the drag-and-drop board (which generates
+  // non-deterministic @dnd-kit accessibility ids) is never server-rendered —
+  // this avoids an aria-describedby hydration mismatch. Data is fetched on mount.
+  const [status, setStatus] = useState('generating');
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -193,7 +199,9 @@ export default function GeneratedDailyPlanningPage() {
   }
 
   useEffect(() => {
-    regenerate(day);
+    const initial = todayIso();
+    setDay(initial);
+    regenerate(initial);
   }, []);
 
   function moveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {

@@ -56,7 +56,7 @@ export default function Sidebar() {
   const toggle = (label) => setExpanded((s) => ({ ...s, [label]: !s[label] }));
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-72 bg-gradient-to-b from-[#7c3aed] via-[#6d28d9] to-[#5b21b6] text-white shadow-2xl shadow-slate-900/25">
+    <aside className="fixed left-0 top-0 z-50 h-screen w-72 bg-gradient-to-b from-[#7c3aed] via-[#6d28d9] to-[#5b21b6] text-white shadow-2xl shadow-slate-900/25">
       <div className="h-20 flex items-center gap-3 px-6 border-b border-white/10">
         <div className="w-12 h-12 rounded-3xl bg-white/15 flex items-center justify-center text-xl font-bold shadow-inner shadow-white/10">
           <span className="text-white">O</span>

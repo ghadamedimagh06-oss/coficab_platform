@@ -6,8 +6,8 @@ export default function AppShell({ children }) {
   return (
     <div className="flex min-h-screen bg-[#faf8f5] text-[#1a1a2e]">
       <Sidebar />
-      <main className="flex-1 pb-12 pl-72">
-        <div className="sticky top-0 z-20 bg-[#faf8f5]/95 backdrop-blur-xl border-b border-[#e8e5df] px-6 py-4">
+      <main className="min-w-0 flex-1 pb-12 pl-72">
+        <div className="sticky top-0 z-40 bg-[#faf8f5]/95 backdrop-blur-xl border-b border-[#e8e5df] px-6 py-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.32em] text-[#6b6b7b]">COFICAB Control Tower</p>
