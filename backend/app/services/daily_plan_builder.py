@@ -72,6 +72,10 @@ class DailyPlanConfig:
     max_service_minutes: int = 120
     reload_minutes: int = 30       # back at depot between trips of one truck
     avg_speed_kmh: float = 55.0    # loaded-truck average over Tunisian roads
+    # Use OR-Tools for stop ordering. The single-day planning screen wants the
+    # best route; the dashboard, which rebuilds a whole week per refresh, turns
+    # this off and uses the (near-instant) greedy order so it stays responsive.
+    prefer_ortools: bool = True
 
 
 class DailyPlanBuilder:
@@ -911,7 +915,7 @@ class DailyPlanBuilder:
         if len(items) <= 1:
             return list(items)
         local = [0] + [d["_mi"] for d in items]
-        if HAS_ORTOOLS:
+        if HAS_ORTOOLS and self.cfg.prefer_ortools:
             order_idx = self._ortools_vrptw_order(local, items, dur_min)
             if order_idx is not None:
                 return [items[i] for i in order_idx]
@@ -982,7 +986,9 @@ class DailyPlanBuilder:
             params.local_search_metaheuristic = (
                 routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
             )
-            params.time_limit.FromSeconds(3)
+            # Zones hold ≤ a couple dozen stops; guided local search converges in
+            # well under a second, so a short cap keeps the planner responsive.
+            params.time_limit.FromMilliseconds(300)
             solution = routing.SolveWithParameters(params)
             if solution is None:
                 return None
@@ -1021,7 +1027,7 @@ class DailyPlanBuilder:
             params.local_search_metaheuristic = (
                 routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
             )
-            params.time_limit.FromSeconds(2)
+            params.time_limit.FromMilliseconds(200)
             solution = routing.SolveWithParameters(params)
             if solution is None:
                 return None
@@ -1137,9 +1143,10 @@ class DailyPlanBuilder:
             "end_location": row.get("end_location") or row.get("client") or "Unknown destination",
             "quantity_positions": positions,
             "position_count": positions,
-            # Capacity is positions-only by business rule — the workbook's kg
-            # values are unreliable, so weight is not modelled and never binds.
-            "quantity_kg": 0.0,
+            # Capacity binds on BOTH positions and the real gross weight declared
+            # in the workbook (rows without a weight contribute 0 kg, so weight
+            # only constrains where the data exists — it never invents a limit).
+            "quantity_kg": self._weight_from_row(row),
             "etd": etd,
             "eta": eta,
             "priority": row.get("priority") or "normal",
