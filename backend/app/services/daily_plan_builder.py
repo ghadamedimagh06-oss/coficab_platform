@@ -56,8 +56,17 @@ except ImportError:
 
 @dataclass
 class DailyPlanConfig:
-    work_start: str = "06:00"      # depots open early for long hauls
+    work_start: str = "06:00"      # normal depot opening for regular trips
+    # Long hauls may leave the depot before normal opening so the truck gets
+    # home as early as possible — freeing it for a second tour.
+    early_start: str = "05:00"
+    long_haul_km: float = 120.0    # one-way depot distance treated as "long distance"
     work_end: str = "20:00"
+    # Latest a truck may LEAVE the depot on a fresh trip. The binding daily
+    # constraint is the departure, not the return: a driver heading to a far
+    # zone (e.g. Ksar Hellal, Kairouan) is allowed to drive back after 20:00, so
+    # the round trip is feasible as long as it departs by this cut-off.
+    max_depart: str = "18:00"
     service_minutes: int = 20      # minimum on-site setup/(un)loading time
     service_minutes_per_position: float = 3.0
     max_service_minutes: int = 120
@@ -674,9 +683,14 @@ class DailyPlanBuilder:
         order = self._order_stops(items, dur_min)
         capacity = truck["capacity_positions"]
         cap_kg = float(truck["capacity_kg"])
-        work_end = self._minutes(self.cfg.work_end)
+        max_depart = self._minutes(self.cfg.max_depart)
+        work_start = self._minutes(self.cfg.work_start)
+        early_start = self._minutes(self.cfg.early_start)
 
-        cursor = self._minutes(self.cfg.work_start)  # truck free-at-depot time
+        # The truck can be staged from the early-start hour; a regular (short)
+        # first trip is still floored at normal opening below, but a long haul is
+        # allowed to roll out at first light.
+        cursor = early_start  # truck free-at-depot time
         overflow: list[dict[str, Any]] = []
 
         trip_stops: list[dict[str, Any]] = []
@@ -690,19 +704,10 @@ class DailyPlanBuilder:
             nonlocal cursor, trip_stops, load, load_kg, prev, t, depart_at
             if not trip_stops:
                 return
+            # The trip already passed the depart-by-max_depart gate when it left
+            # the depot, so it is committed regardless of how late it returns —
+            # far zones are served by driving the empty truck home in the evening.
             return_at = t + dur_min[prev][0]
-            if return_at > work_end:
-                overflow.extend({
-                    **stop,
-                    "unassigned_reason": "Trip cannot return before the working day ends",
-                } for stop in trip_stops)
-                trip_stops = []
-                load = 0.0
-                load_kg = 0.0
-                prev = 0
-                t = float(cursor)
-                depart_at = float(cursor)
-                return
             truck["trips"].append({
                 "trip_id": f"{truck['truck_id']}-{len(truck['trips']) + 1}",
                 "depart_at": self._clock(int(round(depart_at))),
@@ -757,9 +762,24 @@ class DailyPlanBuilder:
                 # Leaving the depot fresh: depart late enough to roll straight
                 # into the window instead of idling at the customer.
                 leg = dur_min[0][mi]
-                start = cursor
+                # Long hauls may leave at first light (05:00); regular trips are
+                # floored at normal opening (06:00) so we don't run short routes
+                # uselessly early.
+                is_long_haul = float(d.get("distance_km") or 0) >= self.cfg.long_haul_km
+                floor = early_start if is_long_haul else work_start
+                start = max(cursor, floor)
                 if win_start is not None:
-                    start = max(cursor, win_start - int(round(leg)))
+                    start = max(floor, win_start - int(round(leg)))
+                # A truck may not LEAVE the depot after the daily cut-off, even
+                # though it is allowed to return in the evening.
+                if start > max_depart:
+                    overflow.append({
+                        **d,
+                        "unassigned_reason": (
+                            f"Truck cannot depart by {self.cfg.max_depart} for this stop"
+                        ),
+                    })
+                    continue
                 depart_at = start
                 t = float(start)
                 prev = 0
@@ -770,15 +790,8 @@ class DailyPlanBuilder:
             service = self._service_minutes(d)
             service_end = arrival + service
 
-            if service_end > work_end or (win_end is not None and arrival > win_end):
-                overflow.append({
-                    **d,
-                    "unassigned_reason": (
-                        "Outside customer time window"
-                        if win_end is not None and arrival > win_end
-                        else "Exceeds working hours"
-                    ),
-                })
+            if win_end is not None and arrival > win_end:
+                overflow.append({**d, "unassigned_reason": "Outside customer time window"})
                 continue
 
             trip_stops.append({
@@ -810,13 +823,14 @@ class DailyPlanBuilder:
         vehicles stay free for loads that truly need them. Returns the deliveries
         that still could not be placed."""
         work_start = self._minutes(self.cfg.work_start)
-        work_end = self._minutes(self.cfg.work_end)
+        early_start = self._minutes(self.cfg.early_start)
+        max_depart = self._minutes(self.cfg.max_depart)
         speed = self.cfg.avg_speed_kmh
 
-        def free_at(truck: dict[str, Any]) -> int:
+        def free_at(truck: dict[str, Any], floor: int) -> int:
             if truck["trips"]:
                 return self._minutes(truck["trips"][-1]["return_at"]) + self.cfg.reload_minutes
-            return work_start
+            return floor
 
         still: list[dict[str, Any]] = []
         ordered = sorted(
@@ -833,6 +847,9 @@ class DailyPlanBuilder:
                 continue
             leg = float(km) / speed * 60.0
             service = self._service_minutes(d)
+            # A long-haul rescue may stage an idle truck from first light (05:00)
+            # so its evening return is as early as possible.
+            floor = early_start if float(km) >= self.cfg.long_haul_km else work_start
             window = d.get("constraints", {}).get("time_window")
             win_start = self._minutes(window[0]) if window else None
             win_end = self._minutes(window[1]) if window else None
@@ -845,21 +862,23 @@ class DailyPlanBuilder:
             candidates.sort(key=lambda t: (
                 t["truck_id"] == self.RENTED_TRUCK_ID,
                 t["capacity_positions"],
-                free_at(t),
+                free_at(t, floor),
             ))
 
             placed = False
             for t in candidates:
-                start = free_at(t)
+                start = free_at(t, floor)
                 if win_start is not None:
-                    start = max(start, win_start - int(round(leg)))
+                    start = max(floor, win_start - int(round(leg)))
+                # Depart-by-cut-off is the binding rule; the evening return home
+                # may run past the work window.
+                if start > max_depart:
+                    continue
                 arrival = start + leg
                 if win_start is not None and arrival < win_start:
                     arrival = float(win_start)
                 service_end = arrival + service
                 return_at = service_end + leg
-                if service_end > work_end or return_at > work_end:
-                    continue
                 if win_end is not None and arrival > win_end:
                     continue
                 t["trips"].append({
@@ -934,17 +953,16 @@ class DailyPlanBuilder:
             cost_cb = routing.RegisterTransitCallback(distance_cost)
             routing.SetArcCostEvaluatorOfAllVehicles(cost_cb)
             time_cb = routing.RegisterTransitCallback(transit_time)
-            horizon = self._minutes(self.cfg.work_end)
-            routing.AddDimension(time_cb, horizon, horizon, False, "Time")
+            # Returns from far zones may run into the evening, so the time
+            # horizon extends past work_end; the binding rule is that the truck
+            # leaves the depot no later than max_depart.
+            early_start = self._minutes(self.cfg.early_start)
+            max_depart = self._minutes(self.cfg.max_depart)
+            late_horizon = 24 * 60
+            routing.AddDimension(time_cb, late_horizon, late_horizon, False, "Time")
             time_dim = routing.GetDimensionOrDie("Time")
-            time_dim.CumulVar(routing.Start(0)).SetRange(
-                self._minutes(self.cfg.work_start),
-                self._minutes(self.cfg.work_end),
-            )
-            time_dim.CumulVar(routing.End(0)).SetRange(
-                self._minutes(self.cfg.work_start),
-                self._minutes(self.cfg.work_end),
-            )
+            time_dim.CumulVar(routing.Start(0)).SetRange(early_start, max_depart)
+            time_dim.CumulVar(routing.End(0)).SetRange(early_start, late_horizon)
 
             for local_pos, delivery in enumerate(items, start=1):
                 index = manager.NodeToIndex(local_pos)
@@ -953,8 +971,8 @@ class DailyPlanBuilder:
                     start = self._minutes(window[0])
                     end = self._minutes(window[1])
                 else:
-                    start = self._minutes(self.cfg.work_start)
-                    end = self._minutes(self.cfg.work_end)
+                    start = early_start
+                    end = late_horizon
                 time_dim.CumulVar(index).SetRange(start, end)
 
             params = pywrapcp.DefaultRoutingSearchParameters()
