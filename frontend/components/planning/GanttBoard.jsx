@@ -72,6 +72,8 @@ function LegendChip({ swatch, children }) {
 
 export default function GanttBoard({
   plan,
+  selectedTruckId = null,
+  onSelectTruck,
   onDropDelivery,
   onResizeDelivery,
   onCancel,
@@ -152,6 +154,8 @@ export default function GanttBoard({
                 nowMinute={nowMinute}
                 windowEnd={windowEnd}
                 hosWarning={hosByLabel.get(String(truck.truck_label)) || null}
+                selected={String(truck.truck_id) === String(selectedTruckId)}
+                onSelectTruck={onSelectTruck}
                 onResizeDelivery={onResizeDelivery}
                 onCancel={onCancel}
                 onRestore={onRestore}

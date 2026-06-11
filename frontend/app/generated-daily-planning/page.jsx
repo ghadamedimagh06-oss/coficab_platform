@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, Wand2 } from 'lucide-react';
 import { exportDailyPlan, generateDailyPlan } from '../services/api';
@@ -9,6 +10,9 @@ import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
 import PlanTable from '../../components/planning/PlanTable';
+
+// Leaflet touches `window` at import time, so load the map client-side only.
+const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
 import { trucks as fallbackTrucks } from '../../data/coficabData';
 import { useFleet } from '../../hooks/useFleet';
@@ -171,6 +175,7 @@ export default function GeneratedDailyPlanningPage() {
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [selectedTruckId, setSelectedTruckId] = useState(null);
 
   const stats = useMemo(() => ({
     deliveries: countDeliveries(plan),
@@ -516,6 +521,8 @@ export default function GeneratedDailyPlanningPage() {
             <div className="min-w-0">
               <GanttBoard
                 plan={plan}
+                selectedTruckId={selectedTruckId}
+                onSelectTruck={setSelectedTruckId}
                 onDropDelivery={moveDelivery}
                 onResizeDelivery={resizeDelivery}
                 onCancel={cancelDelivery}
@@ -528,6 +535,14 @@ export default function GeneratedDailyPlanningPage() {
           )}
           <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
         </div>
+
+        {plan && (
+          <RouteMap
+            plan={plan}
+            selectedTruckId={selectedTruckId}
+            onSelectTruck={setSelectedTruckId}
+          />
+        )}
 
         {plan && (
           <PlanTable

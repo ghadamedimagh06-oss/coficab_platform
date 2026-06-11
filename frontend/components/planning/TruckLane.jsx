@@ -78,7 +78,7 @@ function fillColor(ratio) {
   return '#ef4444';
 }
 
-export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, hosWarning = null, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, hosWarning = null, selected = false, onSelectTruck, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
   const spanMin = Math.max(1, windowEnd - WORK_START);
   const { isOver, setNodeRef } = useDroppable({
     id: `truck-lane-${truck.truck_id}`,
@@ -177,8 +177,13 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
   return (
     <div className={`grid ${LANE_LABEL_CLASS} border-b border-[#ece8e1] last:border-b-0`} style={{ minHeight: laneHeight }}>
       {/* Sticky truck card */}
-      <div className={`sticky left-0 z-20 flex flex-col justify-center gap-2 border-r border-[#ece8e1] px-5 py-3 ${isIdle ? 'bg-[#fbfaf8]' : 'bg-white'}`}>
-        <div className="flex items-center gap-2.5">
+      <div className={`sticky left-0 z-20 flex flex-col justify-center gap-2 border-r border-[#ece8e1] px-5 py-3 transition-colors ${selected ? 'bg-[#7c3aed]/5 ring-2 ring-inset ring-[#7c3aed]' : isIdle ? 'bg-[#fbfaf8]' : 'bg-white'}`}>
+        <button
+          type="button"
+          onClick={() => onSelectTruck?.(truck.truck_id)}
+          title={selected ? 'Hide this truck on the map' : 'Show this truck’s route on the map'}
+          className="flex items-center gap-2.5 rounded-lg text-left transition hover:opacity-80"
+        >
           <span
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm"
             style={{ backgroundColor: accent }}
@@ -201,7 +206,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
               {capacityPositions.toLocaleString()} pos · {Number(truck.capacity_kg || 0).toLocaleString()} kg
             </p>
           </div>
-        </div>
+        </button>
         {isIdle ? (
           <span className="inline-flex w-fit items-center rounded-full bg-[#f0eee9] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#a39e96]">
             Idle
