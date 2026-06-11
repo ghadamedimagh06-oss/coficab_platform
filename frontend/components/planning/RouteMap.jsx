@@ -37,6 +37,7 @@ function buildRoutes(plan) {
 function FitBounds({ routes, selectedId, depot }) {
   const map = useMap();
   useEffect(() => {
+    map.invalidateSize();
     const inFocus = selectedId != null
       ? routes.filter((r) => String(r.truck.truck_id) === String(selectedId))
       : routes;

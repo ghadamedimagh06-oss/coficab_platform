@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const statusColor = {
@@ -25,32 +25,33 @@ function normalizePosition(entity, index) {
   return [base, 10.181 + (index % 7) * 0.09];
 }
 
-function getMapCenter(trucks, clients) {
-  const points = [...trucks, ...clients].map((item, index) => normalizePosition(item, index));
-  if (!points.length) {
-    return tunisiaCenter;
-  }
-  const sum = points.reduce(
-    (acc, [lat, lng]) => {
-      acc.lat += lat;
-      acc.lng += lng;
-      return acc;
-    },
-    { lat: 0, lng: 0 }
-  );
-  return [sum.lat / points.length, sum.lng / points.length];
+// React-leaflet keeps the map instance across renders, so instead of remounting
+// the <MapContainer> (which leaves the map mis-sized and showing a blank/green
+// box) we drive it imperatively: fix its size after layout and fit it to the
+// current points whenever the data changes.
+function MapController({ points }) {
+  const map = useMap();
+  useEffect(() => {
+    map.invalidateSize();
+    if (points.length === 1) {
+      map.setView(points[0], 9);
+    } else if (points.length > 1) {
+      map.fitBounds(points, { padding: [40, 40], maxZoom: 11 });
+    }
+  }, [map, points]);
+  return null;
 }
 
 export default function TruckMap({ trucks = [], clients = [], height = 420, hideHeader = false }) {
   const [isClient, setIsClient] = useState(false);
-  
+
   useEffect(() => {
     setIsClient(true);
   }, []);
 
   if (!isClient) {
     return (
-      <div 
+      <div
         className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-4 shadow-xl shadow-black/20"
         style={{ height: height ? height + 40 : 460 }}
       >
@@ -61,7 +62,7 @@ export default function TruckMap({ trucks = [], clients = [], height = 420, hide
     );
   }
 
-  const center = getMapCenter(trucks, clients);
+  const points = [...clients, ...trucks].map((item, index) => normalizePosition(item, index));
 
   return (
     <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-4 shadow-xl shadow-black/20">
@@ -74,11 +75,12 @@ export default function TruckMap({ trucks = [], clients = [], height = 420, hide
         </div>
       )}
       <div className="overflow-hidden rounded-[1.5rem] border border-slate-800" style={{ height }}>
-        <MapContainer center={center} zoom={6} className="h-full w-full" key={`map-${JSON.stringify(center)}`}>
+        <MapContainer center={tunisiaCenter} zoom={7} scrollWheelZoom className="h-full w-full">
           <TileLayer
             attribution='&copy; OpenStreetMap contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <MapController points={points} />
           {clients.map((client, index) => {
             const position = normalizePosition(client, index);
             return (
