@@ -334,10 +334,14 @@ async def generate_planning(request: PlanningGenerateRequest):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @daily_router.post("/generate")
-async def generate_daily_plan(
+def generate_daily_plan(
     request: DailyGenerateRequest,
     db: Optional[Session] = Depends(get_db_optional),
 ):
+    # Plain ``def`` on purpose: build() does synchronous geocoding (urllib +
+    # a 1.05s Nominatim rate-limit sleep) that would block the event loop on a
+    # cold cache. FastAPI runs sync handlers in a threadpool, so concurrent
+    # requests are not stalled. See scripts/prewarm_geocode.py to warm offline.
     try:
         trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
         builder = DailyPlanBuilder(WEEKLY_DIR, trucks=trucks)
@@ -365,13 +369,16 @@ def _weekly_source_signature() -> tuple:
 
 
 @daily_router.get("/dashboard")
-async def daily_dashboard(
+def daily_dashboard(
     day: Optional[str] = None,
     db: Optional[Session] = Depends(get_db_optional),
 ):
     """Operations-dashboard metrics derived from the generated daily plan:
     KPI cards (period averages), fleet health, route-efficiency donut, recent
-    activity, alerts, and a Mon→Sun trend — all real, offline-capable, cached."""
+    activity, alerts, and a Mon→Sun trend — all real, offline-capable, cached.
+
+    Plain ``def`` (threadpool): rebuilds up to 7 daily plans, each doing
+    synchronous geocoding that would otherwise block the event loop."""
     import time
 
     try:
