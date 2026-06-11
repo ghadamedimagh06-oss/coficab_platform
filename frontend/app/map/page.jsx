@@ -52,42 +52,48 @@ export default function MapPage() {
   );
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[1.5fr_0.9fr]">
-      <section className="space-y-6">
-        <div className="grid gap-6 sm:grid-cols-3">
-          <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon={<IconBubble kind="truck" />} />
-          <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon={<IconBubble kind="chart" />} />
-          <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon={<IconBubble kind="bolt" />} />
-        </div>
+    <div className="min-h-screen bg-[#f8f7f3] p-8">
+      <div className="mb-8">
+        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Live Tracking</p>
+        <h1 className="mt-3 text-3xl font-semibold text-[#1a1a2e]">Delivery network map</h1>
+        <p className="mt-2 text-sm text-[#6b6b7b]">Client destinations across Tunisia, the COFICAB depot, and any trucks reporting a live position.</p>
+      </div>
 
-        <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
+      <div className="grid gap-8 xl:grid-cols-[1.5fr_0.9fr]">
+        <section className="space-y-6">
+          <div className="grid gap-6 sm:grid-cols-3">
+            <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon={<IconBubble kind="truck" />} />
+            <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon={<IconBubble kind="chart" />} />
+            <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon={<IconBubble kind="bolt" />} />
+          </div>
+
           <TruckMap trucks={tracking} clients={mapClients} />
-        </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Route stability</p>
-            <p className="mt-3 text-3xl font-semibold text-brand">{tracking.length ? ((statusCounts.onTime / tracking.length) * 100).toFixed(0) : 0}%</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Route stability</p>
+              <p className="mt-3 text-3xl font-semibold text-[#7c3aed]">{tracking.length ? ((statusCounts.onTime / tracking.length) * 100).toFixed(0) : 0}%</p>
+            </div>
+            <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Delay risk</p>
+              <p className="mt-3 text-3xl font-semibold text-[#d97706]">{statusCounts.warning}</p>
+            </div>
+            <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Critical alerts</p>
+              <p className="mt-3 text-3xl font-semibold text-[#ef4444]">{statusCounts.critical}</p>
+            </div>
           </div>
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Delay risk</p>
-            <p className="mt-3 text-3xl font-semibold text-orange-400">{statusCounts.warning}</p>
-          </div>
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Critical alerts</p>
-            <p className="mt-3 text-3xl font-semibold text-red-500">{statusCounts.critical}</p>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <aside className="space-y-6">
-        <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
-          <h2 className="text-xl font-semibold">Map insights</h2>
-          <p className="mt-3 text-sm text-slate-400">The live map reflects current vehicle positions, ETA, and route status. Polling refresh keeps the view aligned with backend tracking data.</p>
-        </div>
+        <aside className="space-y-6">
+          <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-[#1a1a2e]">Map insights</h2>
+            <p className="mt-3 text-sm text-[#6b6b7b]">Blue dots are client delivery destinations, gold is the COFICAB Mégrine depot, and coloured dots are trucks reporting a live GPS position. Foreign export sites are kept off this Tunisia view.</p>
+          </div>
 
-        <ChatPanel messages={chatMessages} />
-      </aside>
+          <ChatPanel messages={chatMessages} />
+        </aside>
+      </div>
     </div>
   );
 }
