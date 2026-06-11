@@ -7,6 +7,14 @@ export function apiUrl(path: string) {
   return `${baseURL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+function authHeader(): Record<string, string> {
+  // Attach the JWT when one is stored (set after login). Harmless when absent:
+  // protected routes fall back to the offline dev user unless REQUIRE_AUTH is on.
+  if (typeof window === 'undefined') return {};
+  const token = window.localStorage.getItem('access_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request(path: string, options: RequestInit = {}) {
   if (debugAPI) {
     console.log(`API Request: ${options.method || 'GET'} ${baseURL}${path}`);
@@ -16,6 +24,7 @@ async function request(path: string, options: RequestInit = {}) {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeader(),
       ...(options.headers || {}),
     },
   });

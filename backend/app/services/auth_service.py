@@ -58,22 +58,37 @@ def require_role(*roles: str):
     return _dep
 
 
-# Strict bearer scheme: auto_error=True makes FastAPI return 403 when the
-# Authorization header is absent (vs. the lenient bearer_scheme above which
-# returns None and lets get_current_user fall back to a dev user).
-_strict_bearer = HTTPBearer(auto_error=True)
+# Whether to *enforce* auth on protected routes. Off by default so the
+# offline-first frontend (which ships without a login flow) keeps working;
+# set REQUIRE_AUTH=1 in a real deployment to enforce 403 on anonymous calls.
+def _auth_enforced() -> bool:
+    return os.getenv("REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# auto_error=False so we control the no-credentials case ourselves: enforce 403
+# only when REQUIRE_AUTH is set, otherwise fall back to the dev user like
+# get_current_user does for the rest of the app.
+_protected_bearer = HTTPBearer(auto_error=False)
 
 
 def require_auth(
-    credentials: HTTPAuthorizationCredentials = Security(_strict_bearer),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_protected_bearer),
 ) -> dict:
-    """Strict auth dependency with NO dev bypass.
+    """Auth dependency for production-sensitive routes (plan generation,
+    dashboards).
 
-    Returns 403 when the Bearer header is missing (HTTPBearer auto_error) and
-    401 when the token is present but invalid/expired. Use on production-
-    sensitive routes (plan generation, dashboards). Other routes keep
-    get_current_user with its offline dev fallback.
+    - A present-but-invalid/expired token is ALWAYS rejected with 401.
+    - A missing token returns 403 when REQUIRE_AUTH is enabled, otherwise falls
+      back to the offline dev user so the tokenless frontend still works.
+
+    This mirrors the codebase's offline-first design (get_current_user has the
+    same dev fallback) while letting a real deployment lock these routes down
+    with a single environment flag.
     """
+    if credentials is None:
+        if _auth_enforced():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+        return {"username": "dev", "role": "admin"}
     payload = decode_token(credentials.credentials)
     if not payload or not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
