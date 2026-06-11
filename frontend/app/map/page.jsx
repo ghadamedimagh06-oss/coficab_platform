@@ -1,97 +1,118 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { getLiveTracking } from '../services/api';
+import { CalendarDays, RefreshCcw } from 'lucide-react';
+import { generateDailyPlan } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
-import { clients as initialClients, getClientPosition } from '../../data/coficabData';
 
-const TruckMap = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
+// Leaflet touches `window` at import time, so load the map client-side only.
+const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
 
-const fallbackMapClients = initialClients.map((client, index) => {
-  const [lat, lng] = getClientPosition(client.destination, index);
-  return { ...client, lat, lng };
-});
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function countStops(plan) {
+  return (plan?.trucks || []).reduce(
+    (sum, t) => sum + (t.trips || []).reduce((n, trip) => n + (trip.stops || []).length, 0),
+    0,
+  );
+}
 
 export default function MapPage() {
-  const [tracking, setTracking] = useState([]);
-  const [mapClients, setMapClients] = useState(fallbackMapClients);
-  const [chatMessages, setChatMessages] = useState([]);
+  const [day, setDay] = useState('');
+  const [plan, setPlan] = useState(null);
+  const [status, setStatus] = useState('loading');
+  const [selectedTruckId, setSelectedTruckId] = useState(null);
+  const [messages, setMessages] = useState([]);
+
+  async function load(nextDay) {
+    setStatus('loading');
+    try {
+      const next = await generateDailyPlan(nextDay);
+      setPlan(next);
+      setSelectedTruckId(null);
+      setStatus('ready');
+      setMessages((prev) => [`Loaded ${countStops(next)} client stops for ${nextDay}. Click a truck to trace its road.`, ...prev]);
+    } catch (err) {
+      setStatus('ready');
+      setMessages((prev) => [`Unable to load the plan for ${nextDay}: ${err?.response?.data?.detail || err.message}`, ...prev]);
+    }
+  }
 
   useEffect(() => {
-    async function loadTracking() {
-      try {
-        const live = await getLiveTracking();
-        const items = live?.tracking_data ? Object.values(live.tracking_data) : live || [];
-        setTracking(items);
-        if (Array.isArray(live?.clients) && live.clients.length) {
-          setMapClients(live.clients);
-        }
-        setChatMessages((prev) => [
-          'Real-time truck positions refreshed. Click a marker for ETA and status details.',
-          ...prev,
-        ]);
-      } catch (error) {
-        setChatMessages((prev) => ['Unable to refresh map data. Check backend polling settings.', ...prev]);
-      }
-    }
-    loadTracking();
+    const initial = todayIso();
+    setDay(initial);
+    load(initial);
   }, []);
 
-  const statusCounts = tracking.reduce(
-    (acc, item) => {
-      const status = item.status?.toLowerCase();
-      if (status?.includes('critical')) acc.critical += 1;
-      else if (status?.includes('delay')) acc.warning += 1;
-      else acc.onTime += 1;
-      return acc;
-    },
-    { onTime: 0, warning: 0, critical: 0 }
-  );
+  const stats = useMemo(() => {
+    const trucksUsed = (plan?.trucks || []).filter((t) => (t.trips || []).length > 0).length;
+    return { trucksUsed, clients: countStops(plan), unassigned: plan?.unassigned?.length || 0 };
+  }, [plan]);
 
   return (
     <div className="min-h-screen bg-[#f8f7f3] p-8">
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Live Tracking</p>
-        <h1 className="mt-3 text-3xl font-semibold text-[#1a1a2e]">Delivery network map</h1>
-        <p className="mt-2 text-sm text-[#6b6b7b]">Client destinations across Tunisia, the COFICAB depot, and any trucks reporting a live position.</p>
+      <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Live Map</p>
+          <h1 className="mt-3 text-3xl font-semibold text-[#1a1a2e]">Today’s clients &amp; truck routes</h1>
+          <p className="mt-2 text-sm text-[#6b6b7b]">Every delivery for the day plotted across Tunisia, with each truck’s road from the depot.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e]">
+            <CalendarDays size={16} />
+            <input
+              type="date"
+              value={day}
+              onChange={(e) => { setDay(e.target.value); load(e.target.value); }}
+              className="bg-transparent outline-none"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => load(day)}
+            disabled={status === 'loading'}
+            className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
+          >
+            <RefreshCcw size={16} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-8 xl:grid-cols-[1.5fr_0.9fr]">
         <section className="space-y-6">
           <div className="grid gap-6 sm:grid-cols-3">
-            <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon={<IconBubble kind="truck" />} />
-            <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon={<IconBubble kind="chart" />} />
-            <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon={<IconBubble kind="bolt" />} />
+            <StatCard title="Trucks routed" value={status === 'loading' ? '—' : stats.trucksUsed} hint="Vehicles on the road today" icon={<IconBubble kind="truck" />} />
+            <StatCard title="Clients" value={status === 'loading' ? '—' : stats.clients} hint="Delivery stops planned" icon={<IconBubble kind="chart" />} />
+            <StatCard title="Unassigned" value={status === 'loading' ? '—' : stats.unassigned} hint="Need dispatcher review" icon={<IconBubble kind="bolt" />} />
           </div>
 
-          <TruckMap trucks={tracking} clients={mapClients} />
-
-          <div className="grid gap-4 sm:grid-cols-3">
+          {status === 'loading' && !plan ? (
             <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
-              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Route stability</p>
-              <p className="mt-3 text-3xl font-semibold text-[#7c3aed]">{tracking.length ? ((statusCounts.onTime / tracking.length) * 100).toFixed(0) : 0}%</p>
+              <div className="h-[520px] rounded-[1.25rem] bg-[#f0eee9] animate-pulse" />
             </div>
-            <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
-              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Delay risk</p>
-              <p className="mt-3 text-3xl font-semibold text-[#d97706]">{statusCounts.warning}</p>
-            </div>
-            <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
-              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">Critical alerts</p>
-              <p className="mt-3 text-3xl font-semibold text-[#ef4444]">{statusCounts.critical}</p>
-            </div>
-          </div>
+          ) : (
+            <RouteMap plan={plan} selectedTruckId={selectedTruckId} onSelectTruck={setSelectedTruckId} height={560} />
+          )}
         </section>
 
         <aside className="space-y-6">
           <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#1a1a2e]">Map insights</h2>
-            <p className="mt-3 text-sm text-[#6b6b7b]">Blue dots are client delivery destinations, gold is the COFICAB Mégrine depot, and coloured dots are trucks reporting a live GPS position. Foreign export sites are kept off this Tunisia view.</p>
+            <h2 className="text-lg font-semibold text-[#1a1a2e]">Map legend</h2>
+            <ul className="mt-3 space-y-2 text-sm text-[#6b6b7b]">
+              <li className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: '#facc15' }} /> COFICAB Mégrine depot</li>
+              <li className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: '#7c3aed' }} /> Client stop (coloured by truck)</li>
+              <li className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: '#9ca3af' }} /> Unassigned client</li>
+            </ul>
+            <p className="mt-3 text-xs text-[#9e9aa4]">Click a truck chip or its route to trace that vehicle’s ordered stops. Routes are straight legs (road routing via OSRM is planned).</p>
           </div>
 
-          <ChatPanel messages={chatMessages} />
+          <ChatPanel messages={messages} />
         </aside>
       </div>
     </div>

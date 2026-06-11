@@ -6,35 +6,34 @@ import 'leaflet/dist/leaflet.css';
 
 const TUNISIA_CENTER = [35.8, 9.6];
 const PALETTE = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#0891b2', '#9333ea', '#65a30d'];
+const UNASSIGNED_COLOR = '#9ca3af';
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
-const coord = (o) => (o && isNum(o.lat) && isNum(o.lon) ? [o.lat, o.lon] : (o && isNum(o.lat) && isNum(o.lng) ? [o.lat, o.lng] : null));
+const coord = (o) => {
+  const lat = o?.lat ?? o?.latitude;
+  const lon = o?.lon ?? o?.lng ?? o?.longitude;
+  return isNum(Number(lat)) && isNum(Number(lon)) && (lat || lon) ? [Number(lat), Number(lon)] : null;
+};
 
-// Build, per truck, the ordered list of trips with their depot→stops→depot
-// point sequences (straight legs — travel times are haversine-based, the road
-// network is not modelled). Only stops with real coordinates are included.
+// Per truck: ordered trips, each a depot -> stops -> depot point sequence
+// (straight legs — travel times are haversine-based, roads aren't modelled).
 function buildRoutes(plan) {
   const depot = coord(plan?.depot);
   return (plan?.trucks || []).map((truck, ti) => {
     const color = PALETTE[ti % PALETTE.length];
     const trips = (truck.trips || []).map((trip) => {
-      const stops = (trip.stops || [])
-        .map((s) => ({ ...s, _pt: coord(s) }))
-        .filter((s) => s._pt);
+      const stops = (trip.stops || []).map((s) => ({ ...s, _pt: coord(s) })).filter((s) => s._pt);
       const path = [];
       if (depot) path.push(depot);
       stops.forEach((s) => path.push(s._pt));
       if (depot && stops.length) path.push(depot);
       return { trip_id: trip.trip_id, stops, path };
     }).filter((t) => t.stops.length);
-    const stopCount = trips.reduce((n, t) => n + t.stops.length, 0);
-    return { truck, color, trips, stopCount };
+    return { truck, color, trips, stopCount: trips.reduce((n, t) => n + t.stops.length, 0) };
   });
 }
 
-// Imperatively fit the map to whatever is currently in focus (the selected
-// truck's stops, or the whole plan when nothing is selected).
-function FitBounds({ routes, selectedId, depot }) {
+function FitBounds({ routes, unassigned, selectedId, depot }) {
   const map = useMap();
   useEffect(() => {
     map.invalidateSize();
@@ -44,29 +43,29 @@ function FitBounds({ routes, selectedId, depot }) {
     const pts = [];
     if (depot) pts.push(depot);
     inFocus.forEach((r) => r.trips.forEach((t) => t.stops.forEach((s) => pts.push(s._pt))));
-    if (pts.length === 1) {
-      map.setView(pts[0], 9);
-    } else if (pts.length > 1) {
-      map.fitBounds(pts, { padding: [40, 40] });
-    }
-  }, [routes, selectedId, depot, map]);
+    if (selectedId == null) unassigned.forEach((u) => pts.push(u._pt));
+    if (pts.length === 1) map.setView(pts[0], 9);
+    else if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 11 });
+  }, [routes, unassigned, selectedId, depot, map]);
   return null;
 }
 
-function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
+function MapInner({ plan, selectedTruckId, onSelectTruck }) {
   const routes = useMemo(() => buildRoutes(plan), [plan]);
   const depot = coord(plan?.depot);
+  const unassigned = useMemo(
+    () => (plan?.unassigned || []).map((u) => ({ ...u, _pt: coord(u) })).filter((u) => u._pt),
+    [plan],
+  );
   const hasSelection = selectedTruckId != null;
 
   return (
-    <MapContainer center={depot || TUNISIA_CENTER} zoom={7} className="h-full w-full" scrollWheelZoom>
-      <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      <FitBounds routes={routes} selectedId={selectedTruckId} depot={depot} />
+    <MapContainer center={depot || TUNISIA_CENTER} zoom={7} scrollWheelZoom className="h-full w-full">
+      <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <FitBounds routes={routes} unassigned={unassigned} selectedId={selectedTruckId} depot={depot} />
 
-      {/* Routes: faint by default, the selected truck's route is bold + numbered */}
+      {/* Every truck's route. Selected one is bold + solid; the rest stay visible
+          (dashed) so the whole day is shown, dimming only when one is focused. */}
       {routes.map((r) => {
         const selected = String(r.truck.truck_id) === String(selectedTruckId);
         const dim = hasSelection && !selected;
@@ -77,7 +76,7 @@ function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
             pathOptions={{
               color: r.color,
               weight: selected ? 5 : 3,
-              opacity: dim ? 0.18 : selected ? 0.95 : 0.55,
+              opacity: dim ? 0.15 : selected ? 0.95 : 0.6,
               dashArray: selected ? null : '6 6',
             }}
             eventHandlers={{ click: () => onSelectTruck?.(r.truck.truck_id) }}
@@ -85,8 +84,11 @@ function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
         ));
       })}
 
-      {/* Numbered stop markers for the selected truck only (keeps it readable) */}
-      {routes.filter((r) => String(r.truck.truck_id) === String(selectedTruckId)).map((r) => {
+      {/* Every client stop. Without a selection all are shown as colored dots;
+          the focused truck's stops become numbered in delivery order. */}
+      {routes.map((r) => {
+        const selected = String(r.truck.truck_id) === String(selectedTruckId);
+        const dim = hasSelection && !selected;
         let order = 0;
         return r.trips.flatMap((t) => t.stops.map((s) => {
           order += 1;
@@ -94,14 +96,15 @@ function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
             <CircleMarker
               key={`${r.truck.truck_id}-${s.id}`}
               center={s._pt}
-              radius={11}
-              pathOptions={{ color: '#fff', weight: 2, fillColor: r.color, fillOpacity: 1 }}
+              radius={selected ? 11 : 6}
+              pathOptions={{ color: '#fff', weight: selected ? 2 : 1, fillColor: r.color, fillOpacity: dim ? 0.25 : 1 }}
+              eventHandlers={{ click: () => onSelectTruck?.(r.truck.truck_id) }}
             >
-              <Tooltip permanent direction="center" className="route-stop-num">{order}</Tooltip>
+              {selected && <Tooltip permanent direction="center" className="route-stop-num">{order}</Tooltip>}
               <Popup>
                 <div className="space-y-0.5 text-slate-900">
                   <p className="font-semibold">{s.client}</p>
-                  <p className="text-xs">{s.resolved_location || s.end_location || ''}</p>
+                  <p className="text-xs">{r.truck.truck_label} · {s.resolved_location || s.end_location || ''}</p>
                   <p className="text-xs">{s.etd} → {s.eta}</p>
                   <p className="text-xs">
                     {Number(s.quantity_positions || s.position_count || 0)} pos
@@ -114,7 +117,24 @@ function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
         }));
       })}
 
-      {/* Depot */}
+      {/* Today's clients that couldn't be routed — shown in grey so "all clients"
+          really means all of them. */}
+      {unassigned.map((u, i) => (
+        <CircleMarker
+          key={`un-${u.id || i}`}
+          center={u._pt}
+          radius={6}
+          pathOptions={{ color: '#fff', weight: 1, fillColor: UNASSIGNED_COLOR, fillOpacity: hasSelection ? 0.3 : 0.9 }}
+        >
+          <Popup>
+            <div className="space-y-0.5 text-slate-900">
+              <p className="font-semibold">{u.client}</p>
+              <p className="text-xs text-red-600">Unassigned{u.unassigned_reason ? ` — ${u.unassigned_reason}` : ''}</p>
+            </div>
+          </Popup>
+        </CircleMarker>
+      ))}
+
       {depot && (
         <CircleMarker center={depot} radius={9} pathOptions={{ color: '#1a1a2e', weight: 3, fillColor: '#facc15', fillOpacity: 1 }}>
           <Tooltip direction="top">COFICAB Mégrine (depot)</Tooltip>
@@ -124,23 +144,25 @@ function MapInner({ plan, selectedTruckId, onSelectTruck, height }) {
   );
 }
 
-export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, height = 460 }) {
+export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, height = 520 }) {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
 
   const routes = useMemo(() => buildRoutes(plan), [plan]);
   const activeRoutes = routes.filter((r) => r.stopCount > 0);
   const selected = routes.find((r) => String(r.truck.truck_id) === String(selectedTruckId));
+  const totalStops = activeRoutes.reduce((n, r) => n + r.stopCount, 0);
+  const unassignedCount = (plan?.unassigned || []).length;
 
   return (
     <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#7c3aed]">Truck routes</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#7c3aed]">Today’s routes</p>
           <p className="mt-1 text-xs text-[#6b6b7b]">
             {selected
-              ? `Showing ${selected.truck.truck_label} — ${selected.stopCount} stop${selected.stopCount > 1 ? 's' : ''} from the depot`
-              : 'Select a truck below or in the timeline to trace its road.'}
+              ? `${selected.truck.truck_label} — ${selected.stopCount} stop${selected.stopCount > 1 ? 's' : ''} from the depot`
+              : `${activeRoutes.length} truck${activeRoutes.length > 1 ? 's' : ''} · ${totalStops} client${totalStops > 1 ? 's' : ''}${unassignedCount ? ` · ${unassignedCount} unassigned` : ''}`}
           </p>
         </div>
         {selectedTruckId != null && (
@@ -149,12 +171,11 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
             onClick={() => onSelectTruck?.(null)}
             className="rounded-full border border-[#e8e5df] px-3 py-1 text-xs font-semibold text-[#6b6b7b] transition hover:bg-[#faf8f5]"
           >
-            Show all
+            Show all trucks
           </button>
         )}
       </div>
 
-      {/* Clickable truck legend */}
       <div className="mb-4 flex flex-wrap gap-2">
         {activeRoutes.map((r) => {
           const on = String(r.truck.truck_id) === String(selectedTruckId);
@@ -178,7 +199,7 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
 
       <div className="overflow-hidden rounded-[1.25rem] border border-[#ece8e1]" style={{ height }}>
         {isClient ? (
-          <MapInner plan={plan} selectedTruckId={selectedTruckId} onSelectTruck={onSelectTruck} height={height} />
+          <MapInner plan={plan} selectedTruckId={selectedTruckId} onSelectTruck={onSelectTruck} />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-[#f0eee9] text-sm text-[#9e9aa4]">Loading map…</div>
         )}
