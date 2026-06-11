@@ -4,7 +4,7 @@ Handles weekly Excel planning ingestion, validated-planning comparison,
 J+1 change detection, review operations, and audit history tracking.
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 
@@ -661,7 +661,7 @@ class PlanningService:
             for diff in diffs:
                 audit = PlanningChangeLog(
                     planning_id=planning.id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     source=AUDIT_SOURCE_WATCHDOG,
                     modified_by=0,
                     field_name=diff["field_name"],
@@ -675,7 +675,7 @@ class PlanningService:
 
             status_set = "PENDING_REVIEW" if any(d["is_j_plus_1"] for d in diffs) else "MODIFIED_AFTER_VALIDATION"
             planning.status = status_set
-            planning.last_review_at = datetime.utcnow()
+            planning.last_review_at = datetime.now(timezone.utc)
             self.db.add(planning)
             self.db.commit()
 
@@ -743,10 +743,10 @@ class PlanningService:
             raise ValueError("Planning version must be pending review or modified after validation to revalidate")
 
         planning.status = "REVALIDATED"
-        planning.validated_at = datetime.utcnow()
+        planning.validated_at = datetime.now(timezone.utc)
         planning.validated_by = user_id
         planning.reviewed_by = user_id
-        planning.last_review_at = datetime.utcnow()
+        planning.last_review_at = datetime.now(timezone.utc)
         self.db.add(planning)
         self.db.commit()
         self.db.refresh(planning)
@@ -785,7 +785,7 @@ class PlanningService:
 
         planning.status = "REJECTED_CHANGES"
         planning.reviewed_by = user_id
-        planning.last_review_at = datetime.utcnow()
+        planning.last_review_at = datetime.now(timezone.utc)
         self.db.add(planning)
 
         audit = PlanningChangeLog(

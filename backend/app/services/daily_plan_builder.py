@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -139,10 +139,10 @@ class DailyPlanBuilder:
         clean_trucks = [self._clean_truck(t) for t in trucks]
 
         return {
-            "plan_id": int(datetime.utcnow().timestamp()),
+            "plan_id": int(datetime.now(timezone.utc).timestamp()),
             "day": day.isoformat(),
             "source_file": source_path.name,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "algorithm": (
                 "global multi-vehicle VRPTW (OR-Tools: capacity+kg+time dimensions, "
                 "multi-trip, drop penalties) over split/baseline demand variants"

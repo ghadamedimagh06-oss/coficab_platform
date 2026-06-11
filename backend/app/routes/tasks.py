@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Dict
 
 from app.database import get_db
@@ -28,10 +28,10 @@ async def daily_planning(db: Session = Depends(get_db)) -> Dict:
         except Exception:
             continue
     db.commit()
-    return {"status": "completed", "activated_deliveries": activated, "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "completed", "activated_deliveries": activated, "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @router.post("/process-data")
 async def process_data():
     """Process ingested data (placeholder)."""
-    return {"status": "completed", "records_processed": 150, "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "completed", "records_processed": 150, "timestamp": datetime.now(timezone.utc).isoformat()}

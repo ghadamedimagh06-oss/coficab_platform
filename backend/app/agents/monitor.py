@@ -7,7 +7,7 @@ session so the job participates in the test transaction.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ SLA_TOLERANCE_MIN = 15
 def run(db: Session | None = None, now: datetime | None = None) -> int:
     owns_session = db is None
     db = db or SessionLocal()
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc)
     created = 0
 
     try:
@@ -47,7 +47,7 @@ def run(db: Session | None = None, now: datetime | None = None) -> int:
 
 
 def check_mission(db: Session, mission: PlanMission, now: datetime | None = None) -> int:
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc)
     stops = sorted(mission.mission_demandes, key=lambda stop: (stop.ordre_livraison, stop.id))
 
     for stop in stops:
@@ -83,7 +83,7 @@ def check_mission(db: Session, mission: PlanMission, now: datetime | None = None
 
 
 def already_flagged(db: Session, mission_id: int, demande_id: int | None, now: datetime | None = None) -> bool:
-    cutoff = (now or datetime.utcnow()) - timedelta(hours=2)
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(hours=2)
     query = db.query(EvenementAlea).filter(
         EvenementAlea.type == EvenementType.RETARD_TRAFIC,
         EvenementAlea.date_evenement > cutoff,
