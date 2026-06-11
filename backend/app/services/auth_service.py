@@ -4,7 +4,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from app.models.user import User
 from app.models.transport import UserCreate, TokenData
@@ -56,6 +56,28 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
         return user
     return _dep
+
+
+# Strict bearer scheme: auto_error=True makes FastAPI return 403 when the
+# Authorization header is absent (vs. the lenient bearer_scheme above which
+# returns None and lets get_current_user fall back to a dev user).
+_strict_bearer = HTTPBearer(auto_error=True)
+
+
+def require_auth(
+    credentials: HTTPAuthorizationCredentials = Security(_strict_bearer),
+) -> dict:
+    """Strict auth dependency with NO dev bypass.
+
+    Returns 403 when the Bearer header is missing (HTTPBearer auto_error) and
+    401 when the token is present but invalid/expired. Use on production-
+    sensitive routes (plan generation, dashboards). Other routes keep
+    get_current_user with its offline dev fallback.
+    """
+    payload = decode_token(credentials.credentials)
+    if not payload or not payload.get("sub"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    return {"username": payload["sub"], "role": payload.get("role", "admin")}
 
 
 class AuthService:

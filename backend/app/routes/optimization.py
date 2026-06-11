@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_optional
+from app.services.auth_service import require_auth
 from app.services.daily_plan_builder import DailyPlanBuilder, DailyPlanConfig
 from app.services import dashboard_service
 from app.services.excel_exporter import export_plan_to_xlsx
@@ -74,7 +75,11 @@ class RunRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/run")
-def run_optimizer(request: RunRequest, db: Session = Depends(get_db)):
+def run_optimizer(
+    request: RunRequest,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
     """
     Trigger the DB-aware VRPTW optimizer for a given day.
 
@@ -126,7 +131,11 @@ def run_optimizer(request: RunRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/plan/{plan_version_id}")
-def get_plan(plan_version_id: int, db: Session = Depends(get_db)):
+def get_plan(
+    plan_version_id: int,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
     """
     Return a plan version with all its missions and stop sequences.
     """
@@ -181,7 +190,11 @@ def get_plan(plan_version_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/plan/{plan_version_id}/kpis")
-def get_plan_kpi_preview(plan_version_id: int, db: Session = Depends(get_db)):
+def get_plan_kpi_preview(
+    plan_version_id: int,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(require_auth),
+):
     """
     Preview the expected KPIs for a DRAFT plan without executing it.
 
@@ -337,6 +350,7 @@ async def generate_planning(request: PlanningGenerateRequest):
 def generate_daily_plan(
     request: DailyGenerateRequest,
     db: Optional[Session] = Depends(get_db_optional),
+    _user: dict = Depends(require_auth),
 ):
     # Plain ``def`` on purpose: build() does synchronous geocoding (urllib +
     # a 1.05s Nominatim rate-limit sleep) that would block the event loop on a
@@ -372,6 +386,7 @@ def _weekly_source_signature() -> tuple:
 def daily_dashboard(
     day: Optional[str] = None,
     db: Optional[Session] = Depends(get_db_optional),
+    _user: dict = Depends(require_auth),
 ):
     """Operations-dashboard metrics derived from the generated daily plan:
     KPI cards (period averages), fleet health, route-efficiency donut, recent
@@ -410,7 +425,10 @@ def daily_dashboard(
 
 
 @daily_router.post("/export")
-async def export_daily_plan(request: DailyExportRequest):
+async def export_daily_plan(
+    request: DailyExportRequest,
+    _user: dict = Depends(require_auth),
+):
     try:
         source_path = (WEEKLY_DIR / request.source_file).resolve()
         if WEEKLY_DIR.resolve() not in source_path.parents:
