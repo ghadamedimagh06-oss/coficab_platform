@@ -50,6 +50,24 @@ function FitBounds({ routes, unassigned, selectedId, depot }) {
   return null;
 }
 
+// Snap a trip's waypoints (depot -> stops -> depot) to the real road network
+// via the public OSRM server. Returns [[lat,lng], ...] following the roads, or
+// null on any failure so the caller falls back to straight legs.
+async function fetchRoadGeometry(path) {
+  if (path.length < 2) return null;
+  const coords = path.map(([la, lo]) => `${lo},${la}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=simplified&geometries=geojson`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const g = data?.routes?.[0]?.geometry?.coordinates;
+    return Array.isArray(g) ? g.map(([lo, la]) => [la, lo]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function MapInner({ plan, selectedTruckId, onSelectTruck }) {
   const routes = useMemo(() => buildRoutes(plan), [plan]);
   const depot = coord(plan?.depot);
@@ -58,6 +76,25 @@ function MapInner({ plan, selectedTruckId, onSelectTruck }) {
     [plan],
   );
   const hasSelection = selectedTruckId != null;
+
+  // Real road geometry per trip, keyed by truck-trip id. Drawn instead of the
+  // straight legs once OSRM responds; straight legs show meanwhile / on failure.
+  const [roads, setRoads] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        routes.flatMap((r) => r.trips.map(async (t) => {
+          const geom = await fetchRoadGeometry(t.path);
+          return [`${r.truck.truck_id}-${t.trip_id}`, geom];
+        })),
+      );
+      if (!cancelled) {
+        setRoads(Object.fromEntries(entries.filter(([, g]) => g)));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [routes]);
 
   return (
     <MapContainer center={depot || TUNISIA_CENTER} zoom={7} scrollWheelZoom className="h-full w-full">
@@ -72,7 +109,7 @@ function MapInner({ plan, selectedTruckId, onSelectTruck }) {
         return r.trips.map((t) => (
           <Polyline
             key={`${r.truck.truck_id}-${t.trip_id}`}
-            positions={t.path}
+            positions={roads[`${r.truck.truck_id}-${t.trip_id}`] || t.path}
             pathOptions={{
               color: r.color,
               weight: selected ? 5 : 3,
