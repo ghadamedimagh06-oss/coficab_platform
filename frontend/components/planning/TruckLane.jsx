@@ -4,9 +4,9 @@ import { Truck, Warehouse } from 'lucide-react';
 import DeliveryBlock from './DeliveryBlock';
 import DepotMarker from './DepotMarker';
 import { LANE_LABEL_CLASS } from './TimeAxis';
-import { WORK_START, WORK_MINUTES, toMinutes as minutes, pct } from './timeline';
+import { WORK_START, WORK_END, toMinutes as minutes, pctIn } from './timeline';
 
-function deliveryBox(delivery) {
+function deliveryBox(delivery, spanMin) {
   const start = minutes(delivery.etd);
   const end = Math.max(minutes(delivery.eta), start + 30);
   const duration = Math.max(30, end - start);
@@ -14,25 +14,22 @@ function deliveryBox(delivery) {
     ...delivery,
     _start: start,
     _end: end,
-    _left: ((start - WORK_START) / WORK_MINUTES) * 100,
-    _width: Math.max((duration / WORK_MINUTES) * 100, 8),
+    _left: ((start - WORK_START) / spanMin) * 100,
+    _width: Math.max((duration / spanMin) * 100, 6),
   };
 }
 
-// A delivery block is rendered at least this wide (in timeline minutes) so its
-// label stays readable. Row packing reserves this width too: a truck's stops are
-// sequential, so two stops only drop onto a second row when their *rendered*
-// boxes would physically overlap — never because of a tiny clock gap. This kills
-// the old illusion of one truck running "parallel" deliveries.
-const MIN_BLOCK_MINUTES = 55;
-
-function packedStops(stops) {
+// Row packing reserves each card's *rendered* width (minBlockMinutes, derived
+// from the card's pixel min-width), so two stops drop onto a second row only
+// when their drawn boxes would truly overlap — never for a tiny clock gap, and
+// never leaving boxes overlapping on one row.
+function packedStops(stops, minBlockMinutes, spanMin) {
   const rows = [];
   return stops
-    .map(deliveryBox)
+    .map((s) => deliveryBox(s, spanMin))
     .sort((a, b) => a._start - b._start)
     .map((stop) => {
-      const renderedEnd = Math.max(stop._end, stop._start + MIN_BLOCK_MINUTES);
+      const renderedEnd = Math.max(stop._end, stop._start + minBlockMinutes);
       let rowIndex = rows.findIndex((rowEnd) => stop._start >= rowEnd);
       if (rowIndex === -1) {
         rowIndex = rows.length;
@@ -81,7 +78,8 @@ function fillColor(ratio) {
   return '#ef4444';
 }
 
-export default function TruckLane({ truck, markers = [], nowMinute = null, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+  const spanMin = Math.max(1, windowEnd - WORK_START);
   const { isOver, setNodeRef } = useDroppable({
     id: `truck-lane-${truck.truck_id}`,
     data: { truckId: truck.truck_id },
@@ -109,11 +107,15 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
   const trips = truck.trips || [];
   const tripStops = trips.map((trip) => mergeSameLocation(trip.stops || []));
   const allStops = tripStops.flat();
-  const packed = packedStops(allStops);
+  // Card min-width is 148px; reserve the same span (in minutes) for packing so
+  // the row layout matches what's actually drawn.
+  const MIN_BLOCK_PX = 132;
+  const minBlockMinutes = laneWidth ? (MIN_BLOCK_PX / laneWidth) * spanMin : 55;
+  const packed = packedStops(allStops, minBlockMinutes, spanMin);
   const truckMarkers = markers.filter((marker) => String(marker.truck_id) === String(truck.truck_id));
   const rowCount = Math.max(1, packed.reduce((max, stop) => Math.max(max, stop._row + 1), 1));
   const laneHeight = Math.max(allStops.length ? 124 : 84, rowCount * 104 + 24);
-  const minutesPerPixel = laneWidth ? WORK_MINUTES / laneWidth : 1;
+  const minutesPerPixel = laneWidth ? spanMin / laneWidth : 1;
 
   const capacityPositions = Number(truck.capacity_positions || 0);
   const usedPositions = allStops.reduce((sum, s) => sum + Number(s.quantity_positions || s.position_count || 0), 0);
@@ -121,25 +123,26 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
   const fillRatio = capacityPositions && tripCount ? usedPositions / (capacityPositions * tripCount) : 0;
   const isIdle = allStops.length === 0;
   const accent = isIdle ? '#c4bfb6' : fillColor(fillRatio);
-  const nowLeft = nowMinute != null ? pct(`${Math.floor(nowMinute / 60)}:${nowMinute % 60}`) : null;
+  const nowLeft = nowMinute != null ? pctIn(`${Math.floor(nowMinute / 60)}:${nowMinute % 60}`, windowEnd) : null;
 
-  // Each trip starts with a COFICAB departure marker (its ETD), then dashed
-  // "in transit" connectors show the truck driving between consecutive stops
-  // (the gaps are travel, not idle). We only mark the departure — a return
-  // marker landed inside the last (min-width) block and read as a bogus second
-  // departure, so it is intentionally omitted.
+  // Each trip is bookended by COFICAB markers — the departure (its ETD) and the
+  // return — with dashed "in transit" connectors showing the truck driving
+  // between consecutive stops (gaps are travel, not idle). The return marker is
+  // anchored just past the last card's drawn edge so it never sits inside it.
   const byId = new Map(packed.map((s) => [String(s.id), s]));
-  const minWidthPct = laneWidth ? (148 / laneWidth) * 100 : 8;
+  const minWidthPct = laneWidth ? (MIN_BLOCK_PX / laneWidth) * 100 : 8;
   const connectors = [];
   const depots = [];
+  const renderedRight = (s) => Math.max(0, s._left) + Math.max(s._width, minWidthPct);
   trips.forEach((trip, ti) => {
     const ts = tripStops[ti];
     if (!ts.length) return;
     const first = byId.get(String(ts[0].id));
+    const last = byId.get(String(ts[ts.length - 1].id));
 
     // COFICAB departure (the trip's ETD) → drive to the first stop
     if (first) {
-      const depotLeft = pct(trip.depart_at);
+      const depotLeft = pctIn(trip.depart_at, windowEnd);
       const firstLeft = Math.max(0, first._left);
       depots.push({ key: `dep-${trip.trip_id}`, type: 'depart', left: depotLeft, row: first._row, time: trip.depart_at });
       if (firstLeft - depotLeft > 1) {
@@ -152,10 +155,21 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
       const a = byId.get(String(ts[i - 1].id));
       const b = byId.get(String(ts[i].id));
       if (!a || !b || a._row !== b._row) continue;
-      const aRight = Math.max(0, a._left) + Math.max(a._width, minWidthPct);
+      const aRight = renderedRight(a);
       const bLeft = Math.max(0, b._left);
       if (bLeft - aRight > 1) {
         connectors.push({ key: `${a.id}-${b.id}`, left: aRight, width: bLeft - aRight, row: b._row, travel: b.travel_min });
+      }
+    }
+
+    // last stop → drive back to COFICAB (the return), anchored after the card
+    if (last && trip.return_at) {
+      const lastRight = renderedRight(last);
+      const retPos = Math.max(pctIn(trip.return_at, windowEnd), lastRight);
+      depots.push({ key: `ret-${trip.trip_id}`, type: 'return', left: retPos, row: last._row, time: trip.return_at });
+      if (retPos - lastRight > 1) {
+        const homeMin = minutes(trip.return_at) - minutes(last.eta);
+        connectors.push({ key: `cret-${trip.trip_id}`, left: lastRight, width: retPos - lastRight, row: last._row, travel: homeMin > 0 ? homeMin : null });
       }
     }
   });
@@ -219,7 +233,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
                 style={{
                   left: `${d.left}%`,
                   top: `${12 + d.row * 104 + 44}px`,
-                  transform: d.type === 'return' ? 'translate(-100%, -50%)' : 'translate(0, -50%)',
+                  transform: 'translate(0, -50%)',
                 }}
                 title={d.type === 'depart' ? `Leaves COFICAB at ${d.time}` : `Back at COFICAB at ${d.time}`}
               >
@@ -248,7 +262,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
               </div>
             ))}
             {truckMarkers.map((marker) => (
-              <DepotMarker key={marker.id} marker={marker} left={pct(marker.time)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
+              <DepotMarker key={marker.id} marker={marker} left={pctIn(marker.time, windowEnd)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
             ))}
             {packed.map((delivery) => (
               <div
@@ -258,7 +272,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
                   left: `${Math.max(0, delivery._left)}%`,
                   top: `${12 + delivery._row * 104}px`,
                   width: `${Math.min(delivery._width, 100 - Math.max(0, delivery._left))}%`,
-                  minWidth: 148,
+                  minWidth: MIN_BLOCK_PX,
                 }}
               >
                 <DeliveryBlock
@@ -273,7 +287,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, onRes
           </>
         )}
         {isIdle && truckMarkers.map((marker) => (
-          <DepotMarker key={marker.id} marker={marker} left={pct(marker.time)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
+          <DepotMarker key={marker.id} marker={marker} left={pctIn(marker.time, windowEnd)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
         ))}
         {isIdle && (
           <div className="absolute inset-0 flex items-center px-6 text-xs font-medium text-[#c4bfb6]">No deliveries assigned</div>

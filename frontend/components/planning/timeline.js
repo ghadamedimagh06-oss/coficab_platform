@@ -34,6 +34,19 @@ export function pct(value) {
   return Math.max(0, Math.min(100, ((toMinutes(value) - WORK_START) / WORK_MINUTES) * 100));
 }
 
+// Position (0-100%) within a dynamic [WORK_START, endMin] window. The board
+// fits the axis to the day's latest return (capped at midnight) so the busy
+// daytime isn't squeezed by an always-to-midnight axis.
+export function pctIn(value, endMin) {
+  const span = Math.max(1, endMin - WORK_START);
+  return Math.max(0, Math.min(100, ((toMinutes(value) - WORK_START) / span) * 100));
+}
+
+export function ticksTo(endMin) {
+  const endHour = Math.round(endMin / 60);
+  return Array.from({ length: endHour - WORK_START / 60 + 1 }, (_, i) => WORK_START / 60 + i);
+}
+
 export function clampMinute(value, min = WORK_START, max = WORK_END) {
   return Math.max(min, Math.min(max, value));
 }

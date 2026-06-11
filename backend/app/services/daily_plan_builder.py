@@ -76,6 +76,10 @@ class DailyPlanConfig:
     # best route; the dashboard, which rebuilds a whole week per refresh, turns
     # this off and uses the (near-instant) greedy order so it stays responsive.
     prefer_ortools: bool = True
+    # Per-variant time budget for the global multi-vehicle VRPTW solve.
+    global_solver_seconds: int = 6
+    # Max trips one truck may run in a day (vehicle slots in the global model).
+    trips_per_truck: int = 3
 
 
 class DailyPlanBuilder:
@@ -139,7 +143,12 @@ class DailyPlanBuilder:
             "day": day.isoformat(),
             "source_file": source_path.name,
             "generated_at": datetime.utcnow().isoformat() + "Z",
-            "algorithm": "global VRPTW: demand variants + cost-scored fleet candidates",
+            "algorithm": (
+                "global multi-vehicle VRPTW (OR-Tools: capacity+kg+time dimensions, "
+                "multi-trip, drop penalties) over split/baseline demand variants"
+                if HAS_ORTOOLS else
+                "cluster-first heuristic portfolio over split/baseline demand variants"
+            ),
             "depot": {"lat": depot[0], "lon": depot[1]},
             "work_window": {"start": self.cfg.work_start, "end": self.cfg.work_end},
             "selection": selection,
@@ -207,17 +216,201 @@ class DailyPlanBuilder:
             dur_min = self._build_matrix(servable, depot)
             for i, d in enumerate(servable):
                 d["_mi"] = i + 1
-            candidates = []
-            for name, assign_fn in (
-                ("zones", self._assign_to_trucks),
-                ("packed", self._assign_insertion),
-            ):
-                ct, cu = self._run_strategy(servable, dur_min, assign_fn)
-                candidates.append((self._plan_cost(ct, cu), name, ct, cu))
-            _, _, trucks, best_unassigned = min(candidates, key=lambda c: c[0])
-            unassigned.extend(best_unassigned)
+
+            # Primary: solve the WHOLE fleet as one global VRPTW (joint
+            # assignment + routing + time). Fall back to the cluster-first
+            # heuristic portfolio if OR-Tools is unavailable/disabled or the
+            # global solve fails to return.
+            global_solved = (
+                self._solve_global_vrptw(servable, dur_min)
+                if (HAS_ORTOOLS and self.cfg.prefer_ortools) else None
+            )
+            if global_solved is not None:
+                trucks, g_unassigned = global_solved
+                unassigned.extend(g_unassigned)
+            else:
+                candidates = []
+                for name, assign_fn in (
+                    ("zones", self._assign_to_trucks),
+                    ("packed", self._assign_insertion),
+                ):
+                    ct, cu = self._run_strategy(servable, dur_min, assign_fn)
+                    candidates.append((self._plan_cost(ct, cu), name, ct, cu))
+                _, _, trucks, best_unassigned = min(candidates, key=lambda c: c[0])
+                unassigned.extend(best_unassigned)
 
         return trucks, unassigned, routable, self._plan_cost(trucks, unassigned)
+
+    # ----------------------------------------------------- global VRPTW solver
+    def _solve_global_vrptw(self, servable, dur):
+        """Solve the full multi-vehicle VRPTW in a single OR-Tools model:
+
+          • one node per delivery (node 0 = depot), every vehicle depot-rooted;
+          • two capacity dimensions — positions AND real gross kg — per vehicle;
+          • a time dimension with travel + service transit, customer time windows
+            (Excel), depart-by-cut-off start bounds and evening returns allowed;
+          • multi-trip: each truck is replicated into ``trips_per_truck`` vehicle
+            slots whose start times are chained (a truck runs its trips in
+            sequence, with a reload gap between them);
+          • optional drops via disjunctions, with urgent loads near-mandatory;
+          • a fixed cost per dispatched trip (rented truck heavily penalised) so
+            the solver consolidates onto as few trips/trucks as possible.
+
+        Returns (trucks_with_trips, unassigned) or None on failure.
+        """
+        try:
+            templates = self.truck_templates
+            n = len(servable)
+            if not n:
+                return None
+            early = self._minutes(self.cfg.early_start)
+            cutoff = self._minutes(self.cfg.max_depart)
+            work_start = self._minutes(self.cfg.work_start)
+            horizon = 24 * 60
+            reload = self.cfg.reload_minutes
+
+            # Replicate each physical truck into N trip-slots (separate vehicles).
+            veh_truck: list[int] = []
+            for ti in range(len(templates)):
+                veh_truck.extend([ti] * max(1, self.cfg.trips_per_truck))
+            V = len(veh_truck)
+            if V == 0:
+                return None
+            cap_pos = [int(templates[veh_truck[v]]["capacity_positions"]) for v in range(V)]
+            cap_kg = [int(templates[veh_truck[v]]["capacity_kg"]) for v in range(V)]
+
+            manager = pywrapcp.RoutingIndexManager(n + 1, V, 0)
+            routing = pywrapcp.RoutingModel(manager)
+
+            def transit(from_idx, to_idx):
+                i = manager.IndexToNode(from_idx)
+                j = manager.IndexToNode(to_idx)
+                service = 0 if i == 0 else self._service_minutes(servable[i - 1])
+                return int(round(dur[i][j])) + service
+            tcb = routing.RegisterTransitCallback(transit)
+            routing.SetArcCostEvaluatorOfAllVehicles(tcb)
+
+            # Fixed cost per dispatched trip; the hired truck is a genuine last
+            # resort (a real rental bill), so it carries a heavy surcharge and is
+            # only used when owned trucks cannot cover the demand.
+            for v in range(V):
+                fixed = 1500
+                if templates[veh_truck[v]].get("truck_id") == self.RENTED_TRUCK_ID:
+                    fixed += 20000
+                routing.SetFixedCostOfVehicle(fixed, v)
+
+            # Capacity dimensions — positions and real gross weight.
+            def pos_dem(from_idx):
+                i = manager.IndexToNode(from_idx)
+                return 0 if i == 0 else int(round(self._pos(servable[i - 1])))
+            routing.AddDimensionWithVehicleCapacity(
+                routing.RegisterUnaryTransitCallback(pos_dem), 0, cap_pos, True, "Positions")
+
+            def kg_dem(from_idx):
+                i = manager.IndexToNode(from_idx)
+                return 0 if i == 0 else int(round(self._kg(servable[i - 1])))
+            routing.AddDimensionWithVehicleCapacity(
+                routing.RegisterUnaryTransitCallback(kg_dem), 0, cap_kg, True, "Kg")
+
+            # Time dimension (slack lets a truck wait for a window to open).
+            routing.AddDimension(tcb, horizon, horizon, False, "Time")
+            time_dim = routing.GetDimensionOrDie("Time")
+            time_dim.SetSpanCostCoefficientForAllVehicles(1)  # trim idle/waiting
+            for v in range(V):
+                time_dim.CumulVar(routing.Start(v)).SetRange(early, cutoff)
+            for i in range(1, n + 1):
+                window = servable[i - 1]["constraints"].get("time_window")
+                lo, hi = (
+                    (self._minutes(window[0]), self._minutes(window[1]))
+                    if window else (work_start, horizon)
+                )
+                time_dim.CumulVar(manager.NodeToIndex(i)).SetRange(lo, hi)
+
+            # Multi-trip: a truck's slots run sequentially with a reload gap.
+            solver = routing.solver()
+            slots: dict[int, list[int]] = {}
+            for v in range(V):
+                slots.setdefault(veh_truck[v], []).append(v)
+            for vs in slots.values():
+                for a, b in zip(vs, vs[1:]):
+                    solver.Add(
+                        time_dim.CumulVar(routing.Start(b))
+                        >= time_dim.CumulVar(routing.End(a)) + reload
+                    )
+
+            # Allow drops, but make them very expensive (urgent ~ mandatory).
+            for i in range(1, n + 1):
+                penalty = 100_000_000 if self._is_urgent(servable[i - 1]) else 1_000_000
+                routing.AddDisjunction([manager.NodeToIndex(i)], penalty)
+
+            params = pywrapcp.DefaultRoutingSearchParameters()
+            params.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+            )
+            params.local_search_metaheuristic = (
+                routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+            )
+            params.time_limit.FromSeconds(max(1, int(self.cfg.global_solver_seconds)))
+            sol = routing.SolveWithParameters(params)
+            if sol is None:
+                return None
+
+            trucks = [self._fresh_truck(t) for t in templates]
+            assigned_nodes: set[int] = set()
+            for v in range(V):
+                start = routing.Start(v)
+                if routing.IsEnd(sol.Value(routing.NextVar(start))):
+                    continue  # unused slot
+                truck = trucks[veh_truck[v]]
+                stops: list[dict[str, Any]] = []
+                idx = start
+                prev_node = 0
+                depart = sol.Value(time_dim.CumulVar(start))
+                while not routing.IsEnd(idx):
+                    node = manager.IndexToNode(idx)
+                    if node != 0:
+                        d = servable[node - 1]
+                        arrival = sol.Value(time_dim.CumulVar(idx))
+                        service = self._service_minutes(d)
+                        stops.append({
+                            **self._clean_stop(d),
+                            "etd": self._clock(int(round(arrival))),
+                            "eta": self._clock(int(round(arrival + service))),
+                            "travel_min": int(round(dur[prev_node][node])),
+                            "service_min": int(round(service)),
+                        })
+                        assigned_nodes.add(node)
+                        prev_node = node
+                    idx = sol.Value(routing.NextVar(idx))
+                return_at = sol.Value(time_dim.CumulVar(idx))
+                truck.setdefault("_pending", []).append((depart, return_at, stops))
+
+            for truck in trucks:
+                pending = truck.pop("_pending", [])
+                pending.sort(key=lambda x: x[0])
+                for k, (depart, return_at, stops) in enumerate(pending, start=1):
+                    truck["trips"].append({
+                        "trip_id": f"{truck['truck_id']}-{k}",
+                        "depart_at": self._clock(int(round(depart))),
+                        "return_at": self._clock(int(round(return_at))),
+                        "stops": stops,
+                    })
+
+            unassigned = [
+                {**self._clean_stop(servable[i - 1]),
+                 "unassigned_reason": "No feasible vehicle/time slot in the working day"}
+                for i in range(1, n + 1) if i not in assigned_nodes
+            ]
+            log.info(
+                "Global VRPTW: %d/%d delivered, %d trips on %d trucks",
+                len(assigned_nodes), n,
+                sum(len(t["trips"]) for t in trucks),
+                sum(1 for t in trucks if t["trips"]),
+            )
+            return trucks, unassigned
+        except Exception as exc:  # never break the planner — fall back
+            log.warning("Global VRPTW failed, using heuristic fallback — %s", exc)
+            return None
 
     # --------------------------------------------------- global fleet packing
     # Business objective (iteration 1): minimise total transport waste, not just

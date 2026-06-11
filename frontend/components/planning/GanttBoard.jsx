@@ -10,7 +10,19 @@ import {
 import { Warehouse } from 'lucide-react';
 import TimeAxis from './TimeAxis';
 import TruckLane from './TruckLane';
-import { WORK_START, WORK_END, WORK_MINUTES, SNAP_MINUTES } from './timeline';
+import { WORK_START, WORK_END, SNAP_MINUTES, toMinutes } from './timeline';
+
+// Fit the axis to the day: 06:00 → the latest return/arrival rounded up to the
+// hour, with a minimum of 20:00 and a midnight cap. Keeps the busy daytime
+// roomy on normal days while still showing late evening returns when they exist.
+function planWindowEnd(plan) {
+  let latest = 20 * 60;
+  (plan?.trucks || []).forEach((t) => (t.trips || []).forEach((tr) => {
+    latest = Math.max(latest, toMinutes(tr.return_at));
+    (tr.stops || []).forEach((s) => { latest = Math.max(latest, toMinutes(s.eta)); });
+  }));
+  return Math.min(WORK_END, Math.ceil(latest / 60) * 60);
+}
 
 function MarkerTool() {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -38,7 +50,7 @@ function MarkerTool() {
   );
 }
 
-function snappedMinuteFromDrag(event) {
+function snappedMinuteFromDrag(event, spanMin) {
   const overRect = event.over?.rect;
   if (!overRect?.width) return WORK_START;
 
@@ -46,7 +58,7 @@ function snappedMinuteFromDrag(event) {
   const initial = event.active?.rect?.current?.initial;
   const left = translated?.left ?? initial?.left ?? overRect.left;
   const ratio = Math.max(0, Math.min(1, (left - overRect.left) / overRect.width));
-  return WORK_START + Math.round((ratio * WORK_MINUTES) / SNAP_MINUTES) * SNAP_MINUTES;
+  return WORK_START + Math.round((ratio * spanMin) / SNAP_MINUTES) * SNAP_MINUTES;
 }
 
 function LegendChip({ swatch, children }) {
@@ -76,16 +88,18 @@ export default function GanttBoard({
     useSensor(KeyboardSensor),
   );
 
+  const windowEnd = planWindowEnd(plan);
+
   // Live "now" marker, but only when the board is showing today's plan.
   const today = new Date().toISOString().slice(0, 10);
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const nowMinute = plan?.day === today && nowMin >= WORK_START && nowMin <= WORK_END ? nowMin : null;
+  const nowMinute = plan?.day === today && nowMin >= WORK_START && nowMin <= windowEnd ? nowMin : null;
 
   function handleDragEnd(event) {
     const targetTruckId = event.over?.data?.current?.truckId;
     const activeData = event.active?.data?.current || {};
     if (!targetTruckId) return;
-    const targetMinute = snappedMinuteFromDrag(event);
+    const targetMinute = snappedMinuteFromDrag(event, windowEnd - WORK_START);
 
     if (activeData.markerTemplate) {
       onDropMarker?.(targetTruckId, targetMinute);
@@ -123,14 +137,15 @@ export default function GanttBoard({
 
         {/* Scrollable board */}
         <div className="overflow-x-auto">
-          <div className="min-w-[1900px]">
-            <TimeAxis nowMinute={nowMinute} />
+          <div className="min-w-[2400px]">
+            <TimeAxis nowMinute={nowMinute} windowEnd={windowEnd} />
             {trucks.map((truck) => (
               <TruckLane
                 key={truck.truck_id}
                 truck={truck}
                 markers={plan?.manual_markers || []}
                 nowMinute={nowMinute}
+                windowEnd={windowEnd}
                 onResizeDelivery={onResizeDelivery}
                 onCancel={onCancel}
                 onRestore={onRestore}
