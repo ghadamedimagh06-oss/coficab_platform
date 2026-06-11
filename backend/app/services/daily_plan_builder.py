@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -139,7 +140,7 @@ class DailyPlanBuilder:
         clean_trucks = [self._clean_truck(t) for t in trucks]
 
         return {
-            "plan_id": int(datetime.now(timezone.utc).timestamp()),
+            "plan_id": str(uuid.uuid4()),
             "day": day.isoformat(),
             "source_file": source_path.name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
