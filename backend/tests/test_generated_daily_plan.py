@@ -32,6 +32,16 @@ def _minutes(value):
     return int(hours) * 60 + int(minutes)
 
 
+def test_clock_does_not_clamp_midnight():
+    result = DailyPlanBuilder._clock(1514)  # 25h 14min
+    assert result != "23:59", "_clock must not clamp late returns"
+    assert result == "25:14"
+
+
+def test_clock_formats_normal_time():
+    assert DailyPlanBuilder._clock(6 * 60 + 5) == "06:05"
+
+
 def test_daily_plan_builder_assigns_real_workbook_rows():
     plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
 

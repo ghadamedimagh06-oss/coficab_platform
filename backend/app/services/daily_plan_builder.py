@@ -1399,5 +1399,18 @@ class DailyPlanBuilder:
 
     @staticmethod
     def _clock(minutes: int) -> str:
-        minutes = max(0, min(minutes, 23 * 60 + 59))
+        """Format a minutes-since-midnight value as HH:MM.
+
+        Late returns (>= 24:00) are NOT clamped to 23:59 — they keep counting
+        (e.g. 1514 -> "25:14") so the dispatcher sees the real elapsed time
+        instead of a silently wrong value. A warning is logged so ops notice
+        a plan that overruns midnight. The Gantt's toMinutes() parses hours
+        beyond 24 correctly and clamps only the visual bar position.
+        """
+        minutes = max(0, int(minutes))
+        if minutes >= 24 * 60:
+            log.warning(
+                "DailyPlanBuilder._clock: trip time %d min exceeds midnight -> %02d:%02d",
+                minutes, minutes // 60, minutes % 60,
+            )
         return f"{minutes // 60:02d}:{minutes % 60:02d}"
