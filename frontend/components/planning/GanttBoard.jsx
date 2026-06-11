@@ -90,6 +90,11 @@ export default function GanttBoard({
 
   const windowEnd = planWindowEnd(plan);
 
+  // Driver hours-of-service overruns, keyed by truck label, for the ⚠ badge.
+  const hosByLabel = new Map(
+    (plan?.diagnostics?.hos_warnings || []).map((w) => [String(w.truck), w]),
+  );
+
   // Live "now" marker, but only when the board is showing today's plan.
   const today = new Date().toISOString().slice(0, 10);
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -146,6 +151,7 @@ export default function GanttBoard({
                 markers={plan?.manual_markers || []}
                 nowMinute={nowMinute}
                 windowEnd={windowEnd}
+                hosWarning={hosByLabel.get(String(truck.truck_label)) || null}
                 onResizeDelivery={onResizeDelivery}
                 onCancel={onCancel}
                 onRestore={onRestore}

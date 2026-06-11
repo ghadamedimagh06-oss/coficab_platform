@@ -657,7 +657,50 @@ class DailyPlanBuilder:
             "two_or_fewer_feasible_trucks": two_or_fewer,
             "under_80pct_departures": under,
             "unassigned": unassigned_diag,
+            "hos_warnings": self._hos_warnings(trucks),
         }
+
+    # Tunisian driving regulation limits (informational only — the plan is still
+    # returned; the dispatcher is responsible for legal compliance).
+    HOS_DRIVING_LIMIT_MIN = 540   # 9 h max daily driving
+    HOS_ON_DUTY_LIMIT_MIN = 780   # 13 h max daily on-duty (first depart→last return)
+
+    def _hos_warnings(self, trucks) -> list[dict[str, Any]]:
+        """Flag trucks whose day exceeds the driving (9 h) or on-duty (13 h)
+        limits. Warning only: overruns are surfaced, never silently dropped."""
+        def _clock_min(value) -> Optional[int]:
+            # depart_at/return_at are _clock() strings and may exceed 24:00
+            # (late returns), which _minutes() rejects — parse HH:MM directly.
+            try:
+                hh, mm = str(value).split(":")[:2]
+                return int(hh) * 60 + int(mm)
+            except (ValueError, AttributeError):
+                return None
+
+        warnings: list[dict[str, Any]] = []
+        for t in trucks:
+            trips = t.get("trips") or []
+            if not trips:
+                continue
+            driving = int(round(sum(
+                float(s.get("travel_min") or 0)
+                for trip in trips for s in trip.get("stops", [])
+            )))
+            departs = [m for trip in trips if (m := _clock_min(trip.get("depart_at"))) is not None]
+            returns = [m for trip in trips if (m := _clock_min(trip.get("return_at"))) is not None]
+            on_duty = int(max(returns) - min(departs)) if departs and returns else 0
+            if driving > self.HOS_DRIVING_LIMIT_MIN or on_duty > self.HOS_ON_DUTY_LIMIT_MIN:
+                warnings.append({
+                    "truck": t.get("truck_label"),
+                    "driver": t.get("driver"),
+                    "driving_minutes": driving,
+                    "on_duty_minutes": on_duty,
+                    "driving_limit": self.HOS_DRIVING_LIMIT_MIN,
+                    "on_duty_limit": self.HOS_ON_DUTY_LIMIT_MIN,
+                    "driving_overflow_minutes": max(0, driving - self.HOS_DRIVING_LIMIT_MIN),
+                    "on_duty_overflow_minutes": max(0, on_duty - self.HOS_ON_DUTY_LIMIT_MIN),
+                })
+        return warnings
 
     # --------------------------------------------------------- delivery splits
     def _maybe_split(self, delivery: dict[str, Any]) -> list[dict[str, Any]]:

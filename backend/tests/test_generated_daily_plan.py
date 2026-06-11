@@ -32,6 +32,37 @@ def _minutes(value):
     return int(hours) * 60 + int(minutes)
 
 
+def test_hos_warnings_flag_long_days():
+    builder = DailyPlanBuilder(WEEKLY_DIR)
+    trucks = [{
+        "truck_label": "Truck X", "truck_id": 1,
+        "trips": [
+            {"depart_at": "03:00", "return_at": "12:00", "stops": [{"travel_min": 300}]},
+            {"depart_at": "12:30", "return_at": "18:30", "stops": [{"travel_min": 260}]},
+        ],
+    }]
+    warnings = builder._hos_warnings(trucks)
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert w["truck"] == "Truck X"
+    assert w["driving_minutes"] == 560 and w["driving_overflow_minutes"] == 20
+    assert w["on_duty_minutes"] == 930 and w["on_duty_overflow_minutes"] == 150
+
+
+def test_hos_no_warning_for_compliant_day():
+    builder = DailyPlanBuilder(WEEKLY_DIR)
+    trucks = [{
+        "truck_label": "T", "truck_id": 2,
+        "trips": [{"depart_at": "08:00", "return_at": "12:00", "stops": [{"travel_min": 120}]}],
+    }]
+    assert builder._hos_warnings(trucks) == []
+
+
+def test_plan_exposes_hos_warnings_list():
+    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    assert isinstance(plan["diagnostics"]["hos_warnings"], list)
+
+
 def test_plan_reports_estimated_cost_in_tnd():
     plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
     cost = plan["estimated_cost_tnd"]

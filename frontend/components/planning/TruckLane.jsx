@@ -78,7 +78,7 @@ function fillColor(ratio) {
   return '#ef4444';
 }
 
-export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, hosWarning = null, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
   const spanMin = Math.max(1, windowEnd - WORK_START);
   const { isOver, setNodeRef } = useDroppable({
     id: `truck-lane-${truck.truck_id}`,
@@ -186,7 +186,17 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
             <Truck size={16} />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-[#1a1a2e]">{truck.truck_label}</p>
+            <p className="flex items-center gap-1 truncate text-sm font-semibold text-[#1a1a2e]">
+              <span className="truncate">{truck.truck_label}</span>
+              {hosWarning && (
+                <span
+                  className="shrink-0 text-[#d97706]"
+                  title={`HOS: ${hosWarning.driving_minutes}m driving / ${hosWarning.on_duty_minutes}m on-duty exceeds the 9h/13h limit`}
+                >
+                  ⚠
+                </span>
+              )}
+            </p>
             <p className="text-[11px] text-[#9e9aa4]">
               {capacityPositions.toLocaleString()} pos · {Number(truck.capacity_kg || 0).toLocaleString()} kg
             </p>
