@@ -42,9 +42,9 @@ CLIENTS_DIRECTORY = DATA_DIR / "clients_directory.json"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "coficab-daily-planner/1.0 (logistics planning)"
 
-# COFICAB Mégrine depot — geocoded once, kept as a stable fallback.
-DEPOT_QUERY = "Mégrine, Ben Arous, Tunisia"
-DEPOT_FALLBACK: Tuple[float, float] = (36.7703, 10.2316)
+# COFICAB Sidi Hassine depot — geocoded once, kept as a stable fallback.
+DEPOT_QUERY = "Sidi Hassine, Tunis, Tunisia"
+DEPOT_FALLBACK: Tuple[float, float] = (36.7708, 10.1103)
 
 # Factor that turns straight-line km into approximate road km (used by the
 # builder for client↔client legs that have no directory distance).

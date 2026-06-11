@@ -1417,7 +1417,7 @@ class DailyPlanBuilder:
         return {
             "id": int(row.get("row_number") or 0),
             "client": row.get("client") or row.get("end_location") or "Unknown client",
-            "start_location": row.get("start_location") or "COFICAB Mégrine",
+            "start_location": row.get("start_location") or "COFICAB Sidi Hassine",
             "end_location": row.get("end_location") or row.get("client") or "Unknown destination",
             "quantity_positions": positions,
             "position_count": positions,

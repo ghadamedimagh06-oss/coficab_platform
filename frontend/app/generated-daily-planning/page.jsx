@@ -315,7 +315,7 @@ export default function GeneratedDailyPlanningPage() {
     const delivery = {
       id: Date.now(),
       client: form.client || 'New delivery',
-      start_location: 'COFICAB Megrine',
+      start_location: 'COFICAB Sidi Hassine',
       end_location: form.client || 'New delivery',
       quantity_positions: form.quantity_positions,
       position_count: form.quantity_positions,

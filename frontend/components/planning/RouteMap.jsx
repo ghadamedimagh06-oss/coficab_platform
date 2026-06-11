@@ -174,7 +174,7 @@ function MapInner({ plan, selectedTruckId, onSelectTruck }) {
 
       {depot && (
         <CircleMarker center={depot} radius={9} pathOptions={{ color: '#1a1a2e', weight: 3, fillColor: '#facc15', fillOpacity: 1 }}>
-          <Tooltip direction="top">COFICAB Mégrine (depot)</Tooltip>
+          <Tooltip direction="top">COFICAB Sidi Hassine (depot)</Tooltip>
         </CircleMarker>
       )}
     </MapContainer>
@@ -192,7 +192,7 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
   const unassignedCount = (plan?.unassigned || []).length;
 
   return (
-    <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+    <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#7c3aed]">Today’s routes</p>

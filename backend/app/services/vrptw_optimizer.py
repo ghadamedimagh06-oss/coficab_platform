@@ -20,8 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-DEPOT_LAT: float = 36.5
-DEPOT_LON: float = 10.1
+# COFICAB Sidi Hassine depot
+DEPOT_LAT: float = 36.7708
+DEPOT_LON: float = 10.1103
 SERVICE_TIME_MINUTES: int = 15
 SHIFT_START_MIN: int = 8 * 60   # 08:00
 SHIFT_END_MIN: int = 18 * 60    # 18:00

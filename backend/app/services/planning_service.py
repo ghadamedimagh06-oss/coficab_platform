@@ -390,7 +390,7 @@ class PlanningService:
             start_location = self._text(row.get("start_location")) or ""
             end_location = self._text(row.get("end_location")) or ""
             if not start_location:
-                start_location = "COFICAB Mégrine"
+                start_location = "COFICAB Sidi Hassine"
             if not end_location:
                 end_location = client or "Unknown destination"
 
@@ -535,7 +535,7 @@ class PlanningService:
 
             driver = row["driver"] or ""
             vehicle = row["vehicle"] or ""
-            start_location = row["start_location"] or "COFICAB Mégrine"
+            start_location = row["start_location"] or "COFICAB Sidi Hassine"
             end_location = row["end_location"] or row["client"] or "Unknown destination"
             if row["distance_km"] is None:
                 distance_km = 0.0

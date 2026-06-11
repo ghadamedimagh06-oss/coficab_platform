@@ -13,7 +13,7 @@ const statusColor = {
 const clientColor = '#3b82f6';
 const depotColor = '#facc15';
 const TUNISIA_CENTER = [35.8, 9.6];
-const DEPOT = { lat: 36.7703, lng: 10.2316, name: 'COFICAB Mégrine (depot)' };
+const DEPOT = { lat: 36.7708, lng: 10.1103, name: 'COFICAB Sidi Hassine (depot)' };
 
 // Only real coordinates — never synthesise a position. Reads top-level lat/lng,
 // latitude/longitude, or a nested location:{lat,lng} (the tracking payload
