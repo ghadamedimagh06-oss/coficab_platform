@@ -83,6 +83,26 @@ class DailyPlanConfig:
     trips_per_truck: int = 3
 
 
+@dataclass
+class CostConfig:
+    """Real-world cost parameters in TND (Tunisian Dinars).
+
+    Defaults reflect COFICAB operating costs as of 2026. Injectable per
+    deployment via ``DailyPlanBuilder(cost_config=...)`` so the same optimiser
+    can be tuned per customer without code changes. The optimiser objective and
+    the ``estimated_cost_tnd`` reported on every plan are both derived from
+    these, so the score the solver minimises is the money the dispatcher sees.
+    """
+    fuel_price_tnd_per_liter: float = 2.2        # TND/L (Gasoil), 2026
+    fuel_consumption_l_per_100km: float = 28.0   # avg poids lourd
+    driver_hourly_cost_tnd: float = 8.5          # TND/h incl. charges
+    truck_dispatch_fixed_tnd: float = 45.0       # fixed cost per owned-truck dispatch
+    rental_truck_per_day_tnd: float = 420.0      # daily cost of the hired truck
+    underutil_penalty_per_pos: float = 3.0       # opportunity cost per empty position
+    unassigned_delivery_penalty_tnd: float = 2000.0  # per unassigned delivery
+    urgent_unassigned_multiplier: float = 3.0    # multiplier for urgent unassigned
+
+
 class DailyPlanBuilder:
     def __init__(
         self,
@@ -90,11 +110,13 @@ class DailyPlanBuilder:
         cfg: Optional[DailyPlanConfig] = None,
         geo: Optional[GeoService] = None,
         trucks: Optional[list[dict[str, Any]]] = None,
+        cost_config: Optional[CostConfig] = None,
     ):
         self.source_dir = source_dir
         self.cfg = cfg or DailyPlanConfig()
         self.geo = geo or GeoService()
         self.truck_templates = DEFAULT_TRUCKS if trucks is None else trucks
+        self.cost_config = cost_config or CostConfig()
 
     # ------------------------------------------------------------------ build
     def build(self, day: date, source_file: Optional[str] = None) -> dict[str, Any]:
@@ -138,6 +160,7 @@ class DailyPlanBuilder:
         )
 
         clean_trucks = [self._clean_truck(t) for t in trucks]
+        estimated_cost_tnd = self._cost_breakdown(trucks, unassigned)
 
         return {
             "plan_id": str(uuid.uuid4()),
@@ -165,6 +188,7 @@ class DailyPlanBuilder:
             },
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
+            "estimated_cost_tnd": estimated_cost_tnd,
             "diagnostics": self._diagnostics(trucks, unassigned, routable, self.truck_templates),
         }
 
@@ -421,19 +445,17 @@ class DailyPlanBuilder:
     UTIL_TARGET = 0.80          # a truck "should" depart at least this full
     MAX_DETOUR_KM = 130.0       # max straight-line pull to consolidate a drop
 
-    # Cost weights. Service coverage is lexicographically above everything else:
-    # any feasible plan serving all customers beats any plan with unassigned
-    # drops, and an urgent drop must never be sacrificed for utilisation.
-    _W_UNASSIGNED = 1_000_000.0
-    _W_UNASSIGNED_URGENT = 100_000_000.0
-    _W_TRUCK = 1_500.0          # each dispatched truck is expensive
-    _W_UNDERUTIL = 800.0        # penalty per (0.8 - util) of an under-full trip
-    _W_KM = 1.0
-    _W_TIME = 0.5
-    # Splitting is a structural trade-off, never free — these keep the optimiser
-    # from splitting unless it genuinely lowers the total cost.
-    _W_SPLIT_CUSTOMER = 250.0   # per customer that gets split
-    _W_SPLIT_STOP = 120.0       # per extra stop a split creates
+    # Operational cost weights live in CostConfig (TND); the plan objective is
+    # computed in _cost_breakdown(). Service coverage stays lexicographically
+    # above everything else via CostConfig.unassigned_delivery_penalty_tnd,
+    # which is an order of magnitude larger than any operational term.
+    #
+    # Splitting is a structural trade-off, never free — these TND overheads keep
+    # the optimiser from splitting unless it genuinely lowers the total cost
+    # (e.g. avoids the hired truck or an unassigned drop). Scaled to the same
+    # TND objective as the operational costs above.
+    _W_SPLIT_CUSTOMER = 8.0     # TND overhead per customer that gets split
+    _W_SPLIT_STOP = 4.0         # TND overhead per extra stop a split creates
     # Split comments are EXACT business quantities: warn on any mismatch beyond
     # this tolerance (0 = flag every discrepancy) instead of silently rescaling.
     SPLIT_QTY_TOLERANCE = 0
@@ -471,35 +493,54 @@ class DailyPlanBuilder:
         return trucks, unassigned
 
     def _plan_cost(self, trucks, unassigned) -> float:
-        """Weighted transport-waste score (lower is better)."""
+        """Operational cost of a plan in TND (lower is better). The solver
+        minimises this; the same breakdown is reported as estimated_cost_tnd."""
+        return self._cost_breakdown(trucks, unassigned)["total"]
+
+    def _cost_breakdown(self, trucks, unassigned) -> dict[str, float]:
+        """Plan cost decomposed into real TND terms (fuel, driver, trucks,
+        under-utilisation, unassigned penalty), derived from self.cost_config.
+
+        The unassigned penalty (>= 2000 TND/drop) stays an order of magnitude
+        above any operational term, preserving the lexicographic rule that a
+        plan serving all customers always beats one that drops a delivery.
+        """
+        cfg = self.cost_config
         used = [t for t in trucks if t.get("trips")]
         total_travel_min = 0.0
-        underutil = 0.0
+        empty_positions = 0.0
+        cost_trucks = 0.0
         for t in used:
             cap_p = float(t["capacity_positions"]) or 1.0
-            cap_k = float(t["capacity_kg"]) or 1.0
+            is_rented = str(t.get("truck_id")) == "999"
+            cost_trucks += cfg.rental_truck_per_day_tnd if is_rented else cfg.truck_dispatch_fixed_tnd
             for trip in t["trips"]:
                 stops = trip.get("stops", [])
                 if not stops:
                     continue
                 pos = sum(self._pos(s) for s in stops)
-                kg = sum(self._kg(s) for s in stops)
-                util = max(pos / cap_p, kg / cap_k)
-                if util < self.UTIL_TARGET:
-                    underutil += (self.UTIL_TARGET - util)
+                empty_positions += max(0.0, cap_p - pos)
                 total_travel_min += sum(float(s.get("travel_min") or 0) for s in stops)
+
         total_km = total_travel_min / 60.0 * self.cfg.avg_speed_kmh
-        unassigned_pen = sum(
-            self._W_UNASSIGNED_URGENT if self._is_urgent(u) else self._W_UNASSIGNED
+        total_hours = total_travel_min / 60.0
+        cost_fuel = total_km * cfg.fuel_price_tnd_per_liter * cfg.fuel_consumption_l_per_100km / 100.0
+        cost_driver = total_hours * cfg.driver_hourly_cost_tnd
+        cost_underutil = empty_positions * cfg.underutil_penalty_per_pos
+        cost_unassigned = sum(
+            cfg.unassigned_delivery_penalty_tnd
+            * (cfg.urgent_unassigned_multiplier if self._is_urgent(u) else 1.0)
             for u in unassigned
         )
-        return (
-            unassigned_pen
-            + self._W_TRUCK * len(used)
-            + self._W_UNDERUTIL * underutil
-            + self._W_KM * total_km
-            + self._W_TIME * total_travel_min
-        )
+        total = cost_trucks + cost_fuel + cost_driver + cost_underutil + cost_unassigned
+        return {
+            "total": round(total, 2),
+            "trucks": round(cost_trucks, 2),
+            "fuel": round(cost_fuel, 2),
+            "driver": round(cost_driver, 2),
+            "underutilization": round(cost_underutil, 2),
+            "unassigned_penalty": round(cost_unassigned, 2),
+        }
 
     def _assign_insertion(self, servable, trucks):
         """Global packing: place each drop (largest first) on the nearest truck

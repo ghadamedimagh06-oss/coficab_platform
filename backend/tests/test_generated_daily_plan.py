@@ -32,6 +32,26 @@ def _minutes(value):
     return int(hours) * 60 + int(minutes)
 
 
+def test_plan_reports_estimated_cost_in_tnd():
+    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    cost = plan["estimated_cost_tnd"]
+    assert isinstance(cost, dict)
+    assert cost["total"] > 0
+    for key in ("trucks", "fuel", "driver", "underutilization", "unassigned_penalty"):
+        assert key in cost
+        assert cost[key] >= 0
+
+
+def test_cost_config_is_injectable():
+    from app.services.daily_plan_builder import CostConfig
+
+    cheap = CostConfig(fuel_price_tnd_per_liter=0.0, driver_hourly_cost_tnd=0.0,
+                       truck_dispatch_fixed_tnd=0.0, underutil_penalty_per_pos=0.0,
+                       unassigned_delivery_penalty_tnd=0.0, rental_truck_per_day_tnd=0.0)
+    builder = DailyPlanBuilder(WEEKLY_DIR, cost_config=cheap)
+    assert builder.cost_config.fuel_price_tnd_per_liter == 0.0
+
+
 def test_clock_does_not_clamp_midnight():
     result = DailyPlanBuilder._clock(1514)  # 25h 14min
     assert result != "23:59", "_clock must not clamp late returns"
