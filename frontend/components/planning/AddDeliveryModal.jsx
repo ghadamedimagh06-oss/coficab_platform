@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 
 export default function AddDeliveryModal({ open, trucks, onClose, onAdd }) {
@@ -11,6 +11,18 @@ export default function AddDeliveryModal({ open, trucks, onClose, onAdd }) {
     priority: 'normal',
     truck_id: trucks?.[0]?.truck_id || 1,
   });
+
+  // The form state is seeded once at mount — often before the plan's trucks have
+  // loaded — so the default truck_id can point at a truck that doesn't exist.
+  // When the modal opens, snap the selection to a real truck if needed.
+  useEffect(() => {
+    if (!open || !trucks?.length) return;
+    setForm((current) => (
+      trucks.some((t) => String(t.truck_id) === String(current.truck_id))
+        ? current
+        : { ...current, truck_id: trucks[0].truck_id }
+    ));
+  }, [open, trucks]);
 
   if (!open) return null;
 

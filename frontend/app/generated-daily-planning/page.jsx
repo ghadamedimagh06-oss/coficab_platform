@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
-import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, Wand2 } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, ShieldCheck, ShieldOff, Wand2 } from 'lucide-react';
 import { exportDailyPlan, generateDailyPlan } from '../services/api';
 import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
-import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
+import JustificationModal from '../../components/planning/JustificationModal';
+import PlanChangeLog from '../../components/planning/PlanChangeLog';
 import PlanTable from '../../components/planning/PlanTable';
 
 // Leaflet touches `window` at import time, so load the map client-side only.
@@ -29,6 +30,42 @@ const item = {
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// ── Plan cache ────────────────────────────────────────────────────────────
+// Generating a daily plan is a ~6s backend call (live Nominatim + OSRM road
+// matrix). Without caching, every reload or navigation back to this page paid
+// that cost again. We cache the (possibly edited) plan per day in two layers:
+//   • an in-memory Map that survives client-side navigation within the SPA, and
+//   • sessionStorage so a full page reload restores instantly too.
+// The Regenerate button bypasses the cache to force a fresh build.
+const PLAN_MEMORY_CACHE = new Map();
+const CACHE_PREFIX = 'coficab:dailyPlan:';
+
+function readCachedPlan(day) {
+  if (!day) return null;
+  if (PLAN_MEMORY_CACHE.has(day)) return PLAN_MEMORY_CACHE.get(day);
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(CACHE_PREFIX + day);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    PLAN_MEMORY_CACHE.set(day, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedPlan(day, plan) {
+  if (!day || !plan) return;
+  PLAN_MEMORY_CACHE.set(day, plan);
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(CACHE_PREFIX + day, JSON.stringify(plan));
+  } catch {
+    // Quota or serialization issue — the in-memory cache still covers navigation.
+  }
 }
 
 function countDeliveries(plan) {
@@ -176,6 +213,9 @@ export default function GeneratedDailyPlanningPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedTruckId, setSelectedTruckId] = useState(null);
+  const [isVerified, setIsVerified] = useState(false);
+  const [changeLog, setChangeLog] = useState([]);
+  const [pendingAction, setPendingAction] = useState(null);
 
   const stats = useMemo(() => ({
     deliveries: countDeliveries(plan),
@@ -194,8 +234,9 @@ export default function GeneratedDailyPlanningPage() {
     setStatus('generating');
     setError(null);
     try {
-      const nextPlan = await generateDailyPlan(nextDay, undefined, activeTrucks);
-      setPlan(withManualMarkers(nextPlan));
+      const nextPlan = withManualMarkers(await generateDailyPlan(nextDay, undefined, activeTrucks));
+      setPlan(nextPlan);
+      writeCachedPlan(nextDay, nextPlan);
       setStatus('ready');
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Unable to generate the daily plan.');
@@ -203,13 +244,57 @@ export default function GeneratedDailyPlanningPage() {
     }
   }
 
+  // Show a cached plan instantly when one exists for `nextDay`; only fall back
+  // to the slow backend build on a cache miss. Returns true when served cached.
+  function showCachedOrRegenerate(nextDay) {
+    const cached = readCachedPlan(nextDay);
+    if (cached) {
+      setPlan(withManualMarkers(cached));
+      setError(null);
+      setStatus('ready');
+      return true;
+    }
+    regenerate(nextDay);
+    return false;
+  }
+
   useEffect(() => {
     const initial = todayIso();
     setDay(initial);
-    regenerate(initial);
+    showCachedOrRegenerate(initial);
   }, []);
 
+  // Keep the cache in step with local edits (moves, adds, deletes) so a reload
+  // restores the latest state rather than the pristine generated plan.
+  useEffect(() => {
+    if (plan && status === 'ready' && day) writeCachedPlan(day, plan);
+  }, [plan, status, day]);
+
   function moveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {
+    if (!deliveryId || !plan) return;
+
+    if (isVerified) {
+      const { delivery: d, truck: sourceTruck } = findDelivery(plan, deliveryId);
+      const targetTruck = plan.trucks.find((t) => String(t.truck_id) === String(targetTruckId));
+      const duration = d ? deliveryDuration(d) : 45;
+      const clamped = clampMinute(targetMinute, WORK_START, WORK_END - duration);
+      setPendingAction({
+        action: 'Move',
+        description: `Move "${d?.client}" from ${sourceTruck?.truck_label || '?'} to ${targetTruck?.truck_label || '?'}`,
+        client: d?.client || '?',
+        truckFrom: sourceTruck?.truck_label || '?',
+        truckTo: targetTruck?.truck_label || '?',
+        timeFrom: `${d?.etd || '?'}–${d?.eta || '?'}`,
+        timeTo: `${toClock(clamped)}–${toClock(clamped + duration)}`,
+        execute: () => executeMoveDelivery(deliveryId, targetTruckId, targetMinute),
+      });
+      return;
+    }
+
+    executeMoveDelivery(deliveryId, targetTruckId, targetMinute);
+  }
+
+  function executeMoveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {
     if (!deliveryId || !plan) return;
     let moved = null;
     const sourceCleared = {
@@ -269,6 +354,27 @@ export default function GeneratedDailyPlanningPage() {
 
   function resizeDelivery(deliveryId, nextEtd, nextEta) {
     if (!deliveryId || !plan) return;
+
+    if (isVerified) {
+      const { delivery: d, truck: t } = findDelivery(plan, deliveryId);
+      setPendingAction({
+        action: 'Reschedule',
+        description: `Reschedule "${d?.client}" from ${d?.etd || '?'}–${d?.eta || '?'} to ${nextEtd}–${nextEta}`,
+        client: d?.client || '?',
+        truckFrom: t?.truck_label || '?',
+        truckTo: t?.truck_label || '?',
+        timeFrom: `${d?.etd || '?'}–${d?.eta || '?'}`,
+        timeTo: `${nextEtd}–${nextEta}`,
+        execute: () => executeResizeDelivery(deliveryId, nextEtd, nextEta),
+      });
+      return;
+    }
+
+    executeResizeDelivery(deliveryId, nextEtd, nextEta);
+  }
+
+  function executeResizeDelivery(deliveryId, nextEtd, nextEta) {
+    if (!deliveryId || !plan) return;
     const { delivery } = findDelivery(plan, deliveryId);
     if (!delivery) return;
 
@@ -304,14 +410,68 @@ export default function GeneratedDailyPlanningPage() {
   }
 
   function cancelDelivery(deliveryId) {
+    if (isVerified) {
+      const { delivery: d, truck: t } = findDelivery(plan, deliveryId);
+      setPendingAction({
+        action: 'Delete',
+        description: `Delete delivery "${d?.client}" from ${t?.truck_label || '?'}`,
+        client: d?.client || '?',
+        truckFrom: t?.truck_label || '?',
+        truckTo: 'Removed',
+        timeFrom: `${d?.etd || '?'}–${d?.eta || '?'}`,
+        timeTo: '—',
+        execute: () => executeCancelDelivery(deliveryId),
+      });
+      return;
+    }
+    executeCancelDelivery(deliveryId);
+  }
+
+  function executeCancelDelivery(deliveryId) {
     setPlan((current) => mutateDelivery(current, deliveryId, (stop) => ({ ...stop, status: 'cancelled' })));
   }
 
   function restoreDelivery(deliveryId) {
+    if (isVerified) {
+      const { delivery: d, truck: t } = findDelivery(plan, deliveryId);
+      setPendingAction({
+        action: 'Restore',
+        description: `Restore delivery "${d?.client}" on ${t?.truck_label || '?'}`,
+        client: d?.client || '?',
+        truckFrom: 'Removed',
+        truckTo: t?.truck_label || '?',
+        timeFrom: '—',
+        timeTo: `${d?.etd || '?'}–${d?.eta || '?'}`,
+        execute: () => executeRestoreDelivery(deliveryId),
+      });
+      return;
+    }
+    executeRestoreDelivery(deliveryId);
+  }
+
+  function executeRestoreDelivery(deliveryId) {
     setPlan((current) => mutateDelivery(current, deliveryId, (stop) => ({ ...stop, status: 'planned' })));
   }
 
   function addDelivery(form) {
+    if (isVerified) {
+      const truck = (plan?.trucks || []).find((t) => String(t.truck_id) === String(form.truck_id));
+      setPendingAction({
+        action: 'Add',
+        description: `Add delivery "${form.client || 'New delivery'}" to ${truck?.truck_label || '?'}`,
+        client: form.client || 'New delivery',
+        truckFrom: 'New',
+        truckTo: truck?.truck_label || '?',
+        timeFrom: '—',
+        timeTo: `${form.etd}–${form.eta}`,
+        execute: () => executeAddDelivery(form),
+      });
+      return;
+    }
+    executeAddDelivery(form);
+  }
+
+  function executeAddDelivery(form) {
     const delivery = {
       id: Date.now(),
       client: form.client || 'New delivery',
@@ -383,6 +543,26 @@ export default function GeneratedDailyPlanningPage() {
     });
   }
 
+  function confirmPendingAction(reason) {
+    if (!pendingAction) return;
+    pendingAction.execute();
+    setChangeLog((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        client: pendingAction.client,
+        action: pendingAction.action,
+        truckFrom: pendingAction.truckFrom,
+        truckTo: pendingAction.truckTo,
+        timeFrom: pendingAction.timeFrom,
+        timeTo: pendingAction.timeTo,
+        reason,
+      },
+    ]);
+    setPendingAction(null);
+  }
+
   async function handleExport() {
     if (!plan?.source_file) {
       setError('No source workbook is loaded yet.');
@@ -424,7 +604,7 @@ export default function GeneratedDailyPlanningPage() {
                 value={day}
                 onChange={(event) => {
                   setDay(event.target.value);
-                  regenerate(event.target.value);
+                  showCachedOrRegenerate(event.target.value);
                 }}
                 className="bg-transparent outline-none"
               />
@@ -432,7 +612,8 @@ export default function GeneratedDailyPlanningPage() {
             <button
               type="button"
               onClick={() => regenerate(day)}
-              disabled={status === 'generating'}
+              disabled={status === 'generating' || isVerified}
+              title={isVerified ? 'Unlock the plan to regenerate' : 'Fetch a fresh plan from the server (ignores the cached one)'}
               className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
             >
               <RefreshCcw size={16} />
@@ -442,6 +623,7 @@ export default function GeneratedDailyPlanningPage() {
               type="button"
               onClick={() => setModalOpen(true)}
               disabled={!plan || status === 'generating'}
+              title={isVerified ? 'Adding a delivery will require a justification' : undefined}
               className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
             >
               <Plus size={16} />
@@ -506,35 +688,60 @@ export default function GeneratedDailyPlanningPage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
-          {status === 'generating' && !plan ? (
-            <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
-              <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
-            </div>
-          ) : (
-            // Wrap in a single grid cell: GanttBoard's <DndContext> renders
-            // several sibling nodes (marker toolbar, the scroller, and dnd-kit's
-            // hidden a11y live regions). Without this wrapper those siblings are
-            // auto-placed as separate grid items and the timeline gets squeezed
-            // into the narrow side column. min-w-0 lets the scroller shrink so
-            // its 1800px content stays inside the cell and scrolls horizontally.
-            <div className="min-w-0">
-              <GanttBoard
-                plan={plan}
-                selectedTruckId={selectedTruckId}
-                onSelectTruck={setSelectedTruckId}
-                onDropDelivery={moveDelivery}
-                onResizeDelivery={resizeDelivery}
-                onCancel={cancelDelivery}
-                onRestore={restoreDelivery}
-                onDropMarker={addMarker}
-                onMoveMarker={moveMarker}
-                onDeleteMarker={deleteMarker}
-              />
-            </div>
-          )}
-          <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
-        </div>
+        {/* ── Verify / Lock ── centered above the Gantt board ── */}
+        {plan && (
+          <div className="flex flex-col items-center gap-2 py-1">
+            {!isVerified ? (
+              <button
+                type="button"
+                onClick={() => setIsVerified(true)}
+                className="inline-flex items-center gap-2.5 rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700 hover:shadow-lg"
+              >
+                <ShieldCheck size={18} />
+                Verify &amp; Lock Plan
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <div className="inline-flex items-center gap-2.5 rounded-full bg-emerald-100 px-5 py-2.5 text-sm font-semibold text-emerald-700 ring-2 ring-emerald-300">
+                  <ShieldCheck size={16} />
+                  Plan Verified &amp; Locked
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsVerified(false)}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-4 py-2.5 text-sm font-medium text-[#6b6b7b] transition hover:bg-[#faf8f5]"
+                >
+                  <ShieldOff size={14} />
+                  Unlock Plan
+                </button>
+              </div>
+            )}
+            {isVerified && (
+              <p className="text-xs text-[#6b6b7b]">Any modifications to this plan require a written justification.</p>
+            )}
+          </div>
+        )}
+
+        {status === 'generating' && !plan ? (
+          <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
+            <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <GanttBoard
+              plan={plan}
+              selectedTruckId={selectedTruckId}
+              onSelectTruck={setSelectedTruckId}
+              onDropDelivery={moveDelivery}
+              onResizeDelivery={resizeDelivery}
+              onCancel={cancelDelivery}
+              onRestore={restoreDelivery}
+              onDropMarker={addMarker}
+              onMoveMarker={moveMarker}
+              onDeleteMarker={deleteMarker}
+            />
+          </div>
+        )}
 
         {plan && (
           <RouteMap
@@ -545,11 +752,15 @@ export default function GeneratedDailyPlanningPage() {
         )}
 
         {plan && (
-          <PlanTable
-            plan={plan}
-            exporting={exporting}
-            onExport={plan?.source_file ? handleExport : null}
-          />
+          <>
+            <PlanTable
+              plan={plan}
+              exporting={exporting}
+              onExport={plan?.source_file ? handleExport : null}
+            />
+
+            {isVerified && <PlanChangeLog entries={changeLog} />}
+          </>
         )}
       </motion.div>
 
@@ -559,6 +770,14 @@ export default function GeneratedDailyPlanningPage() {
         onClose={() => setModalOpen(false)}
         onAdd={addDelivery}
       />
+
+      {pendingAction && (
+        <JustificationModal
+          action={pendingAction.description}
+          onConfirm={confirmPendingAction}
+          onCancel={() => setPendingAction(null)}
+        />
+      )}
     </div>
   );
 }
