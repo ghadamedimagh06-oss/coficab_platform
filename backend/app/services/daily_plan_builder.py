@@ -77,10 +77,35 @@ class DailyPlanConfig:
     # best route; the dashboard, which rebuilds a whole week per refresh, turns
     # this off and uses the (near-instant) greedy order so it stays responsive.
     prefer_ortools: bool = True
+    # Use real road distances (OSRM /table) for the travel matrix instead of
+    # straight-line × winding factor. Falls back to haversine automatically if
+    # the routing server is unreachable, so builds never block on it.
+    use_osrm_road_matrix: bool = True
     # Per-variant time budget for the global multi-vehicle VRPTW solve.
     global_solver_seconds: int = 6
     # Max trips one truck may run in a day (vehicle slots in the global model).
     trips_per_truck: int = 3
+
+    # --- Objective shaping: operational policy, not money ------------------
+    # The dispatcher's stated goal: finish the whole day as early as possible by
+    # running trucks IN PARALLEL (each well filled), rather than a few trucks
+    # doing many sequential trips. These three knobs encode that policy in the
+    # solver objective; they are deliberately NOT in TND (that stays in
+    # CostConfig / _cost_breakdown for the reported bill).
+    #
+    # Global makespan/balance term on the time dimension: rewards bringing the
+    # LAST truck home sooner, so the solver spreads load across trucks instead
+    # of queuing trips on a few. Higher => more parallelism / earlier finish.
+    makespan_cost_coef: int = 3
+    # Cost of opening a truck's FIRST trip. High enough that the solver won't
+    # dispatch a truck for a near-empty load (keeps trucks ~full), low enough
+    # that adding a truck for parallelism stays attractive. This is the soft
+    # "fill the truck before opening another" / ~90% pressure.
+    trip_dispatch_cost: int = 1000
+    # Extra cost per SUBSEQUENT trip on the SAME truck, so a 2nd/3rd trip is
+    # dearer than dispatching a fresh truck's first trip — favouring many
+    # well-filled trucks over a few trucks doing a lot of trips.
+    extra_trip_cost: int = 2500
 
 
 @dataclass
@@ -278,8 +303,10 @@ class DailyPlanBuilder:
             slots whose start times are chained (a truck runs its trips in
             sequence, with a reload gap between them);
           • optional drops via disjunctions, with urgent loads near-mandatory;
-          • a fixed cost per dispatched trip (rented truck heavily penalised) so
-            the solver consolidates onto as few trips/trucks as possible.
+          • an escalating fixed cost per dispatched trip plus a global makespan
+            term, so the day finishes early by running well-filled trucks in
+            parallel rather than a few trucks doing many sequential trips (the
+            rented truck stays heavily penalised as a last resort).
 
         Returns (trucks_with_trips, unassigned) or None on failure.
         """
@@ -294,10 +321,16 @@ class DailyPlanBuilder:
             horizon = 24 * 60
             reload = self.cfg.reload_minutes
 
-            # Replicate each physical truck into N trip-slots (separate vehicles).
+            # Replicate each physical truck into N trip-slots (separate
+            # vehicles). veh_trip records the 0-based trip index of each slot so
+            # later trips on the same truck can be priced higher than a fresh
+            # truck's first trip.
             veh_truck: list[int] = []
+            veh_trip: list[int] = []
             for ti in range(len(templates)):
-                veh_truck.extend([ti] * max(1, self.cfg.trips_per_truck))
+                for k in range(max(1, self.cfg.trips_per_truck)):
+                    veh_truck.append(ti)
+                    veh_trip.append(k)
             V = len(veh_truck)
             if V == 0:
                 return None
@@ -315,11 +348,16 @@ class DailyPlanBuilder:
             tcb = routing.RegisterTransitCallback(transit)
             routing.SetArcCostEvaluatorOfAllVehicles(tcb)
 
-            # Fixed cost per dispatched trip; the hired truck is a genuine last
-            # resort (a real rental bill), so it carries a heavy surcharge and is
-            # only used when owned trucks cannot cover the demand.
+            # Fixed cost per dispatched trip, escalating with the trip index:
+            # a truck's first trip costs ``trip_dispatch_cost`` (the soft "fill
+            # the truck before opening another" pressure), and every subsequent
+            # trip on the SAME truck adds ``extra_trip_cost`` — so the solver
+            # prefers dispatching a fresh truck (cheap first trip, runs in
+            # parallel) over piling a 2nd/3rd trip onto one truck. The hired
+            # truck is a genuine last resort (a real rental bill), so it keeps a
+            # heavy surcharge on top.
             for v in range(V):
-                fixed = 1500
+                fixed = self.cfg.trip_dispatch_cost + veh_trip[v] * self.cfg.extra_trip_cost
                 if templates[veh_truck[v]].get("truck_id") == self.RENTED_TRUCK_ID:
                     fixed += 20000
                 routing.SetFixedCostOfVehicle(fixed, v)
@@ -341,6 +379,11 @@ class DailyPlanBuilder:
             routing.AddDimension(tcb, horizon, horizon, False, "Time")
             time_dim = routing.GetDimensionOrDie("Time")
             time_dim.SetSpanCostCoefficientForAllVehicles(1)  # trim idle/waiting
+            # Global makespan/balance term: penalise (latest return − earliest
+            # departure) across the whole fleet, so the solver spreads load onto
+            # trucks running in parallel and the LAST truck gets home sooner,
+            # rather than queuing many trips on a few trucks.
+            time_dim.SetGlobalSpanCostCoefficient(max(0, int(self.cfg.makespan_cost_coef)))
             for v in range(V):
                 time_dim.CumulVar(routing.Start(v)).SetRange(early, cutoff)
             for i in range(1, n + 1):
@@ -834,15 +877,32 @@ class DailyPlanBuilder:
     def _build_matrix(
         self, routable: list[dict[str, Any]], depot: tuple[float, float]
     ) -> list[list[float]]:
-        """Symmetric travel-time matrix (minutes), node 0 = depot.
+        """Travel-time matrix (minutes), node 0 = depot.
 
-        Depot↔client legs use the directory's real road km; client↔client legs
-        use straight-line distance × a road-winding factor. Every leg's time is
-        distance ÷ average truck speed, so displayed km and scheduled time stay
-        consistent (and we never trust a possibly-wrong coordinate for the
-        depot distance when the table already gives the real km)."""
+        Preferred path: real driving distances from OSRM for every leg (depot↔
+        client and client↔client). Fallback (OSRM unreachable): the directory's
+        real road km for depot legs and straight-line × a road-winding factor
+        for the rest. Either way every leg's time is distance ÷ average truck
+        speed, so the displayed km and the scheduled time stay on one model."""
         speed = self.cfg.avg_speed_kmh
         n = len(routable)
+        size = n + 1
+        dur = [[0.0] * size for _ in range(size)]
+
+        # --- preferred: real road distances from OSRM ---------------------
+        if self.cfg.use_osrm_road_matrix:
+            coords = [depot] + [(d["lat"], d["lon"]) for d in routable]
+            road = self.geo.road_km_matrix(coords)
+            if road is not None:
+                for i, d in enumerate(routable):
+                    d["distance_km"] = round(road[0][i + 1], 1)  # depot → client
+                for a in range(size):
+                    for b in range(size):
+                        if a != b:
+                            dur[a][b] = road[a][b] / speed * 60.0
+                return dur
+
+        # --- fallback: directory km (depot) + haversine × winding ---------
         depot_km: list[float] = []
         for d in routable:
             table_km = d.get("_table_km")
@@ -853,8 +913,6 @@ class DailyPlanBuilder:
             depot_km.append(km)
             d["distance_km"] = round(km, 1)
 
-        size = n + 1
-        dur = [[0.0] * size for _ in range(size)]
         for i in range(n):
             t = depot_km[i] / speed * 60.0
             dur[0][i + 1] = dur[i + 1][0] = t

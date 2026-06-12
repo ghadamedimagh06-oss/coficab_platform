@@ -90,3 +90,6 @@ dump.rdb
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime OSRM road-distance cache (regenerated on demand, falls back to haversine)
+backend/app/data/road_matrix_cache.json

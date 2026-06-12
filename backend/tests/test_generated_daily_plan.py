@@ -96,17 +96,31 @@ def test_clock_formats_normal_time():
 def test_daily_plan_builder_assigns_real_workbook_rows():
     plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
 
-    assigned_count = sum(
-        len(trip["stops"])
+    assigned_stops = [
+        stop
         for truck in plan["trucks"]
         for trip in truck["trips"]
-    )
+        for stop in trip["stops"]
+    ]
+
+    # Conservation is per ORIGINAL delivery, not per stop: a split delivery is
+    # served across several stops but is still one considered delivery, so we
+    # collapse each stop back to its parent (split_parent_id when split, else id)
+    # before counting. Every considered delivery is either served or unassigned.
+    def _parent(stop):
+        return stop.get("split_parent_id", stop.get("id"))
+
+    assigned_deliveries = {_parent(s) for s in assigned_stops}
+    unassigned_deliveries = {_parent(s) for s in plan["unassigned"]}
 
     assert plan["source_file"] == SOURCE_FILE.name
     assert plan["day"] == "2026-05-26"
     assert plan["summary"]["selected_delivery_rows"] > 0
-    assert assigned_count > 0
-    assert assigned_count + len(plan["unassigned"]) == plan["summary"]["deliveries_considered"]
+    assert len(assigned_stops) > 0
+    assert (
+        len(assigned_deliveries | unassigned_deliveries)
+        == plan["summary"]["deliveries_considered"]
+    )
 
 
 def test_daily_plan_builder_does_not_parallelize_one_truck():
