@@ -9,6 +9,7 @@ import { generateDailyPlan } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
+import { palette } from '@/lib/theme';
 
 // Leaflet touches `window` at import time, so load the map client-side only.
 const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
@@ -67,18 +68,18 @@ export default function MapPage() {
   }, [plan]);
 
   return (
-    <div className="p-8 min-h-screen bg-[#f8f7f3]">
+    <div className="p-8 min-h-screen bg-canvas">
       <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={item} className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
+        <motion.div variants={item} className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Live Map</p>
-              <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Today’s clients &amp; truck routes</h1>
-              <p className="mt-2 text-sm leading-6 text-[#6b6b7b]">Every delivery for the day plotted across Tunisia, with each truck’s road from the COFICAB Sidi Hassine depot.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Live Map</p>
+              <h1 className="mt-3 text-4xl font-bold text-ink">Today’s clients &amp; truck routes</h1>
+              <p className="mt-2 text-sm leading-6 text-muted">Every delivery for the day plotted across Tunisia, with each truck’s road from the COFICAB Sidi Hassine depot.</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e]">
-                <CalendarDays size={16} className="text-[#7c3aed]" />
+              <label className="inline-flex items-center gap-2 rounded-2xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink">
+                <CalendarDays size={16} className="text-brand-600" />
                 <input
                   type="date"
                   value={day}
@@ -90,14 +91,14 @@ export default function MapPage() {
                 type="button"
                 onClick={() => load(day)}
                 disabled={status === 'loading'}
-                className="inline-flex items-center gap-2 rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-2xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-60"
               >
                 <RefreshCcw size={16} className={status === 'loading' ? 'animate-spin' : ''} />
                 Refresh
               </button>
               <Link
                 href="/generated-daily-planning"
-                className="inline-flex items-center gap-2 rounded-2xl bg-[#7c3aed] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#6d28d9] shadow-sm"
+                className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 shadow-sm"
               >
                 <Route size={16} />
                 Open planning
@@ -116,7 +117,7 @@ export default function MapPage() {
 
             <motion.div variants={item}>
               {status === 'loading' && !plan ? (
-                <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+                <div className="rounded-[2rem] border border-border bg-white p-5 shadow-sm">
                   <div className="h-[560px] rounded-[1.5rem] bg-[#f0eee9] animate-pulse" />
                 </div>
               ) : (
@@ -126,18 +127,22 @@ export default function MapPage() {
           </section>
 
           <motion.aside variants={item} className="space-y-6">
-            <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-              <p className="text-sm text-[#6b6b7b]">Reference</p>
-              <h2 className="text-2xl font-semibold text-[#1a1a2e]">Map legend</h2>
-              <ul className="mt-4 space-y-3 text-sm text-[#6b6b7b]">
+            <div className="rounded-[2rem] border border-border bg-white p-6 shadow-sm">
+              <p className="text-sm text-muted">Reference</p>
+              <h2 className="text-2xl font-semibold text-ink">Map legend</h2>
+              <ul className="mt-4 space-y-3 text-sm text-muted">
                 <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#facc15' }} /> COFICAB Sidi Hassine depot</li>
-                <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#7c3aed' }} /> Client stop (coloured by truck)</li>
+                <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: palette.brand[600] }} /> Client stop (coloured by truck)</li>
                 <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#9ca3af' }} /> Unassigned client</li>
               </ul>
               <p className="mt-4 text-xs leading-5 text-[#9e9aa4]">Click a truck chip or its route to trace that vehicle’s ordered stops. Routes follow the real road network via OSRM.</p>
             </div>
 
-            <ChatPanel messages={messages} />
+            <ChatPanel
+              messages={messages}
+              title="Map Copilot"
+              context={{ page: 'map', day, status, selectedTruckId, plan }}
+            />
           </motion.aside>
         </motion.div>
       </motion.div>

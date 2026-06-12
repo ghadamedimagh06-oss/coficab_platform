@@ -10,6 +10,13 @@ from app.models.user import User
 from app.models.transport import UserCreate, TokenData
 import os
 
+# TODO(TMS P0 security — see docs/TMS_ROADMAP.md §10):
+#   1. SECRET_KEY falls back to a hardcoded value — fail fast if JWT_SECRET is
+#      unset in production instead of signing tokens with a known key.
+#   2. passlib 1.7.4 is BROKEN against bcrypt>=4.1 (it reads the removed
+#      bcrypt.__about__) — hash_password/verify_password raise. Pin bcrypt==4.0.1
+#      or move to a maintained hasher. scripts/seed_from_files.py hashes the admin
+#      user with the bcrypt lib directly to work around this.
 SECRET_KEY = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -42,6 +49,9 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+    # TODO(TMS P0 security): this dev fallback hands out a fake ADMIN when no token
+    # is present — i.e. every endpoint is open by default. Gate this behind an
+    # explicit env flag (e.g. AUTH_DEV_BYPASS=1) and 401 otherwise in production.
     if creds is None:
         return {"username": "dev", "role": "admin"}
     payload = decode_token(creds.credentials)

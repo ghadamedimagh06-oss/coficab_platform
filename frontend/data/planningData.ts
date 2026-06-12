@@ -1,3 +1,5 @@
+import { palette } from '@/lib/theme';
+
 export const drivers = [
   { id: 'Chauf001', name: 'Ala', avatar: 'AL', vehicle: 'TR-01', status: 'on-route' },
   { id: 'Chauf002', name: 'Bilel', avatar: 'BI', vehicle: 'TR-02', status: 'on-route' },
@@ -186,7 +188,7 @@ export const groupages = [
 ];
 
 export const statusColors = {
-  scheduled: { bg: '#f5f3ff', border: '#7c3aed', text: '#7c3aed' },
+  scheduled: { bg: '#f5f3ff', border: palette.brand[600], text: palette.brand[600] },
   'in-progress': { bg: '#eff6ff', border: '#3b82f6', text: '#3b82f6' },
   completed: { bg: '#f0fdf4', border: '#22c55e', text: '#22c55e' },
   delayed: { bg: '#fef2f2', border: '#ef4444', text: '#ef4444' },

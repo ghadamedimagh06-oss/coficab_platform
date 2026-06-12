@@ -61,7 +61,11 @@ export default function AnalyticsPage() {
           <p className="mt-3 text-sm text-slate-400">Use this page to compare operational performance, risk, and cost impact. The analytics module is designed to highlight where AI planning improved outcomes.</p>
         </div>
 
-        <ChatPanel messages={chatMessages} />
+        <ChatPanel
+          messages={chatMessages}
+          title="Analytics Copilot"
+          context={{ page: 'analytics', metrics, transportCount: transports.length }}
+        />
       </aside>
     </div>
   );

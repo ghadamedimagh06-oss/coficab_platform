@@ -72,11 +72,11 @@ export default function VehiclesPage() {
     [trucks]
   );
   return (
-    <div className="p-8 min-h-screen bg-[#f8f7f3]">
-      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Fleet vehicles</p>
-        <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Vehicle fleet overview</h1>
-        <p className="mt-2 text-sm text-[#6b6b7b] max-w-2xl">Track truck availability, status, and operational readiness in one control center.</p>
+    <div className="p-8 min-h-screen bg-canvas">
+      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] border border-border bg-white p-8 shadow-sm mb-8">
+        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Fleet vehicles</p>
+        <h1 className="mt-3 text-4xl font-bold text-ink">Vehicle fleet overview</h1>
+        <p className="mt-2 text-sm text-muted max-w-2xl">Track truck availability, status, and operational readiness in one control center.</p>
       </motion.div>
 
       <div className="grid gap-6 xl:grid-cols-3 mb-8">
@@ -115,13 +115,13 @@ export default function VehiclesPage() {
       </div>
 
       <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] bg-white border border-[#e8e5eb] shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between bg-[#f8f7f3] px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">
+        <div className="flex items-center justify-between bg-canvas px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">
           <span>Vehicle details</span>
           <span className="rounded-full bg-[#eff6ff] px-3 py-1 text-[11px] font-semibold text-[#2563eb]">{summary.total} trucks</span>
         </div>
-        <div className="divide-y divide-[#e8e5df] bg-white">
+        <div className="divide-y divide-border bg-white">
           {sortedTrucks.map((truck) => (
-            <div key={truck.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-4 px-6 py-4 text-sm text-[#1a1a2e] items-center hover:bg-[#faf8f5] transition">
+            <div key={truck.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr] gap-4 px-6 py-4 text-sm text-ink items-center hover:bg-canvas transition">
               <div>
                 <p className="font-semibold">{truck.id}</p>
                 <p className="text-[#6b7280] text-xs">{truck.plate_number}</p>
@@ -132,7 +132,7 @@ export default function VehiclesPage() {
                 <select
                   value={truck.status}
                   onChange={(event) => handleStatusChange(truck.id, event.target.value)}
-                  className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-[#1a1a2e]'}`}
+                  className={`w-full rounded-xl border border-border px-3 py-2 text-sm font-semibold ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-ink'}`}
                 >
                   {TRUCK_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>{status}</option>

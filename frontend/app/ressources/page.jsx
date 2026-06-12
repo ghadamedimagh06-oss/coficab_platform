@@ -166,7 +166,7 @@ export default function RessourcesPage() {
         >
           <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[#7c3aed]">Resource Operations</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-600">Resource Operations</p>
               <h1 className="mt-3 text-4xl font-bold text-[#111827]">Good morning, Ghada</h1>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-[#4b5563]">A premium control center for your fleet, drivers, and daily assignments. Everything is designed for faster decisions and clearer resource visibility.</p>
             </div>
@@ -266,23 +266,23 @@ export default function RessourcesPage() {
                 <span>Camion</span>
                 <span>Affectation</span>
               </div>
-              <div className="divide-y divide-[#e8e5df] bg-white max-h-96 overflow-y-auto">
+              <div className="divide-y divide-border bg-white max-h-96 overflow-y-auto">
                 {drivers.map((driver) => (
                   <motion.div
                     key={driver.id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-[#1a1a2e] hover:bg-[#f8f7f3] transition"
+                    className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
                   >
                     <div>
                       <p className="font-semibold">{driver.full_name}</p>
-                      <p className="text-[#6b6b7b] text-xs">{driver.phone}</p>
+                      <p className="text-muted text-xs">{driver.phone}</p>
                     </div>
                     <div>
                       <select
                         value={driver.status}
                         onChange={(event) => handleDriverStatusChange(driver.id, event.target.value)}
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#1a1a2e] outline-none focus:ring-2 focus:ring-[#7c3aed] focus:ring-offset-0 transition"
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-0 transition"
                       >
                         {statusOptions.map((status) => (
                           <option key={status} value={status}>{status}</option>
@@ -293,7 +293,7 @@ export default function RessourcesPage() {
                       <select
                         value={driver.shift}
                         onChange={(event) => handleDriverShiftChange(driver.id, event.target.value)}
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#1a1a2e] outline-none focus:ring-2 focus:ring-[#7c3aed] focus:ring-offset-0 transition"
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-0 transition"
                       >
                         {shiftOptions.map((shift) => (
                           <option key={shift} value={shift}>{shift}</option>
@@ -301,7 +301,7 @@ export default function RessourcesPage() {
                       </select>
                     </div>
                     <div>
-                      <span className={`text-sm font-medium ${driver.assigned_truck ? 'text-[#22c55e]' : 'text-[#6b6b7b]'}`}>
+                      <span className={`text-sm font-medium ${driver.assigned_truck ? 'text-[#22c55e]' : 'text-muted'}`}>
                         {driver.assigned_truck || 'Aucun'}
                       </span>
                     </div>
@@ -309,7 +309,7 @@ export default function RessourcesPage() {
                       <select
                         value={driver.assigned_truck || ''}
                         onChange={(event) => handleAssignment(event.target.value || null, driver.id)}
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#1a1a2e] outline-none focus:ring-2 focus:ring-[#7c3aed] focus:ring-offset-0 transition"
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-0 transition"
                       >
                         <option value="">Aucun</option>
                         {trucks.map((truck) => (
@@ -349,19 +349,19 @@ export default function RessourcesPage() {
                 <span>Statut</span>
                 <span>Chauffeur</span>
               </div>
-              <div className="divide-y divide-[#e8e5df] bg-white max-h-96 overflow-y-auto">
+              <div className="divide-y divide-border bg-white max-h-96 overflow-y-auto">
                 {trucks.map((truck) => (
                   <motion.div
                     key={truck.id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-[#1a1a2e] hover:bg-[#f8f7f3] transition"
+                    className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
                   >
                     <div>
                       <p className="font-semibold">{truck.id}</p>
-                      <p className="text-[#6b6b7b] text-xs">{truck.plate_number}</p>
+                      <p className="text-muted text-xs">{truck.plate_number}</p>
                     </div>
-                    <div className="text-[#6b6b7b]">{truck.type}</div>
+                    <div className="text-muted">{truck.type}</div>
                     <div>
                       <span className="inline-block bg-[#f0fdf4] text-[#22c55e] rounded-xl px-3 py-1 text-xs font-semibold">
                         {truck.capacity} kg
@@ -371,7 +371,7 @@ export default function RessourcesPage() {
                       <select
                         value={truck.status}
                         onChange={(event) => handleTruckStatusChange(truck.id, event.target.value)}
-                        className={`w-full rounded-xl border border-[#e8e5df] px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-[#7c3aed] ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-[#1a1a2e]'}`}
+                        className={`w-full rounded-xl border border-border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-brand-600 ${TRUCK_STATUS_STYLES[truck.status] || 'bg-white text-ink'}`}
                       >
                         {TRUCK_STATUS_OPTIONS.map((status) => (
                           <option key={status} value={status}>{status}</option>
@@ -382,7 +382,7 @@ export default function RessourcesPage() {
                       <select
                         value={truck.assigned_driver || ''}
                         onChange={(event) => handleAssignment(truck.id, event.target.value || null)}
-                        className="w-full rounded-xl border border-[#e8e5df] bg-white px-3 py-2 text-sm text-[#1a1a2e] outline-none focus:ring-2 focus:ring-[#7c3aed] focus:ring-offset-0 transition"
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-0 transition"
                       >
                         <option value="">Aucun</option>
                         {drivers.map((driver) => (
@@ -417,7 +417,11 @@ export default function RessourcesPage() {
               </div>
               <span className="rounded-full bg-[#eef2ff] px-3 py-1 text-sm font-semibold text-[#4338ca]">Live</span>
             </div>
-            <ChatPanel messages={chatMessages} />
+            <ChatPanel
+              messages={chatMessages}
+              title="Resources Copilot"
+              context={{ page: 'resources', driverSummary, truckSummary, drivers, trucks }}
+            />
           </motion.div>
         </motion.aside>
       </div>

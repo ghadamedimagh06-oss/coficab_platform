@@ -95,7 +95,11 @@ export default function AdminPage() {
           <p className="mt-3 text-sm text-slate-400">In a demo-ready environment, this panel demonstrates secure ingestion, synchronization, and operational control for logistics operators.</p>
         </div>
 
-        <ChatPanel messages={chatMessages} />
+        <ChatPanel
+          messages={chatMessages}
+          title="Admin Copilot"
+          context={{ page: 'admin', filePath, actionResult }}
+        />
       </aside>
     </div>
   );

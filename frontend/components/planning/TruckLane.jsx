@@ -5,6 +5,7 @@ import DeliveryBlock from './DeliveryBlock';
 import DepotMarker from './DepotMarker';
 import { LANE_LABEL_CLASS } from './TimeAxis';
 import { WORK_START, WORK_END, toMinutes as minutes, pctIn } from './timeline';
+import { palette } from '@/lib/theme';
 
 function deliveryBox(delivery, spanMin) {
   const start = minutes(delivery.etd);
@@ -73,7 +74,7 @@ function mergeSameLocation(stops) {
 
 function fillColor(ratio) {
   if (ratio >= 0.9) return '#22c55e';
-  if (ratio >= 0.7) return '#7c3aed';
+  if (ratio >= 0.7) return palette.brand[600];
   if (ratio >= 0.45) return '#f59e0b';
   return '#ef4444';
 }
@@ -177,7 +178,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
   return (
     <div className={`grid ${LANE_LABEL_CLASS} border-b border-[#ece8e1] last:border-b-0`} style={{ minHeight: laneHeight }}>
       {/* Sticky truck card */}
-      <div className={`sticky left-0 z-20 flex flex-col justify-center gap-2 border-r border-[#ece8e1] px-5 py-3 transition-colors ${selected ? 'bg-[#7c3aed]/5 ring-2 ring-inset ring-[#7c3aed]' : isIdle ? 'bg-[#fbfaf8]' : 'bg-white'}`}>
+      <div className={`sticky left-0 z-20 flex flex-col justify-center gap-2 border-r border-[#ece8e1] px-5 py-3 transition-colors ${selected ? 'bg-brand-600/5 ring-2 ring-inset ring-brand-600' : isIdle ? 'bg-[#fbfaf8]' : 'bg-white'}`}>
         <button
           type="button"
           onClick={() => onSelectTruck?.(truck.truck_id)}
@@ -191,7 +192,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
             <Truck size={16} />
           </span>
           <div className="min-w-0">
-            <p className="flex items-center gap-1 truncate text-sm font-semibold text-[#1a1a2e]">
+            <p className="flex items-center gap-1 truncate text-sm font-semibold text-ink">
               <span className="truncate">{truck.truck_label}</span>
               {hosWarning && (
                 <span
@@ -227,7 +228,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
       {/* Timeline track */}
       <div
         ref={setTimelineRef}
-        className={`relative transition-colors ${isOver ? 'bg-[#f5f3ff]' : isIdle ? 'bg-[#fcfbf9]' : 'bg-white'}`}
+        className={`relative transition-colors ${isOver ? 'bg-brand-50' : isIdle ? 'bg-[#fcfbf9]' : 'bg-white'}`}
         style={{
           // one faint vertical gridline per hour (06–20 → 14 columns)
           backgroundImage: 'linear-gradient(to right,#f1ede6 1px,transparent 1px)',
@@ -236,7 +237,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
       >
         {/* live "now" line — z-0 keeps it behind the delivery cards */}
         {nowLeft != null && (
-          <div className="pointer-events-none absolute top-0 bottom-0 z-0 w-px bg-[#7c3aed]/40" style={{ left: `${nowLeft}%` }} />
+          <div className="pointer-events-none absolute top-0 bottom-0 z-0 w-px bg-brand-600/40" style={{ left: `${nowLeft}%` }} />
         )}
 
         {!isIdle && (
@@ -254,7 +255,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
               >
                 <span
                   className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm"
-                  style={{ backgroundColor: d.type === 'depart' ? '#7c3aed' : '#a39e96' }}
+                  style={{ backgroundColor: d.type === 'depart' ? palette.brand[600] : '#a39e96' }}
                 >
                   <Warehouse size={9} />
                   {d.time}

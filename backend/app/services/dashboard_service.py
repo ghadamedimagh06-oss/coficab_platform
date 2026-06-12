@@ -11,8 +11,11 @@ always agrees with the Generated Daily Planning screen.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
 
 _BAND_COLORS = {
     "Optimized": "#7c3aed",
@@ -22,6 +25,10 @@ _BAND_COLORS = {
 }
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+# Heavy-truck gasoil burn used to derive litres consumed from route distance,
+# matching DailyPlanBuilder's planning assumption (L per 100 km).
+FUEL_L_PER_100KM = 28.0
 
 
 def _positions(stop: dict[str, Any]) -> float:
@@ -42,6 +49,17 @@ def _requested_etd(stop: dict[str, Any]) -> Optional[int]:
     """The customer's requested ETD (minutes) from the workbook row."""
     raw = stop.get("raw") or {}
     return _hhmm_to_minutes(raw.get("etd"))
+
+
+def _scheduled_arrival(stop: dict[str, Any]) -> Optional[int]:
+    """The plan's scheduled ARRIVAL at the stop (minutes).
+
+    On-Time Delivery is measured against when the truck reaches the client, not
+    when it leaves the depot. Note the field-naming quirk in DailyPlanBuilder
+    output: a stop's ``etd`` key holds the computed arrival time, while ``eta``
+    holds arrival+service (the departure after loading).
+    """
+    return _hhmm_to_minutes(stop.get("etd"))
 
 
 def _hhmm_to_minutes(value: Optional[str]) -> Optional[int]:
@@ -202,7 +220,7 @@ _KPI_BANDS = {
     "otif": (95.0, 95.0, 85.0, "up"),
     "otd": (95.0, 95.0, 85.0, "up"),
     "load": (80.0, 80.0, 65.0, "up"),
-    "weight": (80.0, 80.0, 65.0, "up"),
+    "fuel": (0.02, 0.02, 0.03, "down"),  # L/T·km — lower is better
 }
 
 
@@ -225,23 +243,40 @@ def _band(value: Optional[float], green: float, yellow: float, direction: str) -
 
 def _new_kpi_acc() -> dict[str, float]:
     return {
-        "on_time_pos": 0.0,
-        "in_full_on_time_pos": 0.0,
-        "etd_known_pos": 0.0,
+        "on_time_pos": 0.0,        # positions delivered on the demanded day (assigned)
+        "in_full_on_time_pos": 0.0,  # positions of orders delivered in full on the day
+        "demanded_pos": 0.0,       # all positions demanded that day (assigned + unassigned)
         "trip_pos": 0.0,        # positions loaded across all trips
         "trip_cap_pos": 0.0,    # position capacity deployed (per trip)
         "weighted_gross_kg": 0.0,  # gross kg on trips that declare weight
         "weighted_cap_kg": 0.0,    # kg capacity of those same trips
+        "gross_kg_total": 0.0,     # tonnage transported (all stops) — for fuel KPI
     }
 
 
+def _delivery_id(stop: dict[str, Any]) -> str:
+    """Stable key to group a delivery's parts (same-day splits share an id)."""
+    raw = stop.get("raw") or {}
+    return str(stop.get("id") or raw.get("row_number") or raw.get("id")
+               or f"{stop.get('client')}|{_positions(stop)}")
+
+
 def _accumulate_kpis(plan: dict[str, Any], acc: dict[str, float]) -> None:
-    """Fold one day's real travels into the KPI accumulator."""
+    """Fold one day's real travels into the KPI accumulator.
+
+    OTD/OTIF are measured by DAY, not by time of day: the requested ETD time is
+    only a proposal (it matters when urgent), so it is ignored here. Because each
+    day's plan delivers exactly that day's demand, every assigned position is
+    "on time" (delivered on the demanded day); a position misses only when it is
+    left unassigned (pushed to another day). "In full" means the whole order was
+    delivered — same-day splits across trucks still count; an order left short
+    (part unassigned) does not.
+    """
+    demand: dict[str, list[float]] = {}  # delivery id -> [assigned_pos, unassigned_pos]
     for t in plan.get("trucks", []):
         cap_pos = float(t.get("capacity_positions") or 0)
         cap_kg = float(t.get("capacity_kg") or 0)
         for tr in t.get("trips", []):
-            depart = _hhmm_to_minutes(tr.get("depart_at"))
             stops = tr.get("stops", [])
             acc["trip_pos"] += sum(_positions(s) for s in stops)
             acc["trip_cap_pos"] += cap_pos
@@ -249,23 +284,23 @@ def _accumulate_kpis(plan: dict[str, Any], acc: dict[str, float]) -> None:
             has_weight = False
             for s in stops:
                 pos = _positions(s)
-                req = _requested_etd(s)
                 gk = _gross_kg(s)
                 trip_gross += gk
+                acc["gross_kg_total"] += gk
                 has_weight = has_weight or gk > 0
-                if req is not None:
-                    acc["etd_known_pos"] += pos
-                    if depart is not None and depart <= req:
-                        acc["on_time_pos"] += pos
-                        if not s.get("is_split"):
-                            acc["in_full_on_time_pos"] += pos
+                demand.setdefault(_delivery_id(s), [0.0, 0.0])[0] += pos
             if has_weight:
                 acc["weighted_gross_kg"] += trip_gross
                 acc["weighted_cap_kg"] += cap_kg
-    # Unassigned demand counts against OTD/OTIF (not on time, not in full).
+    # Unassigned demand = not delivered on the demanded day → fails OTD/OTIF.
     for u in plan.get("unassigned", []):
-        if _requested_etd(u) is not None:
-            acc["etd_known_pos"] += _positions(u)
+        demand.setdefault(_delivery_id(u), [0.0, 0.0])[1] += _positions(u)
+
+    for assigned, unassigned in demand.values():
+        acc["demanded_pos"] += assigned + unassigned
+        acc["on_time_pos"] += assigned                 # delivered on the demanded day
+        if unassigned == 0:                            # order delivered in full
+            acc["in_full_on_time_pos"] += assigned
 
 
 def _finalize_kpis(acc: dict[str, float]) -> list[dict[str, Any]]:
@@ -273,22 +308,28 @@ def _finalize_kpis(acc: dict[str, float]) -> list[dict[str, Any]]:
 
     All from the REAL workbook columns (requested ETD, Position Nbr, Gross
     weight) + real fleet capacities — no fabricated factors:
-      • OTD  — positions departing by the requested ETD ÷ demand
-      • OTIF — on-time AND in full (not split / not unassigned) ÷ demand
-      • Load Efficiency   — positions loaded ÷ position capacity
-      • Weight Utilization — declared gross weight ÷ kg capacity
+      • OTIF — positions of orders delivered in full on the demanded day ÷ demand
+      • Load Efficiency — positions loaded ÷ position capacity
+      • OTD  — positions delivered on the demanded day ÷ demand
+      • Fuel consumption / tonnage — litres of gasoil per tonne-kilometre
     """
-    etd = acc["etd_known_pos"]
-    otd = round(100.0 * acc["on_time_pos"] / etd, 1) if etd else None
-    otif = round(100.0 * acc["in_full_on_time_pos"] / etd, 1) if etd else None
+    demanded = acc["demanded_pos"]
+    otd = round(100.0 * acc["on_time_pos"] / demanded, 1) if demanded else None
+    otif = round(100.0 * acc["in_full_on_time_pos"] / demanded, 1) if demanded else None
     load_eff = round(100.0 * acc["trip_pos"] / acc["trip_cap_pos"], 1) if acc["trip_cap_pos"] else None
-    weight_util = round(100.0 * acc["weighted_gross_kg"] / acc["weighted_cap_kg"], 1) if acc["weighted_cap_kg"] else None
+
+    # Fuel consumption per tonnage transported = fuel_L × 1000 / (kg × km).
+    # Fuel burned ≈ route_km × FUEL_L_PER_100KM/100, so the route km cancels with
+    # the km in the denominator and the spec formula reduces to a function of the
+    # tonnage carried: (FUEL_L_PER_100KM/100 × 1000) / kg = FUEL_L_PER_100KM×10/kg.
+    gross_kg = acc["gross_kg_total"]
+    fuel_eff = round(FUEL_L_PER_100KM * 10.0 / gross_kg, 4) if gross_kg else None
 
     raw = [
-        ("R4-06", "otif", "OTIF", otif, "%", "truck", "on-time & in-full vs requested ETD"),
-        ("R4-02", "otd", "OTD", otd, "%", "clock", "departs by requested ETD"),
+        ("R4-06", "otif", "OTIF", otif, "%", "truck", "delivered in full on the demanded day"),
         ("R4", "load", "Load Efficiency", load_eff, "%", "gauge", "positions ÷ capacity"),
-        ("R4-11", "weight", "Weight Utilization", weight_util, "%", "weight", "gross weight ÷ capacity"),
+        ("R4-02", "otd", "OTD", otd, "%", "clock", "delivered on the demanded day"),
+        ("R4-13", "fuel", "Fuel / Tonnage", fuel_eff, "L/T·km", "gauge", "fuel ÷ (tonnage × distance)"),
     ]
     kpis = []
     for code, kid, label, value, unit, icon, hint in raw:
@@ -338,45 +379,127 @@ def _weekly_row(plan: Optional[dict[str, Any]], d: date) -> dict[str, Any]:
     }
 
 
-def period_dashboard(build_for_day, ref_day: date, avg_speed_kmh: float) -> dict[str, Any]:
-    """Build every day of the period once and return:
-      • kpis    — the volume-weighted AVERAGE of each KPI over all real travels
-                  in the period (the stable monthly-style figure)
-      • weekly  — the Mon→Sun planned-vs-delivered trend
+PERIODS = ("daily", "weekly", "monthly")
+
+
+def period_dates(period: str, ref_day: date) -> list[date]:
+    """The dates whose plans are pooled into the KPI average for `period`:
+      • daily   — just the reference day
+      • weekly  — the Mon→Sun week containing it
+      • monthly — the 1st of the month up to (and including) the reference day
+    """
+    if period == "daily":
+        return [ref_day]
+    if period == "monthly":
+        start = ref_day.replace(day=1)
+        return [start + timedelta(days=i) for i in range((ref_day - start).days + 1)]
+    return week_bounds(ref_day)
+
+
+def period_range(period: str, ref_day: date) -> tuple[date, date]:
+    """The [start, end] dates the KPI cards are computed over for `period`."""
+    dates = period_dates(period if period in PERIODS else "weekly", ref_day)
+    return dates[0], dates[-1]
+
+
+def _kpi_period_meta(period: str, ref_day: date, dates: list[date], days_used: int) -> dict[str, Any]:
+    month = ref_day.strftime("%B %Y")
+    if period == "daily":
+        label = ref_day.strftime("%A, %d %B %Y")
+    elif period == "monthly":
+        label = month
+    else:
+        label = f"{dates[0].strftime('%d %b')} → {dates[-1].strftime('%d %b')}"
+    return {
+        "period": period,
+        "label": label,
+        "month": month,
+        "range": f"{dates[0].isoformat()} → {dates[-1].isoformat()}",
+        "days": days_used,
+    }
+
+
+def period_dashboard(
+    build_for_day, ref_day: date, avg_speed_kmh: float, period: str = "weekly",
+    load_eff_fn=None,
+) -> dict[str, Any]:
+    """Build the days the dashboard needs once and return:
+      • kpis       — the volume-weighted AVERAGE of each KPI over the chosen
+                     `period` (daily / weekly / monthly)
+      • kpi_period — the label/range/day-count describing that window
+      • weekly     — the Mon→Sun planned-vs-delivered trend (always, for context)
       • the ref-day plan's fleet/efficiency/activity/alerts/totals panels
 
     `build_for_day(d)` returns a plan dict (or raises); a failed day is skipped
     from the average but still shown as an empty bar in the trend.
+
+    `load_eff_fn(plan) -> float | None`, when given, replaces the Load Efficiency
+    KPI value with the average of its per-day result over the period (used to
+    source Load Efficiency from the same VRPTW optimiser as the generated-planning
+    page, so the two screens agree).
     """
-    dates = week_bounds(ref_day)
-    acc = _new_kpi_acc()
-    weekly = []
-    ref_plan = None
-    days_used = 0
-    for d in dates:
+    period = period if period in PERIODS else "weekly"
+    kpi_dates = period_dates(period, ref_day)
+    week = week_bounds(ref_day)
+
+    # Build each needed day exactly once — the KPI window and the Mon→Sun trend
+    # can overlap, and for monthly the week is a subset of the month.
+    plans: dict[date, Optional[dict[str, Any]]] = {}
+    for d in sorted(set(kpi_dates) | set(week)):
         try:
-            plan = build_for_day(d)
+            plans[d] = build_for_day(d)
         except Exception:
-            plan = None
-        weekly.append(_weekly_row(plan, d))
+            plans[d] = None
+
+    acc = _new_kpi_acc()
+    days_used = 0
+    for d in kpi_dates:
+        plan = plans.get(d)
         if plan:
             _accumulate_kpis(plan, acc)
             days_used += 1
-            if d == ref_day:
-                ref_plan = plan
-    if ref_plan is None:
-        ref_plan = build_for_day(ref_day)
 
+    weekly = [_weekly_row(plans.get(d), d) for d in week]
+
+    ref_plan = plans.get(ref_day) or build_for_day(ref_day)
     metrics = plan_metrics(ref_plan, avg_speed_kmh, ref_day)
+
+    kpis = _finalize_kpis(acc)
+    if load_eff_fn is not None:
+        _override_load_efficiency(kpis, plans, kpi_dates, load_eff_fn)
+
     return {
         "generated_at": ref_plan.get("generated_at"),
         "source_file": ref_plan.get("source_file"),
-        "kpis": _finalize_kpis(acc),
-        "kpi_period": {
-            "month": ref_day.strftime("%B %Y"),
-            "range": f"{dates[0].isoformat()} → {dates[-1].isoformat()}",
-            "days": days_used,
-        },
+        "kpis": kpis,
+        "kpi_period": _kpi_period_meta(period, ref_day, kpi_dates, days_used),
         "weekly": weekly,
         **metrics,
     }
+
+
+def _override_load_efficiency(kpis, plans, kpi_dates, load_eff_fn) -> None:
+    """Replace the 'load' KPI value with the period-average of `load_eff_fn`
+    (one value per day with a plan). Leaves it untouched if nothing computes."""
+    values = []
+    for d in kpi_dates:
+        plan = plans.get(d)
+        if not plan:
+            continue
+        try:
+            v = load_eff_fn(plan)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("Load-efficiency override failed for %s: %s", d, exc)
+            v = None
+        if v is not None:
+            values.append(float(v))
+    if not values:
+        return
+    avg = round(sum(values) / len(values), 1)
+    target, green, yellow, direction = _KPI_BANDS["load"]
+    for card in kpis:
+        if card.get("id") == "load":
+            card["value"] = avg
+            card["color"] = _band(avg, green, yellow, direction)
+            card["hint"] = "truck fill from the planning optimiser"
+            break

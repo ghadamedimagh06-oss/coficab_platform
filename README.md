@@ -183,7 +183,23 @@ coficab_platform/
 | Database | PostgreSQL 15 |
 | Cache | Redis 7 |
 | Optimization | OR-Tools 9.15 |
+| Copilot (LLM) | Anthropic Claude (`claude-opus-4-8`) via the `anthropic` SDK |
 | Auth | JWT (python-jose + passlib + bcrypt) |
+
+---
+
+## Dispatch Copilot (Claude)
+
+The in-app assistant panel is a real LLM copilot powered by Anthropic Claude. It
+streams answers grounded in a snapshot of whatever screen the dispatcher is on
+(the active plan, KPI cards, fleet status, recent actions), so it can summarize
+a plan, flag risks, and explain optimizer decisions.
+
+- Backend: `POST /api/copilot/chat` (streams the reply) and `GET /api/copilot/status`.
+- Enable it by setting `ANTHROPIC_API_KEY` in the backend environment. Without a
+  key the copilot input is disabled and the chat endpoint returns 503.
+- Optional overrides: `COPILOT_MODEL` (default `claude-opus-4-8`),
+  `COPILOT_MAX_TOKENS` (default `1024`).
 
 ---
 

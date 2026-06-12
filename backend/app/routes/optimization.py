@@ -1,3 +1,4 @@
+import json
 from datetime import date as _date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -382,39 +383,111 @@ def _weekly_source_signature() -> tuple:
         return ("none", 0)
 
 
+def _vrptw_load_efficiency(plan: dict) -> Optional[float]:
+    """Truck-fill % for one day from the VRPTW optimiser — the SAME engine the
+    generated-planning page uses — so the dashboard's Load Efficiency KPI agrees
+    with that screen. The operational DailyPlanBuilder spreads demand across more
+    trucks (parallel dispatch, time windows) and reads ~62%; VRPTW re-packs the
+    same deliveries into fewer, fuller routes (~85%). Reconstructs the day's
+    deliveries + trucks from the plan and returns avg_utilization_percent
+    (None if it can't be computed)."""
+    stops = []
+    for t in plan.get("trucks", []):
+        for tr in t.get("trips", []):
+            stops += tr.get("stops", [])
+    stops += plan.get("unassigned", [])
+
+    deliveries = []
+    for i, s in enumerate(stops):
+        pos = int(float(s.get("quantity_positions") or s.get("position_count") or 0)) or 1
+        deliveries.append({
+            "id": s.get("id") or i + 1,
+            "customer": s.get("client"),
+            "quantity": pos,
+            # Geography barely affects the load/capacity ratio; use the resolved
+            # client coords when present, else a tiny spread so the solver runs.
+            "lat": s.get("lat") or 36.80 + i * 0.001,
+            "lng": s.get("lon") or s.get("lng") or 10.18 + i * 0.001,
+            "earliest_time": 480,
+            "latest_time": 1020,
+        })
+    trucks = [
+        {"id": t.get("truck_id"), "type": t.get("truck_label"),
+         "capacity": int(float(t.get("capacity_positions") or 33))}
+        for t in plan.get("trucks", [])
+    ]
+    if not deliveries or not trucks:
+        return None
+    res = VRPTWOptimizer(deliveries, trucks).optimize()
+    return res.get("metrics", {}).get("avg_utilization_percent")
+
+
 @daily_router.get("/dashboard")
 def daily_dashboard(
     day: Optional[str] = None,
+    period: str = "weekly",
+    trucks: Optional[str] = None,
     db: Optional[Session] = Depends(get_db_optional),
     _user: dict = Depends(require_auth),
 ):
     """Operations-dashboard metrics derived from the generated daily plan:
-    KPI cards (period averages), fleet health, route-efficiency donut, recent
-    activity, alerts, and a Mon→Sun trend — all real, offline-capable, cached.
+    KPI cards (averaged over the chosen `period` — daily/weekly/monthly), fleet
+    health, route-efficiency donut, recent activity, alerts, and a Mon→Sun
+    trend — all real, offline-capable, cached.
 
-    Plain ``def`` (threadpool): rebuilds up to 7 daily plans, each doing
-    synchronous geocoding that would otherwise block the event loop."""
+    Plain ``def`` (threadpool): rebuilds up to ~31 daily plans (monthly), each
+    doing synchronous geocoding that would otherwise block the event loop."""
     import time
 
     try:
         ref_day = _parse_day(day) if day else _date.today()
-        trucks = _available_trucks_for_daily_plan(db)
+        period = period.lower() if period else "weekly"
+        if period not in dashboard_service.PERIODS:
+            period = "weekly"
+        # The browser sends the active fleet (trucks NOT marked unavailable) as a
+        # JSON query param, so the dashboard plans with the SAME trucks as the
+        # generated-planning screen — otherwise it would silently use the full
+        # fleet and never show the clients that go unassigned when a truck is out.
+        fleet = None
+        if trucks:
+            try:
+                parsed = json.loads(trucks)
+                if isinstance(parsed, list) and parsed:
+                    fleet = parsed
+            except (ValueError, TypeError):
+                fleet = None
+        if fleet is None:
+            fleet = _available_trucks_for_daily_plan(db)
 
-        cache_key = (ref_day.isoformat(), repr(trucks), _weekly_source_signature())
+        cache_key = (ref_day.isoformat(), period, repr(fleet), _weekly_source_signature())
         cached = _DASH_CACHE.get(cache_key)
         now = time.time()
         if cached and now - cached[0] < _DASH_TTL_SECONDS:
             return cached[1]
 
-        # Dashboard aggregates a whole week, so use the fast greedy ordering
-        # (OR-Tools is reserved for the single-day planning screen).
+        # Use the SAME OR-Tools VRPTW solver as the generated-planning page
+        # (prefer_ortools=True). The dashboard plan feeds both the operational
+        # panels AND the OTIF/OTD KPI cards (via dashboard_service._finalize_kpis),
+        # so its set of unassigned clients must match what the planning screen
+        # shows — otherwise the greedy heuristic assigns clients OR-Tools leaves
+        # unassigned (hard time windows), making OTIF read 100% while the planning
+        # page still lists those clients as undelivered. Cached below to bound the
+        # extra solve cost over the period's days.
         builder = DailyPlanBuilder(
-            WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=False), trucks=trucks
+            WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True), trucks=fleet
         )
         result = dashboard_service.period_dashboard(
-            lambda d: builder.build(day=d), ref_day, builder.cfg.avg_speed_kmh
+            lambda d: builder.build(day=d), ref_day, builder.cfg.avg_speed_kmh, period=period,
+            load_eff_fn=_vrptw_load_efficiency,
         )
-        payload = {"day": ref_day.isoformat(), **result}
+
+        # KPI sourcing — all 4 cards (OTIF, Load, OTD, Fuel) are plan-derived in
+        # dashboard_service._finalize_kpis, so they always show a value offline.
+        # OTIF/OTD are measured by DAY (a position misses only when it is left
+        # unassigned, i.e. pushed to another day), so they fall below 100% exactly
+        # when the OR-Tools plan above cannot place a client — keeping the cards in
+        # step with the unassigned list the generated-planning page shows.
+        payload = {"day": ref_day.isoformat(), "period": period, **result}
 
         if len(_DASH_CACHE) > 32:  # keep the cache from growing unbounded
             _DASH_CACHE.clear()

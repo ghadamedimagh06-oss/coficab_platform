@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, ShieldCheck, ShieldOff, Wand2 } from 'lucide-react';
 import { exportDailyPlan, generateDailyPlan } from '../services/api';
 import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
+import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
 import JustificationModal from '../../components/planning/JustificationModal';
@@ -581,23 +582,23 @@ export default function GeneratedDailyPlanningPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f7f3] p-8">
+    <div className="min-h-screen bg-canvas p-8">
       <motion.div initial="hidden" animate="show" className="space-y-8">
         <motion.div variants={item} className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Generated Daily Planning</p>
-            <h1 className="mt-3 text-3xl font-semibold text-[#1a1a2e]">Truck timeline editor</h1>
-            <p className="mt-2 text-sm text-[#6b6b7b]">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Generated Daily Planning</p>
+            <h1 className="mt-3 text-3xl font-semibold text-ink">Truck timeline editor</h1>
+            <p className="mt-2 text-sm text-muted">
               Auto-generated from {plan?.source_file || 'weekly planning'} {plan?.generated_at ? `at ${new Date(plan.generated_at).toLocaleTimeString()}` : ''}
             </p>
             {plan?.selection && (
-              <p className="mt-1 text-xs text-[#6b6b7b]">
+              <p className="mt-1 text-xs text-muted">
                 Using {plan.selection.matched_day || plan.selection.requested_day} rows from the workbook for {plan.selection.requested_date}.
               </p>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e]">
+            <label className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-ink">
               <CalendarDays size={16} />
               <input
                 type="date"
@@ -614,7 +615,7 @@ export default function GeneratedDailyPlanningPage() {
               onClick={() => regenerate(day)}
               disabled={status === 'generating' || isVerified}
               title={isVerified ? 'Unlock the plan to regenerate' : 'Fetch a fresh plan from the server (ignores the cached one)'}
-              className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-60"
             >
               <RefreshCcw size={16} />
               Regenerate
@@ -624,7 +625,7 @@ export default function GeneratedDailyPlanningPage() {
               onClick={() => setModalOpen(true)}
               disabled={!plan || status === 'generating'}
               title={isVerified ? 'Adding a delivery will require a justification' : undefined}
-              className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-60"
             >
               <Plus size={16} />
               Add delivery
@@ -654,10 +655,10 @@ export default function GeneratedDailyPlanningPage() {
             ['Active trucks', stats.trucks, CalendarDays],
             ['Unassigned', stats.unassigned, AlertTriangle],
           ].map(([label, value, Icon]) => (
-            <div key={label} className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-              <div className="mb-4 inline-flex rounded-2xl bg-[#7c3aed]/10 p-3 text-[#7c3aed]"><Icon size={18} /></div>
-              <p className="text-sm uppercase tracking-[0.18em] text-[#6b6b7b]">{label}</p>
-              <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{status === 'generating' ? '--' : formatNumber(value)}</p>
+            <div key={label} className="rounded-[1.75rem] border border-border bg-white p-6 shadow-sm">
+              <div className="mb-4 inline-flex rounded-2xl bg-brand-600/10 p-3 text-brand-600"><Icon size={18} /></div>
+              <p className="text-sm uppercase tracking-[0.18em] text-muted">{label}</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">{status === 'generating' ? '--' : formatNumber(value)}</p>
             </div>
           ))}
         </motion.div>
@@ -671,8 +672,8 @@ export default function GeneratedDailyPlanningPage() {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {plan.unassigned.map((delivery) => (
                 <div key={delivery.id} className="rounded-2xl border border-red-200 bg-white p-4">
-                  <p className="font-semibold text-[#1a1a2e]">{delivery.client}</p>
-                  <p className="mt-1 text-xs text-[#6b6b7b]">
+                  <p className="font-semibold text-ink">{delivery.client}</p>
+                  <p className="mt-1 text-xs text-muted">
                     {formatNumber(delivery.quantity_positions || delivery.position_count)} positions
                     {delivery.quantity_kg ? ` - ${formatNumber(delivery.quantity_kg)} kg` : ''}
                   </p>
@@ -722,26 +723,35 @@ export default function GeneratedDailyPlanningPage() {
           </div>
         )}
 
-        {status === 'generating' && !plan ? (
-          <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
-            <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
-          </div>
-        ) : (
-          <div className="min-w-0">
-            <GanttBoard
-              plan={plan}
-              selectedTruckId={selectedTruckId}
-              onSelectTruck={setSelectedTruckId}
-              onDropDelivery={moveDelivery}
-              onResizeDelivery={resizeDelivery}
-              onCancel={cancelDelivery}
-              onRestore={restoreDelivery}
-              onDropMarker={addMarker}
-              onMoveMarker={moveMarker}
-              onDeleteMarker={deleteMarker}
-            />
-          </div>
-        )}
+        <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
+          {status === 'generating' && !plan ? (
+            <div className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
+              <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
+            </div>
+          ) : (
+            // Wrap in a single grid cell: GanttBoard's <DndContext> renders
+            // several sibling nodes (marker toolbar, the scroller, and dnd-kit's
+            // hidden a11y live regions). Without this wrapper those siblings are
+            // auto-placed as separate grid items and the timeline gets squeezed
+            // into the narrow side column. min-w-0 lets the scroller shrink so
+            // its 1800px content stays inside the cell and scrolls horizontally.
+            <div className="min-w-0">
+              <GanttBoard
+                plan={plan}
+                selectedTruckId={selectedTruckId}
+                onSelectTruck={setSelectedTruckId}
+                onDropDelivery={moveDelivery}
+                onResizeDelivery={resizeDelivery}
+                onCancel={cancelDelivery}
+                onRestore={restoreDelivery}
+                onDropMarker={addMarker}
+                onMoveMarker={moveMarker}
+                onDeleteMarker={deleteMarker}
+              />
+            </div>
+          )}
+          <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
+        </div>
 
         {plan && (
           <RouteMap

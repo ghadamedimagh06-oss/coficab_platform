@@ -6,6 +6,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# TODO(TMS P0 — see docs/TMS_ROADMAP.md §1 & §10):
+#   - Don't ship a hardcoded postgres:postgres default; require DATABASE_URL via a
+#     real .env / secret manager and fail fast if missing in production.
+#   - Replace Base.metadata.create_all (in app/main.py) with Alembic migrations so
+#     schema is versioned/reproducible — and fix the clients.id "manual PK, no
+#     sequence" quirk deliberately in a migration.
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/coficab_db")
 
 # Create engine with connection pooling and error handling

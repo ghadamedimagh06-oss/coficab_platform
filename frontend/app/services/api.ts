@@ -62,6 +62,52 @@ export async function getKpi() {
   return get('/api/metrics/kpi');
 }
 
+export async function getCopilotStatus() {
+  return get('/api/copilot/status');
+}
+
+type CopilotMessage = { role: 'user' | 'assistant'; content: string };
+
+/**
+ * Stream a copilot reply. Calls `onToken` with each text chunk as it arrives.
+ * `context` is a compact snapshot of the current screen so Claude answers
+ * grounded in real data; `activity` is the page's recent-events log.
+ */
+export async function streamCopilotChat(
+  messages: CopilotMessage[],
+  {
+    context,
+    activity,
+    onToken,
+    signal,
+  }: {
+    context?: any;
+    activity?: string[];
+    onToken: (chunk: string) => void;
+    signal?: AbortSignal;
+  },
+) {
+  const response = await fetch(`${baseURL}/api/copilot/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeader() },
+    body: JSON.stringify({ messages, context, activity }),
+    signal,
+  });
+
+  if (!response.ok || !response.body) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.detail || `Copilot request failed (${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onToken(decoder.decode(value, { stream: true }));
+  }
+}
+
 export async function getLiveTracking() {
   return get('/api/tracking/live');
 }

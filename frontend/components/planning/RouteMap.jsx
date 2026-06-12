@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { palette } from '@/lib/theme';
 
 const TUNISIA_CENTER = [35.8, 9.6];
-const PALETTE = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#0891b2', '#9333ea', '#65a30d'];
+const PALETTE = [palette.brand[600], '#2563eb', '#059669', palette.warning, palette.danger, '#0891b2', '#9333ea', '#65a30d'];
 const UNASSIGNED_COLOR = '#9ca3af';
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -173,7 +174,7 @@ function MapInner({ plan, selectedTruckId, onSelectTruck }) {
       ))}
 
       {depot && (
-        <CircleMarker center={depot} radius={9} pathOptions={{ color: '#1a1a2e', weight: 3, fillColor: '#facc15', fillOpacity: 1 }}>
+        <CircleMarker center={depot} radius={9} pathOptions={{ color: palette.ink, weight: 3, fillColor: '#facc15', fillOpacity: 1 }}>
           <Tooltip direction="top">COFICAB Sidi Hassine (depot)</Tooltip>
         </CircleMarker>
       )}
@@ -192,11 +193,11 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
   const unassignedCount = (plan?.unassigned || []).length;
 
   return (
-    <div className="rounded-[2rem] border border-[#e8e5df] bg-white p-5 shadow-sm">
+    <div className="rounded-[2rem] border border-border bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#7c3aed]">Today’s routes</p>
-          <p className="mt-1 text-xs text-[#6b6b7b]">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-600">Today’s routes</p>
+          <p className="mt-1 text-xs text-muted">
             {selected
               ? `${selected.truck.truck_label} — ${selected.stopCount} stop${selected.stopCount > 1 ? 's' : ''} from the depot`
               : `${activeRoutes.length} truck${activeRoutes.length > 1 ? 's' : ''} · ${totalStops} client${totalStops > 1 ? 's' : ''}${unassignedCount ? ` · ${unassignedCount} unassigned` : ''}`}
@@ -206,7 +207,7 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
           <button
             type="button"
             onClick={() => onSelectTruck?.(null)}
-            className="rounded-full border border-[#e8e5df] px-3 py-1 text-xs font-semibold text-[#6b6b7b] transition hover:bg-[#faf8f5]"
+            className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted transition hover:bg-canvas"
           >
             Show all trucks
           </button>
@@ -222,7 +223,7 @@ export default function RouteMap({ plan, selectedTruckId = null, onSelectTruck, 
               type="button"
               onClick={() => onSelectTruck?.(on ? null : r.truck.truck_id)}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                on ? 'border-[#7c3aed] bg-[#7c3aed]/10 text-[#7c3aed]' : 'border-[#e8e5df] text-[#1a1a2e] hover:bg-[#faf8f5]'
+                on ? 'border-brand-600 bg-brand-600/10 text-brand-600' : 'border-border text-ink hover:bg-canvas'
               }`}
             >
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.color }} />

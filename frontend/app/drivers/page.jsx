@@ -21,11 +21,11 @@ export default function DriversPage() {
   );
 
   return (
-    <div className="p-8 min-h-screen bg-[#f8f7f3]">
-      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] border border-[#e8e5df] bg-white p-8 shadow-sm mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">Driver operations</p>
-        <h1 className="mt-3 text-4xl font-bold text-[#1a1a2e]">Driver roster overview</h1>
-        <p className="mt-2 text-sm text-[#6b6b7b] max-w-2xl">Monitor driver availability, shift coverage, and the team ready for dispatch.</p>
+    <div className="p-8 min-h-screen bg-canvas">
+      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] border border-border bg-white p-8 shadow-sm mb-8">
+        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Driver operations</p>
+        <h1 className="mt-3 text-4xl font-bold text-ink">Driver roster overview</h1>
+        <p className="mt-2 text-sm text-muted max-w-2xl">Monitor driver availability, shift coverage, and the team ready for dispatch.</p>
       </motion.div>
 
       <div className="grid gap-6 xl:grid-cols-3 mb-8">
@@ -63,11 +63,11 @@ export default function DriversPage() {
         </motion.div>
       </div>
 
-      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] bg-white border border-[#e8e5df] shadow-sm overflow-hidden">
-        <div className="bg-[#f8f7f3] px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">Driver roster</div>
-        <div className="divide-y divide-[#e8e5df] bg-white">
+      <motion.div variants={statsAnimation} initial="hidden" animate="show" className="rounded-[2rem] bg-white border border-border shadow-sm overflow-hidden">
+        <div className="bg-canvas px-6 py-5 text-sm font-semibold uppercase tracking-[0.18em] text-[#4b5563]">Driver roster</div>
+        <div className="divide-y divide-border bg-white">
           {drivers.map((driver) => (
-            <div key={driver.id} className="grid grid-cols-[1.8fr_1fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-[#1a1a2e] hover:bg-[#faf8f5] transition">
+            <div key={driver.id} className="grid grid-cols-[1.8fr_1fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition">
               <div>
                 <p className="font-semibold">{driver.full_name}</p>
                 <p className="text-[#6b7280] text-xs">{driver.phone}</p>

@@ -74,7 +74,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
       className={`group relative flex h-full min-w-0 flex-col overflow-hidden rounded-xl border text-sm shadow-[0_1px_2px_rgba(26,26,46,0.06)] ring-1 ring-black/[0.02] transition-all duration-150 ${
         cancelled
           ? 'border-slate-200 bg-slate-50 text-slate-400'
-          : 'border-[#ece8e1] bg-white text-[#1a1a2e] hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(26,26,46,0.12)]'
+          : 'border-[#ece8e1] bg-white text-ink hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(26,26,46,0.12)]'
       } ${cancelled ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       style={{
         background: cancelled
@@ -94,7 +94,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
             type="button"
             aria-label="Resize start time"
             onPointerDown={(event) => startResize('start', event)}
-            className="absolute left-0 top-1.5 bottom-1.5 z-10 flex w-3 cursor-ew-resize items-center justify-center text-[#1a1a2e]/0 transition group-hover:text-[#1a1a2e]/30"
+            className="absolute left-0 top-1.5 bottom-1.5 z-10 flex w-3 cursor-ew-resize items-center justify-center text-ink/0 transition group-hover:text-ink/30"
             title="Resize start time"
           >
             <GripVertical size={10} />
@@ -103,7 +103,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
             type="button"
             aria-label="Resize end time"
             onPointerDown={(event) => startResize('end', event)}
-            className="absolute right-0 top-1.5 bottom-1.5 z-10 flex w-3 cursor-ew-resize items-center justify-center text-[#1a1a2e]/0 transition group-hover:text-[#1a1a2e]/30"
+            className="absolute right-0 top-1.5 bottom-1.5 z-10 flex w-3 cursor-ew-resize items-center justify-center text-ink/0 transition group-hover:text-ink/30"
             title="Resize end time"
           >
             <GripVertical size={10} />
@@ -134,7 +134,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
                 event.stopPropagation();
                 cancelled ? onRestore(delivery.id) : onCancel(delivery.id);
               }}
-              className="rounded-full p-0.5 text-[#9e9aa4] opacity-0 transition hover:bg-black/5 hover:text-[#1a1a2e] group-hover:opacity-100"
+              className="rounded-full p-0.5 text-[#9e9aa4] opacity-0 transition hover:bg-black/5 hover:text-ink group-hover:opacity-100"
               title={cancelled ? 'Restore delivery' : 'Cancel delivery'}
             >
               {cancelled ? <RotateCcw size={12} /> : <X size={12} />}
@@ -147,7 +147,7 @@ export default function DeliveryBlock({ delivery, onResize, onCancel, onRestore,
         <span className="inline-flex items-center rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-[#4b4b5b]">
           {delivery.etd || '--'}–{delivery.eta || '--'}
         </span>
-        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#6b6b7b]">
+        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted">
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: base }} />
           {positions.toLocaleString()} pos{weight ? ` · ${(weight / 1000).toFixed(1)} t` : ''}
         </span>

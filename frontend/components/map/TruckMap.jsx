@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { palette } from '@/lib/theme';
 
 const statusColor = {
   on_time: '#22c55e',
@@ -84,14 +85,14 @@ export default function TruckMap({ trucks = [], clients = [], height = 460, hide
   }
 
   return (
-    <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-4 shadow-sm">
+    <div className="rounded-[1.75rem] border border-border bg-white p-4 shadow-sm">
       {!hideHeader && (
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7c3aed]">Network</p>
-            <h3 className="text-lg font-semibold text-[#1a1a2e]">Delivery map</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-600">Network</p>
+            <h3 className="text-lg font-semibold text-ink">Delivery map</h3>
           </div>
-          <div className="flex items-center gap-3 text-[11px] font-medium text-[#6b6b7b]">
+          <div className="flex items-center gap-3 text-[11px] font-medium text-muted">
             <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: depotColor }} /> Depot</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: clientColor }} /> Client</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: statusColor.on_time }} /> Truck</span>
@@ -146,7 +147,7 @@ export default function TruckMap({ trucks = [], clients = [], height = 460, hide
           <CircleMarker
             center={[DEPOT.lat, DEPOT.lng]}
             radius={9}
-            pathOptions={{ color: '#1a1a2e', weight: 3, fillColor: depotColor, fillOpacity: 1 }}
+            pathOptions={{ color: palette.ink, weight: 3, fillColor: depotColor, fillOpacity: 1 }}
           >
             <Tooltip direction="top">{DEPOT.name}</Tooltip>
           </CircleMarker>

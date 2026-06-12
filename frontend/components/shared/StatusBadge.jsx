@@ -1,8 +1,10 @@
+import { palette } from '@/lib/theme';
+
 const statusStyles = {
   scheduled: {
     bg: '#f5f3ff',
-    border: '#7c3aed',
-    text: '#7c3aed',
+    border: palette.brand[600],
+    text: palette.brand[600],
   },
   'in-transit': {
     bg: '#eff6ff',
@@ -21,7 +23,7 @@ const statusStyles = {
   },
   optimized: {
     bg: '#eef2ff',
-    border: '#7c3aed',
+    border: palette.brand[600],
     text: '#3730a3',
   },
 };

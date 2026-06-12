@@ -63,7 +63,7 @@ function snappedMinuteFromDrag(event, spanMin) {
 
 function LegendChip({ swatch, children }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#6b6b7b]">
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted">
       {swatch}
       {children}
     </span>
@@ -127,16 +127,16 @@ export default function GanttBoard({
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece8e1] bg-[#fcfbf9] px-5 py-3">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-[#1a1a2e]">Truck timeline</h3>
-            <span className="rounded-full bg-[#7c3aed]/10 px-2 py-0.5 text-[11px] font-semibold text-[#7c3aed]">
+            <h3 className="text-sm font-semibold text-ink">Truck timeline</h3>
+            <span className="rounded-full bg-brand-600/10 px-2 py-0.5 text-[11px] font-semibold text-brand-600">
               {activeTrucks} active
             </span>
             <span className="hidden h-4 w-px bg-[#ece8e1] sm:block" />
             <div className="hidden flex-wrap items-center gap-3.5 sm:flex">
               <LegendChip swatch={<span className="h-3 w-1.5 rounded-sm bg-[#ef4444]" />}>Urgent</LegendChip>
               <LegendChip swatch={<span className="h-3 w-1.5 rounded-sm bg-[#f59e0b]" />}>Locked</LegendChip>
-              <LegendChip swatch={<span className="h-2.5 w-2.5 rounded-full bg-gradient-to-br from-[#8b5cf6] to-[#3b82f6]" />}>Colour = client</LegendChip>
-              <LegendChip swatch={<Warehouse size={11} className="text-[#7c3aed]" />}>COFICAB depart / return</LegendChip>
+              <LegendChip swatch={<span className="h-2.5 w-2.5 rounded-full bg-gradient-to-br from-brand-500 to-[#3b82f6]" />}>Colour = client</LegendChip>
+              <LegendChip swatch={<Warehouse size={11} className="text-brand-600" />}>COFICAB depart / return</LegendChip>
             </div>
           </div>
           <MarkerTool />

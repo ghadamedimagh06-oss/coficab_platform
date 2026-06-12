@@ -12,7 +12,7 @@ const STATUS_STYLE = {
 const PRIORITY_STYLE = {
   urgent: 'text-red-600 font-semibold',
   high:   'text-amber-600 font-semibold',
-  normal: 'text-[#6b6b7b]',
+  normal: 'text-muted',
   low:    'text-[#9b9bab]',
 };
 
@@ -21,7 +21,7 @@ function fmt(n) {
 }
 
 function Badge({ value, styles }) {
-  const cls = styles[value] || 'bg-[#f0eee9] text-[#6b6b7b] ring-1 ring-[#e8e5df]';
+  const cls = styles[value] || 'bg-[#f0eee9] text-muted ring-1 ring-border';
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>
       {value || '—'}
@@ -139,13 +139,13 @@ function buildRows(plan) {
 }
 
 const TH = ({ children, className = '' }) => (
-  <th className={`whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6b6b7b] ${className}`}>
+  <th className={`whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-muted ${className}`}>
     {children}
   </th>
 );
 
 const TD = ({ children, className = '' }) => (
-  <td className={`px-3 py-2.5 text-sm text-[#1a1a2e] ${className}`}>
+  <td className={`px-3 py-2.5 text-sm text-ink ${className}`}>
     {children}
   </td>
 );
@@ -169,11 +169,11 @@ export default function PlanTable({ plan, onExport, exporting }) {
       {/* header */}
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#7c3aed]">Delivery schedule</p>
-          <h2 className="mt-1 text-xl font-semibold text-[#1a1a2e]">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-600">Delivery schedule</p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">
             Export-ready plan table
           </h2>
-          <p className="mt-0.5 text-xs text-[#6b6b7b]">
+          <p className="mt-0.5 text-xs text-muted">
             {assigned.length} deliveries · {fmt(totalPos)} positions
             {anyWeight && ` · ${fmt(Math.round(totalKg))} kg loaded`}
             {unassigned.length > 0 && ` · ${unassigned.length} unassigned`}
@@ -184,7 +184,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
             type="button"
             onClick={onExport}
             disabled={exporting || !plan?.source_file}
-            className="inline-flex items-center gap-2 rounded-full bg-[#7c3aed] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6d28d9] disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-50"
           >
             <Download size={15} />
             {exporting ? 'Exporting…' : 'Export to Excel'}
@@ -193,10 +193,10 @@ export default function PlanTable({ plan, onExport, exporting }) {
       </div>
 
       {/* main table */}
-      <div className="overflow-x-auto rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-[2rem] border border-border bg-white shadow-sm">
         <table className="min-w-full border-separate border-spacing-0">
-          <thead className="sticky top-0 z-10 bg-[#f8f7f3]">
-            <tr className="border-b border-[#e8e5df]">
+          <thead className="sticky top-0 z-10 bg-canvas">
+            <tr className="border-b border-border">
               <TH className="rounded-tl-[2rem] pl-6">Day</TH>
               <TH>N°</TH>
               <TH>Truck</TH>
@@ -222,18 +222,18 @@ export default function PlanTable({ plan, onExport, exporting }) {
               return (
                 <tr
                   key={row._key}
-                  className={`transition-colors hover:bg-[#faf8f5] ${
-                    row._firstInTrip && i > 0 ? 'border-t border-dashed border-[#e8e5df]' : ''
+                  className={`transition-colors hover:bg-canvas ${
+                    row._firstInTrip && i > 0 ? 'border-t border-dashed border-border' : ''
                   }`}
                 >
-                  <TD className={`pl-6 text-[#6b6b7b] ${isLastRow ? 'rounded-bl-[2rem]' : ''}`}>
+                  <TD className={`pl-6 text-muted ${isLastRow ? 'rounded-bl-[2rem]' : ''}`}>
                     {row.delivery_day || '—'}
                   </TD>
                   <TD className="tabular-nums text-[#9b9bab]">{row.row_number ?? '—'}</TD>
                   <TD>
                     {row._firstInTruck ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e5df] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#1a1a2e] shadow-sm">
-                        <span className="h-2 w-2 rounded-full bg-[#7c3aed]" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-0.5 text-xs font-semibold text-ink shadow-sm">
+                        <span className="h-2 w-2 rounded-full bg-brand-600" />
                         {row.vehicle}
                       </span>
                     ) : (
@@ -247,33 +247,33 @@ export default function PlanTable({ plan, onExport, exporting }) {
                       </span>
                     ) : '—'}
                   </TD>
-                  <TD className="text-[#6b6b7b]">{row.driver}</TD>
+                  <TD className="text-muted">{row.driver}</TD>
                   <TD className="max-w-[14rem] font-medium">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate" title={row.client}>{row.client}</span>
                       {row.is_split && <SplitBadge row={row} />}
                     </span>
                   </TD>
-                  <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
+                  <TD className="max-w-[12rem] text-xs text-muted">
                     <span className="block truncate" title={row.end_location}>{row.end_location}</span>
                   </TD>
-                  <TD className="tabular-nums font-medium text-[#7c3aed]">{row.etd}</TD>
-                  <TD className="tabular-nums font-medium text-[#6b6b7b]">{row.eta}</TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">
+                  <TD className="tabular-nums font-medium text-brand-600">{row.etd}</TD>
+                  <TD className="tabular-nums font-medium text-muted">{row.eta}</TD>
+                  <TD className="tabular-nums text-muted">
                     {row.travel_min != null ? `${row.travel_min} min` : '—'}
                   </TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">
+                  <TD className="tabular-nums text-muted">
                     {row.distance_km != null ? row.distance_km : '—'}
                   </TD>
                   <TD className="tabular-nums font-semibold">{fmt(row.position_count)}</TD>
-                  {anyWeight && <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>}
+                  {anyWeight && <TD className="tabular-nums text-muted">{fmt(row.gross_weight_kg)}</TD>}
                   <TD>
                     <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                       {row.priority}
                     </span>
                   </TD>
                   <TD><Badge value={row.status} styles={STATUS_STYLE} /></TD>
-                  <TD className={`max-w-[16rem] text-xs text-[#6b6b7b] pr-6 ${isLastRow ? 'rounded-br-[2rem]' : ''}`}>
+                  <TD className={`max-w-[16rem] text-xs text-muted pr-6 ${isLastRow ? 'rounded-br-[2rem]' : ''}`}>
                     <span className="block truncate" title={row.comments}>{row.comments || ''}</span>
                   </TD>
                 </tr>
@@ -282,13 +282,13 @@ export default function PlanTable({ plan, onExport, exporting }) {
 
             {/* totals row */}
             {assigned.length > 0 && (
-              <tr className="border-t-2 border-[#e8e5df] bg-[#f8f7f3] font-semibold">
-                <TD className="pl-6 text-[#6b6b7b]" />
+              <tr className="border-t-2 border-border bg-canvas font-semibold">
+                <TD className="pl-6 text-muted" />
                 <TD />
                 <TD />
                 <TD />
                 <TD />
-                <TD className="text-xs uppercase tracking-wider text-[#6b6b7b]">
+                <TD className="text-xs uppercase tracking-wider text-muted">
                   {assigned.length} deliveries
                 </TD>
                 <TD />
@@ -296,8 +296,8 @@ export default function PlanTable({ plan, onExport, exporting }) {
                 <TD />
                 <TD />
                 <TD />
-                <TD className="tabular-nums text-[#1a1a2e]">{fmt(totalPos)}</TD>
-                {anyWeight && <TD className="tabular-nums text-[#1a1a2e]">{fmt(Math.round(totalKg))}</TD>}
+                <TD className="tabular-nums text-ink">{fmt(totalPos)}</TD>
+                {anyWeight && <TD className="tabular-nums text-ink">{fmt(Math.round(totalKg))}</TD>}
                 <TD />
                 <TD />
                 <TD className="pr-6" />
@@ -318,7 +318,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                   const isLast = i === unassigned.length - 1;
                   return (
                     <tr key={row._key} className="bg-red-50/40 hover:bg-red-50 transition-colors">
-                      <TD className={`pl-6 text-[#6b6b7b] ${isLast ? 'rounded-bl-[2rem]' : ''}`}>
+                      <TD className={`pl-6 text-muted ${isLast ? 'rounded-bl-[2rem]' : ''}`}>
                         {row.delivery_day || '—'}
                       </TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.row_number ?? '—'}</TD>
@@ -329,24 +329,24 @@ export default function PlanTable({ plan, onExport, exporting }) {
                         </span>
                       </TD>
                       <TD className="text-xs text-[#9b9bab]">—</TD>
-                      <TD className="text-[#6b6b7b]">—</TD>
+                      <TD className="text-muted">—</TD>
                       <TD className="max-w-[14rem] font-medium text-red-700">
                         <span className="flex items-center gap-1.5">
                           <span className="truncate" title={row.client}>{row.client}</span>
                           {row.is_split && <SplitBadge row={row} />}
                         </span>
                       </TD>
-                      <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
+                      <TD className="max-w-[12rem] text-xs text-muted">
                         <span className="block truncate" title={row.end_location}>{row.end_location}</span>
                       </TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.etd}</TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.eta}</TD>
                       <TD>—</TD>
-                      <TD className="tabular-nums text-[#6b6b7b]">
+                      <TD className="tabular-nums text-muted">
                         {row.distance_km != null ? row.distance_km : '—'}
                       </TD>
                       <TD className="tabular-nums font-semibold text-red-700">{fmt(row.position_count)}</TD>
-                      {anyWeight && <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>}
+                      {anyWeight && <TD className="tabular-nums text-muted">{fmt(row.gross_weight_kg)}</TD>}
                       <TD>
                         <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                           {row.priority}

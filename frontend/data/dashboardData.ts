@@ -1,3 +1,5 @@
+import { palette } from '@/lib/theme';
+
 export const kpiData = [
   {
     id: 'deliveries',
@@ -5,7 +7,7 @@ export const kpiData = [
     value: '1,247',
     icon: 'truck',
     iconBg: 'rgba(124,58,237,0.1)',
-    iconColor: '#7c3aed',
+    iconColor: palette.brand[600],
     trend: 12.5,
     trendLabel: 'vs last week',
     sparklineData: [40, 65, 45, 80, 55, 90, 70],
@@ -56,7 +58,7 @@ export const weeklyData = [
 ];
 
 export const efficiencySegments = [
-  { name: 'Optimized', value: 68, color: '#7c3aed' },
+  { name: 'Optimized', value: 68, color: palette.brand[600] },
   { name: 'Good', value: 18, color: '#3b82f6' },
   { name: 'Average', value: 10, color: '#f59e0b' },
   { name: 'Below Avg', value: 4, color: '#ef4444' },
