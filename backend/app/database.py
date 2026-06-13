@@ -1,18 +1,17 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import os
 from dotenv import load_dotenv
+
+from app.config import database_url
 
 load_dotenv()
 
-# TODO(TMS P0 — see docs/TMS_ROADMAP.md §1 & §10):
-#   - Don't ship a hardcoded postgres:postgres default; require DATABASE_URL via a
-#     real .env / secret manager and fail fast if missing in production.
-#   - Replace Base.metadata.create_all (in app/main.py) with Alembic migrations so
-#     schema is versioned/reproducible — and fix the clients.id "manual PK, no
-#     sequence" quirk deliberately in a migration.
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/coficab_db")
+# Resolved via app.config: a local default in dev, but REQUIRED (and rejecting
+# default credentials) once APP_ENV=production. See docs/TMS_ROADMAP.md §1 & §10.
+# Schema is versioned with Alembic (backend/alembic/) — Base.metadata.create_all
+# in app/main.py remains only as an offline/test convenience.
+DATABASE_URL = database_url()
 
 # Create engine with connection pooling and error handling
 try:

@@ -77,6 +77,20 @@ _DRIVERS = [
 
 _SHIFTS = {"Jour": (time(6, 0), time(18, 0)), "Nuit": (time(18, 0), time(6, 0))}
 
+# Real COFICAB fleet (mirrors database/seed_demo.sql). Seeded so the DB-aware
+# optimiser and the execution/ePOD loop have available trucks out of the box.
+# (plate, type, capacite_kg, max_palettes, consommation_l_100km)
+_CAMIONS = [
+    ("2282TU131", "PORTEUR", 10200, 14, 30.0),
+    ("9524TU238", "PORTEUR", 10230, 14, 30.0),
+    ("5735TU217", "PORTEUR",  9227, 14, 29.0),
+    ("4331TU175", "PORTEUR",  9200, 14, 29.0),
+    ("REM107627", "SEMI",    24950, 24, 35.0),
+    ("626TU203",  "FOURGON",  7650, 14, 24.0),
+    ("7797TU218", "PORTEUR",   925,  4, 18.0),
+    ("6502TU247", "PORTEUR",  8500, 14, 28.0),
+]
+
 # Official Coficab KPI catalog. Thresholds for the 4 dashboard KPIs (OTIF, OTD,
 # Load, Fuel) are authoritative — they match dashboard_service._KPI_BANDS. The
 # other 4 indicators are defined (code/name/unit/direction) but their colour
@@ -246,6 +260,31 @@ def seed_demandes(db, name_to_id: dict[str, int], week_monday: date, dry_run: bo
         print(f"    {d}: {per_day[d]} deliveries")
 
 
+def seed_camions(db, dry_run: bool) -> None:
+    """Upsert the real COFICAB fleet by plate number (status DISPONIBLE)."""
+    from app.models.camion import CamionType, CamionStatus
+    existing = {c.plate_number.strip().lower(): c for c in db.query(Camion).all()}
+    created = updated = 0
+    for plate, ctype, cap_kg, max_pal, conso in _CAMIONS:
+        key = plate.strip().lower()
+        cam = existing.get(key)
+        fields = dict(
+            type=CamionType(ctype),
+            capacite_kg=cap_kg,
+            max_palettes=max_pal,
+            consommation_base_l_100km=conso,
+        )
+        if cam is None:
+            db.add(Camion(plate_number=plate, status=CamionStatus.DISPONIBLE, **fields))
+            created += 1
+        else:
+            for k, v in fields.items():
+                setattr(cam, k, v)
+            updated += 1
+    db.flush()
+    print(f"  camions: +{created} new, ~{updated} updated ({len(_CAMIONS)} total)")
+
+
 def seed_chauffeurs(db, dry_run: bool) -> None:
     """Upsert drivers (from coficadData), linking each to its default camion."""
     camions_by_plate = {
@@ -280,11 +319,9 @@ def seed_chauffeurs(db, dry_run: bool) -> None:
 
 
 def _bcrypt_hash(password: str) -> str:
-    """Hash with the bcrypt lib directly. AuthService uses passlib, which is
-    broken against bcrypt>=4.1 in this venv (passlib 1.7.4 reads the removed
-    bcrypt.__about__), so we produce a standard $2b$ hash here instead."""
-    import bcrypt
-    return bcrypt.hashpw(password.encode("utf-8")[:72], bcrypt.gensalt()).decode("utf-8")
+    """Produce a standard $2b$ bcrypt hash, matching auth_service.hash_password."""
+    from app.services.auth_service import hash_password
+    return hash_password(password)
 
 
 def seed_admin_user(db, dry_run: bool) -> None:
@@ -351,6 +388,7 @@ def main() -> None:
               + (" [DRY-RUN]" if args.dry_run else ""))
         name_to_id = seed_clients(db, args.dry_run)
         seed_demandes(db, name_to_id, week_monday, args.dry_run)
+        seed_camions(db, args.dry_run)
         seed_chauffeurs(db, args.dry_run)
         seed_admin_user(db, args.dry_run)
         seed_kpi_definitions(db, args.dry_run)

@@ -6,19 +6,35 @@ trustworthy operations", **P1** = expected TMS capability, **P2** = differentiat
 
 > Status legend: ✅ done · 🟡 partial · ❌ missing
 
+> **2026-06-13 — P0 backbone landed.** The "trustworthy TMS" core from the
+> suggested order of attack is implemented & verified end-to-end against
+> Postgres: (1) the **execution / ePOD loop** (`execution_service.py`,
+> `/api/execution/*`, `livraison_preuve` proof table) advances
+> plan→missions→demandes through to LIVREE, which makes **OTIF/OTD real**
+> (`/api/metrics/kpi` now reads delivery actuals); (2) **Alembic** migrations
+> (`backend/alembic/`) with a verified baseline; (3) **security** hardening
+> (bcrypt direct, fail-fast secrets/DSN in production, gated dev auth bypass —
+> `app/config.py`). Reproducible fleet seeding added to `seed_from_files.py`.
+> Covered by `tests/test_execution_loop.py`. Remaining items below are the
+> next P1/P2 layers.
+
 ---
 
 ## 1. Data & persistence
 - 🟡 **Postgres is wired** (`backend/app/database.py`); master data seeded from files
   via `backend/scripts/seed_from_files.py` (clients, demandes, camions, chauffeurs,
   kpi_definition, admin user).
-- ❌ **P0 — Schema migrations.** Tables are created with `Base.metadata.create_all`
-  (no versioning). Add **Alembic** so schema changes are reproducible and the
-  `clients.id` "manual PK / no sequence" quirk is fixed deliberately, not by hand.
-- ❌ **P0 — Plans are not persisted.** `plan_mission`, `mission_demande`,
-  `plan_version`, `planning_versions` are empty; every screen rebuilds the plan
-  in-memory each request. Persist each generated/edited plan so history, audit,
-  and KPIs have a source of truth.
+- ✅ **P0 — Schema migrations.** **Alembic** is wired (`backend/alembic/`, URL
+  resolved from `DATABASE_URL` via `app.config`). Baseline `01f614faa2d0`
+  reflects the full schema and applies cleanly to a fresh DB (the camions↔
+  chauffeurs FK cycle is broken with deferred `create_foreign_key`). Existing
+  DBs are reconciled with `alembic stamp head`. `create_all` is kept only for
+  the SQLite test suite / offline mode. (clients.id manual-PK quirk still TODO.)
+- ✅ **P0 — Plans are persisted & executed.** `/api/optimization/run`
+  materialises `plan_version`/`plan_mission`/`mission_demande`; the new
+  execution loop (`/api/execution/*`) then drives them through
+  VALIDE→EXECUTE→CLOTURE with delivery confirmations. History/audit/KPIs now
+  have a DB source of truth.
 - 🟡 Idempotent seed exists, but there's **no real order-intake pipeline** beyond
   the weekly Excel ingester (`ingestion_service.py`).
 
@@ -54,9 +70,11 @@ trustworthy operations", **P1** = expected TMS capability, **P2** = differentiat
 ## 4. Execution, tracking & ePOD  ← biggest missing pillar
 - ❌ **P0 — No real-time tracking.** `transport_tracking` is empty; the map plots
   *planned* stops, not live vehicle GPS. Integrate telematics/GPS.
-- ❌ **P0 — Electronic Proof of Delivery (ePOD).** No delivery confirmation,
-  signature/photo capture, or exception capture. This is the missing input that
-  makes KPIs *actuals* instead of *forecast* (see §5).
+- ✅ **P0 — Electronic Proof of Delivery (ePOD).** `POST /api/execution/stops/
+  {id}/confirm` records a `livraison_preuve` (signataire/photo/notes/on-time,
+  full vs partial) and advances the demande to LIVREE; `/exception` captures
+  refusals/no-shows as `evenement_alea` and cancels the stop. This is the input
+  that turns KPIs into *actuals* (see §5). _Driver mobile UI still pending._
 - ❌ **P1 — Driver mobile app**, geofenced arrival/departure, dynamic ETA.
 
 ## 5. KPIs: forecast → actuals  ← the "is the data real?" gap
@@ -64,9 +82,11 @@ trustworthy operations", **P1** = expected TMS capability, **P2** = differentiat
   (`dashboard_service._finalize_kpis`), now consistent with the planning page
   (both use OR-Tools). A position only "misses" when left **unassigned**.
 - ✅ `kpi_definition` seeded with authoritative thresholds for the 4 dashboard KPIs.
-- ❌ **P0 — OTIF/OTD from real deliveries.** `KpiService._compute_otif` needs
-  `demandes_local.statut=LIVREE` + `livree_a_temps` + `quantite_livree_kg`, which
-  only exist once ePOD (§4) confirms deliveries. Until then "real OTIF" is impossible.
+- ✅ **P0 — OTIF/OTD from real deliveries.** ePOD (§4) now writes
+  `demandes_local.statut=LIVREE` + `livree_a_temps` + `quantite_livree_kg`, so
+  `KpiService._compute_otif`/`_compute_otd` return real values. Verified live:
+  `/api/metrics/kpi` reported OTIF 87.5% / OTD 79.3% from confirmed deliveries
+  (was always `null`/forecast before).
 - ❌ **P1 — KPI snapshots.** `kpi_journalier`/`kpi_mensuel` empty; `recompute_kpis.py`
   can't produce values until `plan_mission`/`livraisons` are populated.
 - ❌ **P1 — The other 4 KPIs** (Premium Freight Cost/Occurrences, Logistics Cost,
@@ -94,12 +114,14 @@ trustworthy operations", **P1** = expected TMS capability, **P2** = differentiat
   "not a domestic truck run").
 
 ## 10. Security, auth & compliance  ← needs hardening before any real use
-- ❌ **P0 — Auth is broken/bypassable.** `passlib 1.7.4` is incompatible with
-  `bcrypt>=4.1` in this venv (hash/verify raise); `auth_service` also has a **dev
-  fallback that returns a fake admin when no token is sent**. Fix the passlib/bcrypt
-  pin and remove/guard the fallback behind an explicit env flag.
-- ❌ **P0 — Secrets.** Default DB URL with `postgres:postgres` is hardcoded; no
-  `.env`, no secret management. JWT signing key handling needs review.
+- ✅ **P0 — Auth hardened.** Dropped the fragile `passlib` shim for direct
+  `bcrypt` (`auth_service.hash_password`/`verify_password`). The anonymous→admin
+  dev fallback is now gated by `app.config.dev_bypass_allowed()` — **disabled in
+  production and whenever `REQUIRE_AUTH` is set** (401/403 instead).
+- ✅ **P0 — Secrets fail-fast.** `app/config.py` resolves `JWT_SECRET` and
+  `DATABASE_URL`: dev gets safe local defaults, but with `APP_ENV=production` the
+  app **refuses to start** on a placeholder secret or a default-credential DSN.
+  `.env.example` documents `APP_ENV`/`REQUIRE_AUTH`.
 - ❌ **P1 — RBAC enforcement** (roles exist on `users` but aren't enforced),
   audit log, per-tenant/plant isolation.
 
@@ -113,10 +135,12 @@ trustworthy operations", **P1** = expected TMS capability, **P2** = differentiat
 ---
 
 ## Suggested order of attack (to reach a *trustworthy* TMS)
-1. **P0 execution loop:** ePOD/delivery confirmation → populate `livraisons` &
-   advance `demandes_local` status → real OTIF/OTD (§4, §5).
-2. **P0 persistence & migrations:** Alembic + persist plans to `plan_mission` (§1).
-3. **P0 security:** fix auth, remove dev fallback, move secrets to env (§10).
+1. ✅ **P0 execution loop:** ePOD/delivery confirmation → advance
+   `demandes_local` status → real OTIF/OTD (§4, §5). _Done 2026-06-13._
+2. ✅ **P0 persistence & migrations:** Alembic + plans persisted/executed in
+   `plan_mission`/`mission_demande` (§1). _Done 2026-06-13._
+3. ✅ **P0 security:** bcrypt, gated dev fallback, fail-fast secrets/DSN (§10).
+   _Done 2026-06-13._
 4. **P1 tracking:** telematics/GPS + live ETA + driver app (§4).
 5. **P1 fleet/maintenance, carrier/rate, billing** (§6–8).
 6. **P1 observability + CI/CD + tests** so it can be operated, not just demoed (§11).

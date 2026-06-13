@@ -1,59 +1,64 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from app.models.user import User
 from app.models.transport import UserCreate, TokenData
-import os
+from app.config import auth_enforced, dev_bypass_allowed, jwt_secret
 
-# TODO(TMS P0 security — see docs/TMS_ROADMAP.md §10):
-#   1. SECRET_KEY falls back to a hardcoded value — fail fast if JWT_SECRET is
-#      unset in production instead of signing tokens with a known key.
-#   2. passlib 1.7.4 is BROKEN against bcrypt>=4.1 (it reads the removed
-#      bcrypt.__about__) — hash_password/verify_password raise. Pin bcrypt==4.0.1
-#      or move to a maintained hasher. scripts/seed_from_files.py hashes the admin
-#      user with the bcrypt lib directly to work around this.
-SECRET_KEY = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# bcrypt operates on at most 72 bytes; longer inputs are silently truncated by
+# most libs, so we truncate explicitly for deterministic behaviour. We call the
+# bcrypt package directly (not passlib, which is unmaintained and reads the
+# removed bcrypt.__about__ on bcrypt>=4.1, emitting errors).
+_BCRYPT_MAX_BYTES = 72
+
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pw = (password or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
+    return bcrypt.hashpw(pw, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password:
+        return False
+    pw = (plain_password or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
+    try:
+        return bcrypt.checkpw(pw, hashed_password.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def create_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, jwt_secret(), algorithm=ALGORITHM)
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, jwt_secret(), algorithms=[ALGORITHM])
     except JWTError:
         return None
 
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
-    # TODO(TMS P0 security): this dev fallback hands out a fake ADMIN when no token
-    # is present — i.e. every endpoint is open by default. Gate this behind an
-    # explicit env flag (e.g. AUTH_DEV_BYPASS=1) and 401 otherwise in production.
+    # The dev fallback hands out a 'dev' admin when no token is present so the
+    # tokenless offline frontend works. It is DISABLED in production (and when
+    # REQUIRE_AUTH is set), where a missing token is rejected. See app.config.
     if creds is None:
-        return {"username": "dev", "role": "admin"}
+        if dev_bypass_allowed():
+            return {"username": "dev", "role": "admin"}
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = decode_token(creds.credentials)
     if not payload or not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
@@ -68,16 +73,7 @@ def require_role(*roles: str):
     return _dep
 
 
-# Whether to *enforce* auth on protected routes. Off by default so the
-# offline-first frontend (which ships without a login flow) keeps working;
-# set REQUIRE_AUTH=1 in a real deployment to enforce 403 on anonymous calls.
-def _auth_enforced() -> bool:
-    return os.getenv("REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-# auto_error=False so we control the no-credentials case ourselves: enforce 403
-# only when REQUIRE_AUTH is set, otherwise fall back to the dev user like
-# get_current_user does for the rest of the app.
+# auto_error=False so we control the no-credentials case ourselves.
 _protected_bearer = HTTPBearer(auto_error=False)
 
 
@@ -85,18 +81,15 @@ def require_auth(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(_protected_bearer),
 ) -> dict:
     """Auth dependency for production-sensitive routes (plan generation,
-    dashboards).
+    dashboards, execution/ePOD).
 
     - A present-but-invalid/expired token is ALWAYS rejected with 401.
-    - A missing token returns 403 when REQUIRE_AUTH is enabled, otherwise falls
-      back to the offline dev user so the tokenless frontend still works.
-
-    This mirrors the codebase's offline-first design (get_current_user has the
-    same dev fallback) while letting a real deployment lock these routes down
-    with a single environment flag.
+    - A missing token returns 403 when auth is enforced (production or
+      REQUIRE_AUTH), otherwise falls back to the offline dev user so the
+      tokenless frontend still works. See app.config.auth_enforced.
     """
     if credentials is None:
-        if _auth_enforced():
+        if auth_enforced():
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
         return {"username": "dev", "role": "admin"}
     payload = decode_token(credentials.credentials)

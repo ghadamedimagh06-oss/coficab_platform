@@ -10,6 +10,7 @@ from .demande import DemandeLocal, StatutDemande, Priorite
 from .plan import PlanVersion, PlanMission, MissionDemande, PlanningChangeLog
 from .plan import StatutPlan, StatutMission, ModeMission, Periode
 from .evenement import EvenementAlea, EvenementType
+from .proof import LivraisonPreuve, PodStatus
 
 # KPI tables
 from .kpi import KpiDefinition, KpiJournalier, KpiMensuel, KpiStatus, KpiDirection, KpiFrequence
@@ -29,6 +30,7 @@ __all__ = [
     "PlanVersion", "PlanMission", "MissionDemande", "PlanningChangeLog",
     "StatutPlan", "StatutMission", "ModeMission", "Periode",
     "EvenementAlea", "EvenementType",
+    "LivraisonPreuve", "PodStatus",
     "KpiDefinition", "KpiJournalier", "KpiMensuel", "KpiStatus", "KpiDirection", "KpiFrequence",
     "User",
     "NotificationLog",

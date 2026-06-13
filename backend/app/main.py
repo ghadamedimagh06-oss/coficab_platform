@@ -25,6 +25,7 @@ from app.routes import (
     incidents,
     dispatch,
     copilot,
+    execution,
 )
 from app.database import engine, Base
 from app.agents.scheduler import start_scheduler
@@ -122,6 +123,7 @@ app.include_router(fleet.clients_router, prefix="/api/clients", tags=["clients"]
 app.include_router(incidents.router, prefix="/api/incidents", tags=["incidents"])
 app.include_router(dispatch.router, prefix="/api/dispatch", tags=["dispatch"])
 app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"])
+app.include_router(execution.router, prefix="/api/execution", tags=["execution"])
 
 
 @app.get("/")
