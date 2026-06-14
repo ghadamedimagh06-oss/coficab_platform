@@ -79,15 +79,38 @@ async def login(
     db: Session = Depends(get_db)
 ):
     """User authentication"""
+    from app.rate_limit import (
+        login_throttle, login_lockout_enabled, login_max_fails, login_window,
+    )
+
     username, password = await _login_payload(request)
+
+    # Brute-force defence: lock an (ip, username) pair after too many consecutive
+    # failures within the window.
+    ip = request.client.host if request.client else "anonymous"
+    throttle_key = (ip, username.lower())
+    lockout_on = login_lockout_enabled()
+    if lockout_on:
+        locked, retry_after = login_throttle.is_locked(throttle_key, login_max_fails(), login_window())
+        if locked:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Please try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
     auth_service = AuthService(db)
     user = auth_service.authenticate_user(username, password)
     if not user:
+        if lockout_on:
+            login_throttle.record_failure(throttle_key, login_window())
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if lockout_on:
+        login_throttle.clear(throttle_key)
     access_token_expires = timedelta(minutes=30)
     access_token = auth_service.create_access_token(
         data={"sub": user.username, "role": getattr(user, "role", "viewer")}, expires_delta=access_token_expires

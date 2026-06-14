@@ -72,7 +72,7 @@
 - [x] **W4.4 — Rate limiting.** ✅ DONE & tested. Dependency-free per-IP fixed-window limiter (`app/rate_limit.py`) installed as middleware; tighter budget for solver/LLM endpoints (`/pareto`,`/stress-test`,`/confidence`,`/replan`,`/generate`,`/dashboard`,`/copilot/chat`). Env-gated (`RATE_LIMIT_ENABLED/DEFAULT/HEAVY/WINDOW`), disabled in tests. `tests/test_rate_limit.py` (3 tests).
 - [ ] **W4.5 — TypeScript strict mode** (only after fixing every surfaced error). **(M)**
 - [x] **W4.6 — File-upload validation.** ✅ DONE & tested. `/api/ingestion/upload` now enforces extension + declared content-type, a configurable size cap (`MAX_UPLOAD_MB`, default 25) via chunked streaming, and ZIP/xlsx magic-byte verification (rejects a renamed .exe/.csv); cleans up partial files. `tests/test_upload_validation.py` (4 tests).
-- [ ] **W4.7 — Login rate-limit / lockout.** **(M)**
+- [x] **W4.7 — Login rate-limit / lockout.** ✅ DONE & tested. `LoginThrottle` (in `app/rate_limit.py`) locks an (ip, username) pair after `LOGIN_MAX_FAILS` (default 5) consecutive failures within `LOGIN_WINDOW` (default 15 min) → 429 + Retry-After; a successful login clears it. Env-gated (`LOGIN_LOCKOUT_ENABLED`), disabled in tests. `tests/test_login_lockout.py` (2 tests).
 
 ---
 
@@ -93,3 +93,6 @@ Excel cache / volume dimension) · W3.2 live control-tower map.
 - _2026-06-14_ — **W2.5 Explainable Routing complete & green.** `/explain` endpoint (per-trip utilisation + binding constraint + counterfactual + per-stop reasoning); `ExplainPanel` UI; 3 new tests. FIVE wow features now on the generated-daily-planning screen. Verified: "fullest trip 100% pallets, binding=positions, 6 stops only this truck can serve, no smaller vehicle fits."
 - _2026-06-14_ — **W3.3 Board report complete (frontend, build green).** `executiveReport.js` opens a print-ready Operations & Sustainability one-pager; "Board report (PDF)" button in SustainabilityPanel. SIX features live. Session total: Wave 0 + 6 features, 89 backend tests green, 7 frontend prod builds green.
 - _2026-06-14_ — **W1.2 One KPI source complete & green.** `/api/metrics/kpi` falls back to live plan-derived KPIs (+CO₂ card) when ERD snapshots are empty; fixed a path bug (`parents[3]`); cached; `source` field. 2 new tests (91 total).
+- _2026-06-14_ — **Committed ee23fef** (35 files): Wave 0 + 6 features + W1.2/W1.3.
+- _2026-06-14_ — **W4.4 rate limiting + W4.6 upload validation complete & green** (committed 7cbe97a). +7 tests → 101.
+- _2026-06-14_ — **W4.7 login lockout complete & green.** +2 tests → 103. Session: Wave 0 + 6 features + W1.2/W1.3 + W4.4/W4.6/W4.7, all green, on parallel-main.
