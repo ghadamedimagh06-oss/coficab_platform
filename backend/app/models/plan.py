@@ -61,10 +61,10 @@ class PlanMission(Base):
     __tablename__ = "plan_mission"
 
     id = Column(Integer, primary_key=True)
-    plan_version_id = Column(Integer, ForeignKey("plan_version.id", ondelete="CASCADE"), nullable=False)
+    plan_version_id = Column(Integer, ForeignKey("plan_version.id", ondelete="CASCADE"), nullable=False, index=True)
     camion_id = Column(Integer, ForeignKey("camions.id"), nullable=False)
     chauffeur_id = Column(Integer, ForeignKey("chauffeurs.id"), nullable=False)
-    date_mission = Column(Date, nullable=False)
+    date_mission = Column(Date, nullable=False, index=True)
     heure_sortie_prevue = Column(DateTime(timezone=True))
     heure_sortie_reelle = Column(DateTime(timezone=True))
     heure_retour_prevue = Column(DateTime(timezone=True))
@@ -103,8 +103,8 @@ class MissionDemande(Base):
     __tablename__ = "mission_demande"
 
     id = Column(Integer, primary_key=True)
-    mission_id = Column(Integer, ForeignKey("plan_mission.id", ondelete="CASCADE"), nullable=False)
-    demande_id = Column(Integer, ForeignKey("demandes_local.id"), nullable=False)
+    mission_id = Column(Integer, ForeignKey("plan_mission.id", ondelete="CASCADE"), nullable=False, index=True)
+    demande_id = Column(Integer, ForeignKey("demandes_local.id"), nullable=False, index=True)
     ordre_livraison = Column(SmallInteger, nullable=False)
     eta_prevue = Column(DateTime(timezone=True))
     eta_reelle = Column(DateTime(timezone=True))

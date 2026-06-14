@@ -66,7 +66,7 @@
 
 ## WAVE 4 — Hardening (verified subset of E–K)
 
-- [ ] **W4.1 — DB indexes** on real FK/filter columns (verify names first). **(S)**
+- [x] **W4.1 — DB indexes.** ✅ DONE & tested. `index=True` on the hot FK/filter columns: `plan_mission.(plan_version_id,date_mission)`, `mission_demande.(mission_id,demande_id)`, `demandes_local.(client_id,date_livraison)`, `livraisons.(delivery_day,status)`, `kpi_journalier.(kpi_def_id,date_mesure)`. `tests/test_db_indexes.py` (10 parametrised checks via schema introspection). Note: an Alembic migration is still needed to add these to an EXISTING Postgres DB (create_all covers fresh DBs).
 - [ ] **W4.2 — Structured logging + `/metrics`.** **(M)**
 - [ ] **W4.3 — Optimizer golden/regression tests.** **(M)**
 - [x] **W4.4 — Rate limiting.** ✅ DONE & tested. Dependency-free per-IP fixed-window limiter (`app/rate_limit.py`) installed as middleware; tighter budget for solver/LLM endpoints (`/pareto`,`/stress-test`,`/confidence`,`/replan`,`/generate`,`/dashboard`,`/copilot/chat`). Env-gated (`RATE_LIMIT_ENABLED/DEFAULT/HEAVY/WINDOW`), disabled in tests. `tests/test_rate_limit.py` (3 tests).

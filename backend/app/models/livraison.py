@@ -13,7 +13,7 @@ class Livraison(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     planning_id = Column(Integer, ForeignKey("planning_versions.id"), nullable=True)
-    delivery_day = Column(String(20), nullable=True)
+    delivery_day = Column(String(20), nullable=True, index=True)
     delivery_date = Column(DateTime(timezone=True), nullable=True)
     row_number = Column(Integer, nullable=True)
     client = Column(String(200), nullable=True)
@@ -25,7 +25,7 @@ class Livraison(Base):
     start_location = Column(String(200), nullable=False)
     end_location = Column(String(200), nullable=False)
     distance_km = Column(Float, nullable=False)
-    status = Column(String(20), default="pending")  # pending, in_transit, completed
+    status = Column(String(20), default="pending", index=True)  # pending, in_transit, completed
     priority = Column(String(10), default="normal")  # low, normal, high, urgent
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
