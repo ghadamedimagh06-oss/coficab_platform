@@ -226,6 +226,18 @@ export async function runStressTest(
   });
 }
 
+export async function copilotAction(
+  text: string,
+  { plan, day, objective }: { plan?: any; day?: string; objective?: string } = {},
+) {
+  return post('/api/copilot/action', {
+    text,
+    plan,
+    day: day || (plan && plan.day),
+    objective: objective || (plan && plan.objective) || 'balanced',
+  });
+}
+
 export async function getControlTower(
   day: string,
   { plan, asOf, delays, objective }:

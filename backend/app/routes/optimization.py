@@ -751,6 +751,112 @@ def _stops_with_truck(plan: Dict[str, Any]):
                 yield t.get("truck_id"), t.get("truck_label"), s
 
 
+def compute_replan(
+    plan: Dict[str, Any],
+    day: _date,
+    disrupted_truck_ids: List[Any],
+    completed_stop_ids: List[Any],
+    objective: str = "balanced",
+    trucks: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Self-healing recovery core: re-optimise the remaining undelivered stops on
+    the remaining fleet and return {day, plan, diff}. Raises ValueError on the
+    two no-op cases so HTTP and copilot callers can present a friendly message.
+    Shared by POST /replan and the agentic copilot's breakdown action (W3.1)."""
+    obj = objective.lower() if objective.lower() in _VALID_OBJECTIVES else "balanced"
+    current = plan or {}
+    disrupted = set(int(x) for x in disrupted_truck_ids)
+    completed = set(str(x) for x in completed_stop_ids)
+
+    # 1) Remaining demand = every assigned stop not yet completed, plus the
+    #    deliveries that were already unassigned in the current plan.
+    old_assignment: Dict[str, str] = {}
+    remaining: List[Dict[str, Any]] = []
+    for truck_id, truck_label, stop in _stops_with_truck(current):
+        sid = str(stop.get("id"))
+        old_assignment[sid] = truck_label
+        if sid in completed:
+            continue
+        remaining.append(dict(stop))
+    for stop in current.get("unassigned", []):
+        old_assignment.setdefault(str(stop.get("id")), "UNASSIGNED")
+        remaining.append(dict(stop))
+
+    if not remaining:
+        raise ValueError("No remaining deliveries to replan.")
+
+    # 2) Remaining fleet = current plan's trucks minus the disrupted ones
+    #    (or an explicit override), so the residual problem uses real vehicles.
+    if trucks is not None:
+        base_fleet = trucks
+    else:
+        base_fleet = [
+            {
+                "truck_id": t.get("truck_id"),
+                "truck_label": t.get("truck_label"),
+                "capacity_positions": t.get("capacity_positions"),
+                "capacity_kg": t.get("capacity_kg"),
+                "capacity_m3": t.get("capacity_m3"),
+            }
+            for t in current.get("trucks", [])
+        ]
+    fleet = [t for t in base_fleet if int(t["truck_id"]) not in disrupted]
+    if not fleet:
+        raise ValueError("No trucks left after the disruption.")
+
+    # 3) Re-solve the residual problem.
+    builder = DailyPlanBuilder(
+        WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True, objective=obj), trucks=fleet,
+    )
+    new_plan = builder.replan(day, remaining)
+
+    # 4) Diff old vs new.
+    new_assignment: Dict[str, str] = {}
+    for _tid, truck_label, stop in _stops_with_truck(new_plan):
+        new_assignment[str(stop.get("id"))] = truck_label
+    new_unassigned_ids = {str(s.get("id")) for s in new_plan.get("unassigned", [])}
+
+    reassignments = []
+    for sid, new_truck in new_assignment.items():
+        old_truck = old_assignment.get(sid)
+        if old_truck and old_truck != new_truck:
+            reassignments.append({"stop_id": sid, "from": old_truck, "to": new_truck})
+
+    newly_unassigned = [
+        {"stop_id": sid, "from": old_assignment.get(sid)}
+        for sid in new_unassigned_ids
+        if old_assignment.get(sid) not in (None, "UNASSIGNED")
+    ]
+    recovered = [
+        {"stop_id": sid, "to": new_assignment.get(sid)}
+        for sid in new_assignment
+        if old_assignment.get(sid) == "UNASSIGNED"
+    ]
+
+    old_cost = (current.get("estimated_cost_tnd") or {}).get("total")
+    new_cost = (new_plan.get("estimated_cost_tnd") or {}).get("total")
+    old_co2 = current.get("estimated_co2_kg")
+    new_co2 = new_plan.get("estimated_co2_kg")
+
+    return {
+        "day": day.isoformat(),
+        "plan": new_plan,
+        "diff": {
+            "disrupted_truck_ids": sorted(disrupted),
+            "completed_count": len(completed),
+            "replanned_stops": len(remaining),
+            "reassignments": reassignments,
+            "reassigned_count": len(reassignments),
+            "newly_unassigned": newly_unassigned,
+            "newly_unassigned_count": len(newly_unassigned),
+            "recovered": recovered,
+            "recovered_count": len(recovered),
+            "cost_delta_tnd": _safe_delta(new_cost, old_cost),
+            "co2_delta_kg": _safe_delta(new_co2, old_co2),
+        },
+    }
+
+
 @daily_router.post("/replan")
 def daily_replan(
     request: DailyReplanRequest,
@@ -765,97 +871,12 @@ def daily_replan(
     """
     try:
         day = _parse_day(request.day)
-        obj = request.objective.lower() if request.objective.lower() in _VALID_OBJECTIVES else "balanced"
-        current = request.plan or {}
-        disrupted = set(int(x) for x in request.disrupted_truck_ids)
-        completed = set(str(x) for x in request.completed_stop_ids)
-
-        # 1) Remaining demand = every assigned stop not yet completed, plus the
-        #    deliveries that were already unassigned in the current plan.
-        old_assignment: Dict[str, str] = {}
-        remaining: List[Dict[str, Any]] = []
-        for truck_id, truck_label, stop in _stops_with_truck(current):
-            sid = str(stop.get("id"))
-            old_assignment[sid] = truck_label
-            if sid in completed:
-                continue
-            remaining.append(dict(stop))
-        for stop in current.get("unassigned", []):
-            old_assignment.setdefault(str(stop.get("id")), "UNASSIGNED")
-            remaining.append(dict(stop))
-
-        if not remaining:
-            raise HTTPException(status_code=400, detail="No remaining deliveries to replan.")
-
-        # 2) Remaining fleet = current plan's trucks minus the disrupted ones
-        #    (or an explicit override), so the residual problem uses real vehicles.
-        if request.trucks is not None:
-            base_fleet = request.trucks
-        else:
-            base_fleet = [
-                {
-                    "truck_id": t.get("truck_id"),
-                    "truck_label": t.get("truck_label"),
-                    "capacity_positions": t.get("capacity_positions"),
-                    "capacity_kg": t.get("capacity_kg"),
-                }
-                for t in current.get("trucks", [])
-            ]
-        fleet = [t for t in base_fleet if int(t["truck_id"]) not in disrupted]
-        if not fleet:
-            raise HTTPException(status_code=400, detail="No trucks left after the disruption.")
-
-        # 3) Re-solve the residual problem.
-        builder = DailyPlanBuilder(
-            WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True, objective=obj), trucks=fleet,
+        return compute_replan(
+            request.plan, day, request.disrupted_truck_ids,
+            request.completed_stop_ids, request.objective, request.trucks,
         )
-        new_plan = builder.replan(day, remaining)
-
-        # 4) Diff old vs new.
-        new_assignment: Dict[str, str] = {}
-        for _tid, truck_label, stop in _stops_with_truck(new_plan):
-            new_assignment[str(stop.get("id"))] = truck_label
-        new_unassigned_ids = {str(s.get("id")) for s in new_plan.get("unassigned", [])}
-
-        reassignments = []
-        for sid, new_truck in new_assignment.items():
-            old_truck = old_assignment.get(sid)
-            if old_truck and old_truck != new_truck:
-                reassignments.append({"stop_id": sid, "from": old_truck, "to": new_truck})
-
-        newly_unassigned = [
-            {"stop_id": sid, "from": old_assignment.get(sid)}
-            for sid in new_unassigned_ids
-            if old_assignment.get(sid) not in (None, "UNASSIGNED")
-        ]
-        recovered = [
-            {"stop_id": sid, "to": new_assignment.get(sid)}
-            for sid in new_assignment
-            if old_assignment.get(sid) == "UNASSIGNED"
-        ]
-
-        old_cost = (current.get("estimated_cost_tnd") or {}).get("total")
-        new_cost = (new_plan.get("estimated_cost_tnd") or {}).get("total")
-        old_co2 = current.get("estimated_co2_kg")
-        new_co2 = new_plan.get("estimated_co2_kg")
-
-        return {
-            "day": day.isoformat(),
-            "plan": new_plan,
-            "diff": {
-                "disrupted_truck_ids": sorted(disrupted),
-                "completed_count": len(completed),
-                "replanned_stops": len(remaining),
-                "reassignments": reassignments,
-                "reassigned_count": len(reassignments),
-                "newly_unassigned": newly_unassigned,
-                "newly_unassigned_count": len(newly_unassigned),
-                "recovered": recovered,
-                "recovered_count": len(recovered),
-                "cost_delta_tnd": _safe_delta(new_cost, old_cost),
-                "co2_delta_kg": _safe_delta(new_co2, old_co2),
-            },
-        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

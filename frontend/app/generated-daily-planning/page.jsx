@@ -18,6 +18,7 @@ import ConfidencePanel from '../../components/planning/ConfidencePanel';
 import DisruptionPanel from '../../components/planning/DisruptionPanel';
 import ExplainPanel from '../../components/planning/ExplainPanel';
 import ControlTowerPanel from '../../components/planning/ControlTowerPanel';
+import CopilotActionBar from '../../components/planning/CopilotActionBar';
 
 // Leaflet touches `window` at import time, so load the map client-side only.
 const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
@@ -760,6 +761,14 @@ export default function GeneratedDailyPlanningPage() {
         )}
 
         {plan && <ControlTowerPanel plan={plan} day={day} />}
+
+        {plan && (
+          <CopilotActionBar
+            plan={plan}
+            day={day}
+            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
+          />
+        )}
 
         {plan && (
           <SustainabilityPanel
