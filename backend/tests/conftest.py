@@ -7,6 +7,8 @@ import os
 
 os.environ.setdefault("WATCHER_ENABLED", "0")
 os.environ.setdefault("SCHEDULER_ENABLED", "0")
+# Keep the rate limiter out of the way of the suite (many rapid TestClient calls).
+os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
 
 # Configuration de la base de données de test
 SQLALCHEMY_DATABASE_URL = "sqlite://"

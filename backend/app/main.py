@@ -30,6 +30,7 @@ from app.routes import (
 from app.database import engine, Base
 from app.agents.scheduler import start_scheduler
 from app.services.excel_watcher import ExcelWatcherService
+from app.rate_limit import install_rate_limiting
 import app.models
 
 _default_watch = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "weekly planning")
@@ -105,6 +106,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Per-IP rate limiting (tighter budget for solver/LLM endpoints). Env-gated;
+# disabled in the test suite. See app/rate_limit.py.
+install_rate_limiting(app)
 
 # Include routers
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])

@@ -144,6 +144,12 @@ async def create_manual_demande(
     }
 
 
+# Upload hardening (W4.6): cap size and verify the file is really an .xlsx
+# (an Office Open XML workbook is a ZIP container, so it starts with "PK\x03\x04").
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
+_XLSX_MAGIC = b"PK\x03\x04"
+
+
 @router.post("/upload")
 async def upload_planning_file(
     file: UploadFile = File(...),
@@ -152,12 +158,43 @@ async def upload_planning_file(
 ):
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
+    # Reject the wrong content type early when the client declares one.
+    if file.content_type and file.content_type not in (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/octet-stream",
+        "application/zip",
+    ):
+        raise HTTPException(status_code=400, detail=f"Unexpected content type: {file.content_type}")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename).name
     target = UPLOAD_DIR / safe_name
-    with target.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+
+    # Stream to disk in chunks, enforcing the size cap as we go (so an oversized
+    # upload can't fill the disk) and validating the ZIP/xlsx magic on the first
+    # bytes (so a renamed .exe/.csv is rejected, not parsed).
+    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+    written = 0
+    first = True
+    try:
+        with target.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                if first:
+                    if not chunk.startswith(_XLSX_MAGIC):
+                        raise HTTPException(status_code=400, detail="File is not a valid .xlsx workbook")
+                    first = False
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_MB} MB limit")
+                out.write(chunk)
+        if written == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    except HTTPException:
+        target.unlink(missing_ok=True)  # don't leave a partial/invalid file behind
+        raise
 
     result = IngestionService(db).ingest_excel(target, ARCHIVE_DIR)
     status = "success" if result.inserted and not result.skipped else (

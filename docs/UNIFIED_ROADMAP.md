@@ -69,9 +69,9 @@
 - [ ] **W4.1 — DB indexes** on real FK/filter columns (verify names first). **(S)**
 - [ ] **W4.2 — Structured logging + `/metrics`.** **(M)**
 - [ ] **W4.3 — Optimizer golden/regression tests.** **(M)**
-- [ ] **W4.4 — Rate limiting** on copilot + planning. **(S)**
+- [x] **W4.4 — Rate limiting.** ✅ DONE & tested. Dependency-free per-IP fixed-window limiter (`app/rate_limit.py`) installed as middleware; tighter budget for solver/LLM endpoints (`/pareto`,`/stress-test`,`/confidence`,`/replan`,`/generate`,`/dashboard`,`/copilot/chat`). Env-gated (`RATE_LIMIT_ENABLED/DEFAULT/HEAVY/WINDOW`), disabled in tests. `tests/test_rate_limit.py` (3 tests).
 - [ ] **W4.5 — TypeScript strict mode** (only after fixing every surfaced error). **(M)**
-- [ ] **W4.6 — File-upload validation** (size/ext/MIME) on ingestion. **(S)**
+- [x] **W4.6 — File-upload validation.** ✅ DONE & tested. `/api/ingestion/upload` now enforces extension + declared content-type, a configurable size cap (`MAX_UPLOAD_MB`, default 25) via chunked streaming, and ZIP/xlsx magic-byte verification (rejects a renamed .exe/.csv); cleans up partial files. `tests/test_upload_validation.py` (4 tests).
 - [ ] **W4.7 — Login rate-limit / lockout.** **(M)**
 
 ---
