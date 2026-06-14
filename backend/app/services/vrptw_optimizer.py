@@ -1,11 +1,27 @@
 """
 VRPTW Optimizer — Vehicle Routing Problem with Time Windows
 
-Two optimizer classes:
-  VrptwOptimizer  — DB-aware, reads Camion/Chauffeur/DemandeLocal, materializes PlanVersion
-  VRPTWOptimizer  — dict-based, used by /api/optimization/planning/generate (legacy UI)
+⚠️  CANONICAL OPTIMIZER: for the generated-daily-planning workflow (workbook →
+    truck-by-time plan), the authoritative engine is
+    ``app.services.daily_plan_builder.DailyPlanBuilder`` (global multi-vehicle
+    VRPTW: capacity + kg + volume + time dimensions, multi-trip, drop penalties,
+    objective modes). New planning code should go through DailyPlanBuilder.
 
-Both use geographic K-means zone clustering so that:
+This module keeps two LEGACY optimizer classes, each still load-bearing for a
+specific non-workbook path (do not delete; they are NOT interchangeable with the
+canonical builder):
+  VrptwOptimizer  — DB-aware: reads Camion/Chauffeur/DemandeLocal and MATERIALIZES
+                    a PlanVersion. Backs POST /api/optimization/run and the
+                    optimizer agent. (DB write path, no workbook.)
+  VRPTWOptimizer  — dict-based: backs POST /api/optimization/planning/generate
+                    (legacy UI) and the dashboard's Load-Efficiency KPI
+                    (_vrptw_load_efficiency), which deliberately re-packs the
+                    day into fuller routes to report ~85% utilisation.
+
+(The former ``vrptw_complete_optimizer.VRPTWCompleteOptimizer`` was a redundant
+passthrough wrapper around VRPTWOptimizer and has been removed.)
+
+Both legacy classes use geographic K-means zone clustering so that:
   1. Each route covers a spatially compact area (dense, tight zones).
   2. No road segment is traversed by more than one truck — zone isolation
      guarantees that every arc (i→j) belongs to exactly one zone's route.
@@ -288,6 +304,12 @@ class OptimizerConfig:
 class VrptwOptimizer:
     """
     DB-aware VRPTW optimizer.
+
+    LEGACY / SPECIAL-PURPOSE: this is the DB materialisation path (it writes a
+    PlanVersion), kept for POST /api/optimization/run and the optimizer agent.
+    For the workbook-driven generated-daily-planning workflow use the canonical
+    ``app.services.daily_plan_builder.DailyPlanBuilder`` instead — it has the
+    richer model (volume dimension, multi-trip, objective modes, drop penalties).
 
     Algorithm
     ---------
@@ -671,6 +693,12 @@ class VrptwOptimizer:
 class VRPTWOptimizer:
     """
     Dict-based VRPTW optimizer used by /api/optimization/planning/generate.
+
+    LEGACY / SPECIAL-PURPOSE: kept for the legacy generate endpoint and the
+    dashboard's Load-Efficiency KPI (``_vrptw_load_efficiency``), which
+    deliberately re-packs the day into fuller routes (~85% utilisation). For the
+    generated-daily-planning workflow use the canonical
+    ``app.services.daily_plan_builder.DailyPlanBuilder`` instead.
 
     Enhanced with geographic zone clustering:
     - Deliveries are pre-partitioned into spatially compact zones (one per truck).
