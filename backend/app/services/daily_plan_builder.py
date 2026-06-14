@@ -122,6 +122,13 @@ class DailyPlanConfig:
     #                       (more trucks, more km/CO₂), makespan weight boosted.
     objective: str = "balanced"
 
+    # Coverage-first portfolio: when True (default), build() never abandons a
+    # serviceable customer — green/cost always solve a small makespan portfolio
+    # (and additionally minimise CO₂), while balanced/fast escalate to it only if
+    # their single solve dropped a serviceable delivery. Set False for bulk/
+    # latency-sensitive callers that accept a single solve (e.g. heavy batch jobs).
+    coverage_portfolio: bool = True
+
     # --- Scenario / stress-test knob -------------------------------------
     # Scales every delivery's demanded positions and kg by this factor when the
     # plan is built. 1.0 = the workbook as-is; 1.3 = "what if volume is +30%?".
@@ -184,9 +191,115 @@ class DailyPlanBuilder:
         self.geo = geo or GeoService()
         self.truck_templates = DEFAULT_TRUCKS if trucks is None else trucks
         self.cost_config = cost_config or CostConfig()
+        # Set transiently by the green CO₂ portfolio to override the makespan
+        # coefficient for a single solve (see _build_min_co2).
+        self._makespan_override: Optional[int] = None
+
+    # Makespan coefficients tried by the coverage-first portfolio. They span the
+    # frontier from pure consolidation (0) to full parallelism (12, = "fast"), so
+    # the portfolio's coverage-first pick is never worse than any single operating
+    # point — guaranteeing we never abandon a serviceable customer that some
+    # setting could serve, and (for green) that CO₂ is genuinely minimised.
+    _PORTFOLIO_COEFS = (0, 6, 12)
+
+    # Substrings of unassigned reasons that are HARD / non-recoverable: re-solving
+    # at a different makespan can never place these (foreign site, ungeocodable,
+    # or larger than the biggest truck on some dimension). Any OTHER drop reason
+    # (no feasible vehicle/time slot, working hours, time window, depart cut-off)
+    # is a SERVICEABLE delivery the solver merely failed to fit — exactly what the
+    # coverage-first portfolio exists to recover.
+    _HARD_DROP_MARKERS = ("export", "could not locate", "exceeds the largest truck", "cubes out", "no available trucks")
 
     # ------------------------------------------------------------------ build
     def build(self, day: date, source_file: Optional[str] = None) -> dict[str, Any]:
+        """Build the day's plan, never abandoning a serviceable customer.
+
+        green/cost always run the coverage-first portfolio (they additionally want
+        minimum CO₂). Other objectives do a single fast solve and only escalate to
+        the portfolio if that solve dropped a SERVICEABLE delivery — so the common
+        case stays one solve, and we only pay for extra solves when there is an
+        actual coverage problem to fix. Disable entirely with
+        DailyPlanConfig(coverage_portfolio=False)."""
+        if not getattr(self.cfg, "coverage_portfolio", True):
+            return self._build_once(day, source_file)
+        if self._is_distance_objective():
+            return self._build_portfolio(day, source_file)
+        plan = self._build_once(day, source_file)
+        if self._recoverable_drops(plan):
+            return self._build_portfolio(day, source_file, seed=plan)
+        return plan
+
+    def _recoverable_drops(self, plan: dict[str, Any]) -> int:
+        """Count unassigned drops that a different makespan MIGHT recover — i.e.
+        serviceable deliveries the solver merely failed to fit (not the hard
+        export/ungeocodable/oversize ones)."""
+        n = 0
+        for u in plan.get("unassigned", []):
+            reason = str(u.get("unassigned_reason") or "").lower()
+            if not any(marker in reason for marker in self._HARD_DROP_MARKERS):
+                n += 1
+        return n
+
+    def _secondary_metric(self, plan: dict[str, Any]) -> float:
+        """The metric minimised AMONG equally-covering plans, per objective:
+        green/cost → CO₂; fast → day finish time; balanced/other → TND cost."""
+        obj = str(self.cfg.objective or "balanced").lower()
+        if obj in ("green", "cost"):
+            return float(plan.get("estimated_co2_kg") or 0.0)
+        if obj == "fast":
+            return float(self._plan_finish_minutes(plan))
+        return float((plan.get("estimated_cost_tnd") or {}).get("total") or 0.0)
+
+    @staticmethod
+    def _plan_finish_minutes(plan: dict[str, Any]) -> int:
+        """Latest truck return across the plan, in minutes (0 if idle)."""
+        latest = 0
+        for t in plan.get("trucks", []):
+            for trip in t.get("trips", []):
+                try:
+                    hh, mm = str(trip.get("return_at")).split(":")[:2]
+                    latest = max(latest, int(hh) * 60 + int(mm))
+                except (ValueError, AttributeError):
+                    continue
+        return latest
+
+    def _build_portfolio(
+        self, day: date, source_file: Optional[str] = None, seed: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
+        """Solve a portfolio of makespan settings and keep the plan that serves
+        the MOST customers (coverage is lexicographically first), then the best
+        objective-appropriate secondary metric. `seed` (an already-built plan) is
+        included as a candidate so the portfolio never returns a worse result than
+        the natural solve. Per-solve time is capped so the extra solves stay cheap."""
+        label = str(self.cfg.objective or "balanced").lower()
+        candidates: list[dict[str, Any]] = []
+        if seed is not None:
+            candidates.append(seed)
+
+        prev_seconds = self.cfg.global_solver_seconds
+        self.cfg.global_solver_seconds = min(prev_seconds, 4)  # cap per-solve cost
+        try:
+            for coef in self._PORTFOLIO_COEFS:
+                self._makespan_override = coef
+                try:
+                    candidates.append(self._build_once(day, source_file))
+                finally:
+                    self._makespan_override = None
+        finally:
+            self.cfg.global_solver_seconds = prev_seconds
+
+        # Maximise coverage (fewest unassigned), then minimise the secondary.
+        best = min(
+            candidates,
+            key=lambda p: (len(p.get("unassigned", [])), self._secondary_metric(p)),
+        )
+        # Present it under the requested objective label, whichever coef won.
+        best["objective"] = label
+        if isinstance(best.get("sustainability"), dict):
+            best["sustainability"]["objective"] = label
+        return best
+
+    def _build_once(self, day: date, source_file: Optional[str] = None) -> dict[str, Any]:
         source_path = self._resolve_source_file(source_file)
         plan_data = PlanningService(db=None).parse_weekly_planning(str(source_path))
         rows, selection = self._filter_rows(plan_data["rows"], day)
@@ -454,7 +567,19 @@ class DailyPlanBuilder:
                 service = 0 if i == 0 else self._service_minutes(servable[i - 1])
                 return int(round(dur[i][j])) + service
             tcb = routing.RegisterTransitCallback(transit)
-            routing.SetArcCostEvaluatorOfAllVehicles(tcb)
+
+            # The cost the solver MINIMISES is pure travel distance (time),
+            # EXCLUDING on-site service time. Service time belongs in the Time
+            # dimension (scheduling), not in the objective — folding it in
+            # penalises the solver per stop served, which pulls the objective away
+            # from true distance/CO₂ minimisation. Time still uses `tcb`
+            # (travel+service) below so arrival times stay correct. (W2.1)
+            def travel_only(from_idx, to_idx):
+                i = manager.IndexToNode(from_idx)
+                j = manager.IndexToNode(to_idx)
+                return int(round(dur[i][j]))
+            dcb = routing.RegisterTransitCallback(travel_only)
+            routing.SetArcCostEvaluatorOfAllVehicles(dcb)
 
             # Fixed cost per dispatched trip, escalating with the trip index:
             # a truck's first trip costs ``trip_dispatch_cost`` (the soft "fill
@@ -748,9 +873,20 @@ class DailyPlanBuilder:
     _MAKESPAN_PRESETS = {"green": 0, "cost": 0, "balanced": None, "fast": 12}
 
     def _makespan_coef(self) -> int:
+        # A green-portfolio solve overrides the makespan coefficient directly.
+        override = getattr(self, "_makespan_override", None)
+        if override is not None:
+            return max(0, int(override))
         preset = self._MAKESPAN_PRESETS.get(str(self.cfg.objective or "balanced").lower(), None)
         coef = self.cfg.makespan_cost_coef if preset is None else preset
         return max(0, int(coef))
+
+    def _is_distance_objective(self) -> bool:
+        """green/cost = minimise driven distance & CO₂ (the environmental point on
+        the frontier), as opposed to balanced/fast which trade distance for an
+        earlier finish. These objectives use the coverage-first CO₂ portfolio in
+        ``build`` rather than a single fixed-makespan solve."""
+        return str(self.cfg.objective or "balanced").lower() in ("green", "cost")
 
     def _plan_travel_km(self, trucks) -> float:
         """Total driven kilometres across every dispatched trip in a plan.
