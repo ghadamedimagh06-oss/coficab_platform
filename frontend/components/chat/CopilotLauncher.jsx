@@ -21,10 +21,10 @@ export default function CopilotLauncher() {
           type="button"
           onClick={() => setOpen(true)}
           className="fixed bottom-6 right-6 z-50 inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-[#7c3aed] to-[#5b21b6] px-5 py-3 text-sm font-semibold text-white shadow-xl shadow-black/20 transition hover:scale-105"
-          aria-label="Open Dispatch Copilot"
+          aria-label="Open Optiroute"
         >
           <MessageSquare size={18} />
-          Copilot
+          Optiroute
         </button>
       )}
 
@@ -42,13 +42,13 @@ export default function CopilotLauncher() {
                 type="button"
                 onClick={() => setOpen(false)}
                 className="grid h-9 w-9 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-sm"
-                aria-label="Close Copilot"
+                aria-label="Close Optiroute"
               >
                 <X size={18} />
               </button>
             </div>
             <div className="min-h-0 flex-1">
-              <ChatPanel title="Dispatch Copilot" context={{ page: "global" }} fill />
+              <ChatPanel title="Optiroute" context={{ page: "global" }} fill />
             </div>
           </div>
         </>

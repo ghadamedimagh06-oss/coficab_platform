@@ -7,7 +7,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { Warehouse } from 'lucide-react';
+import { Warehouse, AlertTriangle, GripVertical } from 'lucide-react';
 import TimeAxis from './TimeAxis';
 import TruckLane from './TruckLane';
 import { WORK_START, WORK_END, SNAP_MINUTES, toMinutes } from './timeline';
@@ -46,6 +46,37 @@ function MarkerTool() {
     >
       <span className="h-4 w-2.5 rounded-sm border border-red-300 bg-[repeating-linear-gradient(135deg,#ef4444_0,#ef4444_3px,#fee2e2_3px,#fee2e2_6px)]" />
       Drag a blocking marker
+    </button>
+  );
+}
+
+// A draggable chip for an unassigned delivery. Dropping it onto a truck lane
+// reuses the same onDropDelivery path as moving an already-placed delivery.
+function UnassignedChip({ delivery }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `unassigned-${delivery.id}`,
+    data: { deliveryId: delivery.id },
+  });
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    opacity: isDragging ? 0.85 : undefined,
+    zIndex: isDragging ? 50 : undefined,
+  } : undefined;
+  const positions = delivery.quantity_positions ?? delivery.position_count ?? 0;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      title={delivery.constraints?.comment_constraint || `Drag ${delivery.client} onto a truck lane`}
+      className="inline-flex cursor-grab items-center gap-2 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 shadow-sm transition hover:bg-red-50 active:cursor-grabbing"
+      style={{ touchAction: 'none', ...style }}
+    >
+      <GripVertical size={13} className="text-red-400" />
+      <span className="max-w-[12rem] truncate">{delivery.client}</span>
+      <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">{positions} pos</span>
     </button>
   );
 }
@@ -141,6 +172,19 @@ export default function GanttBoard({
           </div>
           <MarkerTool />
         </div>
+
+        {/* Unassigned tray — drag a chip onto any truck lane to assign it. */}
+        {(plan?.unassigned || []).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#ece8e1] bg-red-50/70 px-5 py-3">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-red-600">
+              <AlertTriangle size={13} />
+              {plan.unassigned.length} unassigned — drag onto a truck
+            </span>
+            {plan.unassigned.map((delivery) => (
+              <UnassignedChip key={delivery.id} delivery={delivery} />
+            ))}
+          </div>
+        )}
 
         {/* Scrollable board */}
         <div className="overflow-x-auto">

@@ -37,7 +37,7 @@ async def copilot_chat(req: ChatRequest, request: Request):
             status_code=503,
             content={
                 "detail": (
-                    "Copilot is not configured. Set ANTHROPIC_API_KEY in the backend "
+                    "Optiroute is not configured. Set GROQ_API_KEY in the backend "
                     "environment to enable the assistant."
                 )
             },

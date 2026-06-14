@@ -140,7 +140,7 @@ export default function MapPage() {
 
             <ChatPanel
               messages={messages}
-              title="Map Copilot"
+              title="Map Optiroute"
               context={{ page: 'map', day, status, selectedTruckId, plan }}
             />
           </motion.aside>

@@ -339,7 +339,7 @@ export default function ClientsPage() {
             <div className="mt-4">
               <ChatPanel
                 messages={chatMessages}
-                title="Clients Copilot"
+                title="Clients Optiroute"
                 context={{ page: 'clients', clientCount: clients.length, clients, selectedClient }}
               />
             </div>

@@ -124,6 +124,12 @@ function findDelivery(plan, deliveryId) {
       }
     }
   }
+  // Also look among the unassigned deliveries (no source truck).
+  for (const stop of plan?.unassigned || []) {
+    if (String(stop.id) === String(deliveryId)) {
+      return { delivery: stop, truck: null };
+    }
+  }
   return { delivery: null, truck: null };
 }
 
@@ -281,9 +287,9 @@ export default function GeneratedDailyPlanningPage() {
       const clamped = clampMinute(targetMinute, WORK_START, WORK_END - duration);
       setPendingAction({
         action: 'Move',
-        description: `Move "${d?.client}" from ${sourceTruck?.truck_label || '?'} to ${targetTruck?.truck_label || '?'}`,
+        description: `Move "${d?.client}" from ${sourceTruck?.truck_label || 'Unassigned'} to ${targetTruck?.truck_label || '?'}`,
         client: d?.client || '?',
-        truckFrom: sourceTruck?.truck_label || '?',
+        truckFrom: sourceTruck?.truck_label || 'Unassigned',
         truckTo: targetTruck?.truck_label || '?',
         timeFrom: `${d?.etd || '?'}–${d?.eta || '?'}`,
         timeTo: `${toClock(clamped)}–${toClock(clamped + duration)}`,
@@ -313,6 +319,14 @@ export default function GeneratedDailyPlanningPage() {
           return { ...trip, stops: remaining };
         }).filter((trip) => trip.stops.length > 0),
       })),
+      // The delivery may instead be coming from the unassigned tray.
+      unassigned: (plan.unassigned || []).filter((stop) => {
+        if (String(stop.id) === String(deliveryId)) {
+          moved = stop;
+          return false;
+        }
+        return true;
+      }),
     };
     if (!moved) return;
 
@@ -663,31 +677,9 @@ export default function GeneratedDailyPlanningPage() {
           ))}
         </motion.div>
 
-        {(plan?.unassigned || []).length > 0 && (
-          <div className="rounded-[1.75rem] border border-red-200 bg-red-50 p-5">
-            <div className="mb-3 flex items-center gap-2 text-red-700">
-              <AlertTriangle size={16} />
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em]">Needs dispatcher review</h2>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {plan.unassigned.map((delivery) => (
-                <div key={delivery.id} className="rounded-2xl border border-red-200 bg-white p-4">
-                  <p className="font-semibold text-ink">{delivery.client}</p>
-                  <p className="mt-1 text-xs text-muted">
-                    {formatNumber(delivery.quantity_positions || delivery.position_count)} positions
-                    {delivery.quantity_kg ? ` - ${formatNumber(delivery.quantity_kg)} kg` : ''}
-                  </p>
-                  {delivery.constraints?.comment_constraint && (
-                    <p className="mt-2 inline-flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800 ring-1 ring-amber-200">
-                      <span className="font-semibold uppercase tracking-wide">Note</span>
-                      <span className="font-medium">{delivery.constraints.comment_constraint}</span>
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Unassigned deliveries are now shown as a draggable tray inside the
+            Truck timeline (GanttBoard) so they can be dropped straight onto a
+            truck lane. */}
 
         {/* ── Verify / Lock ── centered above the Gantt board ── */}
         {plan && (

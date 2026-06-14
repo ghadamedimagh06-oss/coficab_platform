@@ -96,7 +96,7 @@ export async function streamCopilotChat(
 
   if (!response.ok || !response.body) {
     const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || `Copilot request failed (${response.status})`);
+    throw new Error(data?.detail || `Optiroute request failed (${response.status})`);
   }
 
   const reader = response.body.getReader();

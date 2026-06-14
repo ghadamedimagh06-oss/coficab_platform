@@ -14,7 +14,7 @@ import { getCopilotStatus, streamCopilotChat } from "../../app/services/api";
  *     Claude answers grounded in real data.
  *   - title: heading label.
  */
-export default function ChatPanel({ messages = [], context = null, title = "Dispatch Copilot", fill = false }) {
+export default function ChatPanel({ messages = [], context = null, title = "Optiroute", fill = false }) {
   const activity = Array.isArray(messages) ? messages.filter((m) => typeof m === "string") : [];
   const [configured, setConfigured] = useState(null); // null = unknown
   const [conversation, setConversation] = useState([]); // {role, content}
@@ -66,7 +66,7 @@ export default function ChatPanel({ messages = [], context = null, title = "Disp
         },
       });
     } catch (err) {
-      setError(err?.message || "Copilot request failed.");
+      setError(err?.message || "Optiroute request failed.");
       setConversation((prev) => prev.slice(0, -1)); // drop the empty assistant bubble
     } finally {
       setBusy(false);
@@ -91,7 +91,7 @@ export default function ChatPanel({ messages = [], context = null, title = "Disp
             <Sparkles size={18} />
           </span>
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">Copilot</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-[var(--muted)]">Assistant</p>
             <h2 className="text-lg font-semibold text-[var(--text)]">{title}</h2>
           </div>
         </div>
@@ -164,8 +164,8 @@ export default function ChatPanel({ messages = [], context = null, title = "Disp
           disabled={configured === false || busy}
           placeholder={
             configured === false
-              ? "Set ANTHROPIC_API_KEY to enable the copilot"
-              : "Ask the dispatch copilot…"
+              ? "Set GROQ_API_KEY to enable Optiroute"
+              : "Ask Optiroute…"
           }
           className="flex-1 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm text-[var(--text)] outline-none focus:border-[#7c3aed] disabled:opacity-60"
         />

@@ -63,7 +63,7 @@ export default function AnalyticsPage() {
 
         <ChatPanel
           messages={chatMessages}
-          title="Analytics Copilot"
+          title="Analytics Optiroute"
           context={{ page: 'analytics', metrics, transportCount: transports.length }}
         />
       </aside>

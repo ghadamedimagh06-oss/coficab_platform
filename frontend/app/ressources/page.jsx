@@ -419,7 +419,7 @@ export default function RessourcesPage() {
             </div>
             <ChatPanel
               messages={chatMessages}
-              title="Resources Copilot"
+              title="Resources Optiroute"
               context={{ page: 'resources', driverSummary, truckSummary, drivers, trucks }}
             />
           </motion.div>

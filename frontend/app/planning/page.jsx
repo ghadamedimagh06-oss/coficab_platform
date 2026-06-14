@@ -260,7 +260,7 @@ export default function PlanningPage() {
         </div>
         <ChatPanel
           messages={chatMessages}
-          title="Planning Copilot"
+          title="Planning Optiroute"
           context={{
             page: 'planning',
             activeDay,

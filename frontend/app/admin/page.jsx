@@ -97,7 +97,7 @@ export default function AdminPage() {
 
         <ChatPanel
           messages={chatMessages}
-          title="Admin Copilot"
+          title="Admin Optiroute"
           context={{ page: 'admin', filePath, actionResult }}
         />
       </aside>
