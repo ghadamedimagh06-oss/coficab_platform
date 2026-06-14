@@ -226,6 +226,20 @@ export async function runStressTest(
   });
 }
 
+export async function getControlTower(
+  day: string,
+  { plan, asOf, delays, objective }:
+    { plan?: any; asOf?: string; delays?: any; objective?: string } = {},
+) {
+  return post('/api/planning/daily/control-tower', {
+    day,
+    plan,
+    as_of: asOf,
+    delays: delays || [],
+    objective: objective || 'balanced',
+  });
+}
+
 export async function exportDailyPlan(payload: any) {
   const result = await post('/api/planning/daily/export', payload);
   return {

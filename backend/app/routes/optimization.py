@@ -107,6 +107,22 @@ class DailyConfidenceRequest(BaseModel):
     seed: int = 42
 
 
+class DailyControlTowerRequest(BaseModel):
+    day: str
+    source_file: Optional[str] = None
+    trucks: Optional[List[Dict[str, Any]]] = None
+    objective: str = "balanced"
+    # Pass an already-built (possibly hand-edited) plan to track it directly;
+    # otherwise the server builds the plan for `day` first.
+    plan: Optional[Dict[str, Any]] = None
+    # Wall-clock to snapshot at, "HH:MM". Omitted → mid-point of the working day.
+    as_of: Optional[str] = None
+    # Inject per-truck minutes-behind: [{"truck_id": 3, "delay_min": 45}] or
+    # {"3": 45}. Shifts that truck's whole timeline and surfaces any stop whose
+    # projected arrival then misses its hard delivery window.
+    delays: Any = None
+
+
 class WeightsPayload(BaseModel):
     alpha: float = 1.0
     beta: float = 2.0
@@ -1018,6 +1034,37 @@ def daily_confidence(
             seed=int(request.seed or 42),
         )
         return {"day": request.day, "confidence": report}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@daily_router.post("/control-tower")
+def daily_control_tower(
+    request: DailyControlTowerRequest,
+    db: Optional[Session] = Depends(get_db_optional),
+    _user: dict = Depends(require_auth),
+):
+    """Live control tower: interpolate every truck's current position along its
+    planned route at a wall-clock time, classify its live state, and raise
+    predicted-late / geofence alerts for stops that miss their delivery window
+    (optionally after an injected per-truck delay). Derived purely from the plan
+    — no external GPS feed — so it is deterministic and demoable."""
+    from app.services.control_tower import live_snapshot, _to_min
+
+    try:
+        plan = request.plan
+        if plan is None:
+            day = _parse_day(request.day)
+            obj = request.objective.lower() if request.objective.lower() in _VALID_OBJECTIVES else "balanced"
+            trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+            builder = DailyPlanBuilder(
+                WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True, objective=obj), trucks=trucks,
+            )
+            plan = builder.build(day=day, source_file=request.source_file)
+
+        now_min = _to_min(request.as_of) if request.as_of else None
+        snapshot = live_snapshot(plan, now_min=now_min, delays=request.delays)
+        return {"day": request.day, "control_tower": snapshot}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

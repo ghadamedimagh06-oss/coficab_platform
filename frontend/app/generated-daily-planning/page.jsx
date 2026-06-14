@@ -17,6 +17,7 @@ import StressTestPanel from '../../components/planning/StressTestPanel';
 import ConfidencePanel from '../../components/planning/ConfidencePanel';
 import DisruptionPanel from '../../components/planning/DisruptionPanel';
 import ExplainPanel from '../../components/planning/ExplainPanel';
+import ControlTowerPanel from '../../components/planning/ControlTowerPanel';
 
 // Leaflet touches `window` at import time, so load the map client-side only.
 const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
@@ -757,6 +758,8 @@ export default function GeneratedDailyPlanningPage() {
             onSelectTruck={setSelectedTruckId}
           />
         )}
+
+        {plan && <ControlTowerPanel plan={plan} day={day} />}
 
         {plan && (
           <SustainabilityPanel
