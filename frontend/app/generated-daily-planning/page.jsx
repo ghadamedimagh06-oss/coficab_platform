@@ -12,6 +12,11 @@ import GanttBoard from '../../components/planning/GanttBoard';
 import JustificationModal from '../../components/planning/JustificationModal';
 import PlanChangeLog from '../../components/planning/PlanChangeLog';
 import PlanTable from '../../components/planning/PlanTable';
+import SustainabilityPanel from '../../components/planning/SustainabilityPanel';
+import StressTestPanel from '../../components/planning/StressTestPanel';
+import ConfidencePanel from '../../components/planning/ConfidencePanel';
+import DisruptionPanel from '../../components/planning/DisruptionPanel';
+import ExplainPanel from '../../components/planning/ExplainPanel';
 
 // Leaflet touches `window` at import time, so load the map client-side only.
 const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
@@ -751,6 +756,33 @@ export default function GeneratedDailyPlanningPage() {
             selectedTruckId={selectedTruckId}
             onSelectTruck={setSelectedTruckId}
           />
+        )}
+
+        {plan && (
+          <SustainabilityPanel
+            plan={plan}
+            day={day}
+            activeTrucks={activeTrucks}
+            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
+          />
+        )}
+
+        {plan && (
+          <DisruptionPanel
+            plan={plan}
+            day={day}
+            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
+          />
+        )}
+
+        {plan && (
+          <ConfidencePanel plan={plan} day={day} objective={plan.objective} />
+        )}
+
+        {plan && <ExplainPanel plan={plan} />}
+
+        {plan && (
+          <StressTestPanel day={day} activeTrucks={activeTrucks} objective={plan.objective} />
         )}
 
         {plan && (

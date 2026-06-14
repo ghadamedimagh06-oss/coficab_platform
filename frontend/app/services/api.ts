@@ -108,6 +108,10 @@ export async function streamCopilotChat(
   }
 }
 
+export async function getSourceStatus() {
+  return get('/api/data/source-status');
+}
+
 export async function getLiveTracking() {
   return get('/api/tracking/live');
 }
@@ -164,6 +168,61 @@ export async function generateDailyPlan(day: string, sourceFile?: string, trucks
     day,
     source_file: sourceFile,
     trucks,
+  });
+}
+
+export async function getDailyPareto(day: string, objectives?: string[], trucks?: any[]) {
+  return post('/api/planning/daily/pareto', {
+    day,
+    objectives: objectives && objectives.length ? objectives : ['green', 'balanced', 'fast'],
+    trucks,
+  });
+}
+
+export async function getEsgReport(day: string, objective: string = 'balanced') {
+  return get(`/api/planning/daily/esg-report?day=${encodeURIComponent(day)}&objective=${encodeURIComponent(objective)}`);
+}
+
+export async function explainTruck(plan: any, truckId: number | string) {
+  return post('/api/planning/daily/explain', { plan, truck_id: truckId });
+}
+
+export async function replanPlan(
+  day: string,
+  { plan, disruptedTruckIds, completedStopIds, objective }:
+    { plan: any; disruptedTruckIds?: (number | string)[]; completedStopIds?: any[]; objective?: string },
+) {
+  return post('/api/planning/daily/replan', {
+    day,
+    plan,
+    disrupted_truck_ids: disruptedTruckIds || [],
+    completed_stop_ids: completedStopIds || [],
+    objective: objective || 'balanced',
+  });
+}
+
+export async function getPlanConfidence(
+  day: string,
+  { plan, trucks, objective, runs }: { plan?: any; trucks?: any[]; objective?: string; runs?: number } = {},
+) {
+  return post('/api/planning/daily/confidence', {
+    day,
+    plan,
+    trucks,
+    objective: objective || 'balanced',
+    runs: runs || 500,
+  });
+}
+
+export async function runStressTest(
+  day: string,
+  { trucks, objective, scenarios }: { trucks?: any[]; objective?: string; scenarios?: any[] } = {},
+) {
+  return post('/api/planning/daily/stress-test', {
+    day,
+    trucks,
+    objective: objective || 'balanced',
+    scenarios: scenarios || [],
   });
 }
 

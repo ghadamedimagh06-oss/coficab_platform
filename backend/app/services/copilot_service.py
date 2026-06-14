@@ -98,11 +98,19 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "get_kpis",
             "description": (
-                "Get the current operational KPI cards (on-time delivery, fleet "
-                "utilization, cost, distance, etc.) as shown on the dashboard. Use "
-                "for questions about overall performance metrics."
+                "Get the live operational KPIs exactly as shown on the dashboard, "
+                "computed from the daily plan: OTIF, OTD, Load Efficiency, Fuel/Tonnage, "
+                "plus totals (deliveries, positions, active trucks, distance, tonnage, "
+                "unassigned). Use for any performance / on-time / KPI question. Optional "
+                "day (YYYY-MM-DD) and period ('daily','weekly','monthly')."
             ),
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "day": {"type": "string", "description": "Day as YYYY-MM-DD (optional, defaults to latest)."},
+                    "period": {"type": "string", "description": "'daily' (default), 'weekly', or 'monthly'."},
+                },
+            },
         },
     },
     {
@@ -183,24 +191,6 @@ TOOLS: list[dict[str, Any]] = [
             "name": "get_dispatch_logs",
             "description": "Get recent driver dispatch/notification logs (which mission briefs were sent and their status).",
             "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_daily_dashboard",
-            "description": (
-                "Get the daily planning dashboard: OTIF/OTD on-time KPIs, load/fuel "
-                "metrics and per-day summary. Use for 'how did we do today', service "
-                "level, or on-time performance questions. Optional day (YYYY-MM-DD)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "day": {"type": "string", "description": "Day as YYYY-MM-DD (optional, defaults to latest)."},
-                    "period": {"type": "string", "description": "Aggregation period, e.g. 'day' or 'week' (optional)."},
-                },
-            },
         },
     },
     {
@@ -288,7 +278,12 @@ TOOLS: list[dict[str, Any]] = [
 
 # Map tool name -> (HTTP path builder). Each returns a path string given the input.
 _TOOL_ROUTES = {
-    "get_kpis": lambda i: "/api/metrics/kpi",
+    # The live dashboard KPIs (OTIF/OTD/Load/Fuel) computed from the daily plan —
+    # the same source the dashboard UI shows. The ERD-table KPIs at
+    # /api/metrics/kpi are only populated once monthly snapshots are computed.
+    "get_kpis": lambda i: "/api/planning/daily/dashboard?" + _qs(
+        {"day": i.get("day"), "period": i.get("period") or "daily"}
+    ),
     "get_fleet": lambda i: f"/api/fleet/{i.get('kind', 'trucks')}",
     "get_transports": lambda i: "/api/data/transports?" + _qs(
         {"day": i.get("day"), "limit": i.get("limit") or 200}
@@ -297,9 +292,6 @@ _TOOL_ROUTES = {
     "get_tracking_live": lambda i: "/api/tracking/live",
     "get_agent_status": lambda i: "/api/agents/status",
     "get_dispatch_logs": lambda i: "/api/dispatch/logs",
-    "get_daily_dashboard": lambda i: "/api/planning/daily/dashboard?" + _qs(
-        {"day": i.get("day"), "period": i.get("period")}
-    ),
     "get_data_stats": lambda i: "/api/data/stats",
     "get_pending_splits": lambda i: "/api/planning/oversized/pending",
     "get_metrics": lambda i: {
@@ -404,7 +396,9 @@ async def _run_tool(name: str, tool_input: dict[str, Any], auth_token: Optional[
 
     headers = {"Authorization": auth_token} if auth_token else {}
     try:
-        async with httpx.AsyncClient(base_url=API_BASE, timeout=15.0) as http:
+        # Generous timeout: get_kpis hits the daily dashboard, which runs the
+        # OR-Tools optimizer (~12s cold, cached after).
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=60.0) as http:
             resp = await http.get(path, headers=headers)
         if resp.status_code >= 400:
             return f"Tool {name} returned HTTP {resp.status_code}: {resp.text[:500]}"

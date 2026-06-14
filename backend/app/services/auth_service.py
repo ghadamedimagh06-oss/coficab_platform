@@ -62,7 +62,9 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme
     payload = decode_token(creds.credentials)
     if not payload or not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    return {"username": payload["sub"], "role": payload.get("role", "admin")}
+    # Least privilege: a token without an explicit role claim is treated as a
+    # read-only viewer, never an admin.
+    return {"username": payload["sub"], "role": payload.get("role", "viewer")}
 
 
 def require_role(*roles: str):
@@ -95,7 +97,9 @@ def require_auth(
     payload = decode_token(credentials.credentials)
     if not payload or not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    return {"username": payload["sub"], "role": payload.get("role", "admin")}
+    # Least privilege: a token without an explicit role claim is treated as a
+    # read-only viewer, never an admin.
+    return {"username": payload["sub"], "role": payload.get("role", "viewer")}
 
 
 class AuthService:

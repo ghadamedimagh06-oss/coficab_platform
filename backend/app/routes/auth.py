@@ -90,9 +90,9 @@ async def login(
         )
     access_token_expires = timedelta(minutes=30)
     access_token = auth_service.create_access_token(
-        data={"sub": user.username, "role": getattr(user, "role", "admin")}, expires_delta=access_token_expires
+        data={"sub": user.username, "role": getattr(user, "role", "viewer")}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer", "role": getattr(user, "role", "admin")}
+    return {"access_token": access_token, "token_type": "bearer", "role": getattr(user, "role", "viewer")}
 
 @router.post("/register", response_model=Token)
 async def register(
@@ -112,9 +112,9 @@ async def register(
     user = auth_service.create_user(user_data)
     access_token_expires = timedelta(minutes=30)
     access_token = auth_service.create_access_token(
-        data={"sub": user.username, "role": getattr(user, "role", "admin")}, expires_delta=access_token_expires
+        data={"sub": user.username, "role": getattr(user, "role", "viewer")}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer", "role": getattr(user, "role", "admin")}
+    return {"access_token": access_token, "token_type": "bearer", "role": getattr(user, "role", "viewer")}
 
 
 @router.get("/me")

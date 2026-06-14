@@ -148,9 +148,17 @@ def test_daily_plan_builder_does_not_parallelize_one_truck():
 
 def test_no_trip_exceeds_truck_capacity_or_working_hours():
     """Every trip must fit its truck by BOTH positions and gross weight, and
-    return to the depot before the working day ends. Guards the kg-capacity
-    enforcement and the rescue pass against regressions."""
-    work_end = 20 * 60  # 20:00, matches DailyPlanConfig.work_end
+    must DEPART within the legal dispatch window. The binding daily constraint is
+    the departure cut-off, not the return: by design a truck serving a far zone
+    may drive the empty truck home in the evening (see DailyPlanConfig). Guards
+    the kg-capacity enforcement and the depart-by-cutoff rule against regressions.
+    """
+    from app.services.daily_plan_builder import DailyPlanConfig
+
+    cfg = DailyPlanConfig()
+    earliest_depart = _minutes(cfg.early_start)   # 05:00 (long hauls may stage early)
+    latest_depart = _minutes(cfg.max_depart)      # 18:00 (hard depart cut-off)
+    end_of_day = 24 * 60                           # returns must still land same calendar day
 
     for day in (date(2026, 5, 25), date(2026, 5, 26), date(2026, 5, 28)):
         plan = DailyPlanBuilder(WEEKLY_DIR).build(day)
@@ -168,9 +176,14 @@ def test_no_trip_exceeds_truck_capacity_or_working_hours():
                     f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
                     f"overweight: {load_kg} > {truck['capacity_kg']} kg"
                 )
-                assert _minutes(trip["return_at"]) <= work_end, (
+                depart = _minutes(trip["depart_at"])
+                assert earliest_depart <= depart <= latest_depart, (
                     f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
-                    f"returns after the working day ({trip['return_at']})"
+                    f"departs outside the legal window ({trip['depart_at']})"
+                )
+                assert _minutes(trip["return_at"]) <= end_of_day, (
+                    f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
+                    f"returns after midnight ({trip['return_at']})"
                 )
 
         # The hired truck (id 999) is a last resort: it must never carry load

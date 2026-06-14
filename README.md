@@ -183,23 +183,29 @@ coficab_platform/
 | Database | PostgreSQL 15 |
 | Cache | Redis 7 |
 | Optimization | OR-Tools 9.15 |
-| Copilot (LLM) | Anthropic Claude (`claude-opus-4-8`) via the `anthropic` SDK |
+| Copilot (LLM) | Groq Llama 3.3 70B (`llama-3.3-70b-versatile`) via any OpenAI-compatible endpoint |
 | Auth | JWT (python-jose + passlib + bcrypt) |
 
 ---
 
-## Dispatch Copilot (Claude)
+## Dispatch Copilot (Optiroute)
 
-The in-app assistant panel is a real LLM copilot powered by Anthropic Claude. It
-streams answers grounded in a snapshot of whatever screen the dispatcher is on
-(the active plan, KPI cards, fleet status, recent actions), so it can summarize
-a plan, flag risks, and explain optimizer decisions.
+The in-app assistant panel ("Optiroute") is a real LLM copilot. It talks to any
+OpenAI-compatible chat endpoint — **Groq's free, fast Llama 3.3 70B by default** —
+and streams answers grounded in (1) a snapshot of whatever screen the dispatcher
+is on and (2) read-only tools that query the platform's own API (KPIs, fleet,
+plan, incidents, tracking). So it can summarize a plan, flag risks, and explain
+optimizer decisions over the whole platform, not just the current screen.
 
 - Backend: `POST /api/copilot/chat` (streams the reply) and `GET /api/copilot/status`.
-- Enable it by setting `ANTHROPIC_API_KEY` in the backend environment. Without a
-  key the copilot input is disabled and the chat endpoint returns 503.
-- Optional overrides: `COPILOT_MODEL` (default `claude-opus-4-8`),
+- Enable it by setting `GROQ_API_KEY` (or `COPILOT_API_KEY` / `OPENAI_API_KEY`)
+  in the backend environment. Without a key the copilot input is disabled and the
+  chat endpoint returns 503.
+- Optional overrides: `COPILOT_MODEL` (default `llama-3.3-70b-versatile`),
+  `COPILOT_BASE_URL` (default `https://api.groq.com/openai/v1`),
   `COPILOT_MAX_TOKENS` (default `1024`).
+- Provider-agnostic: point `COPILOT_BASE_URL` + `COPILOT_MODEL` at Anthropic,
+  OpenAI, Together, or a local Ollama and it works unchanged.
 
 ---
 

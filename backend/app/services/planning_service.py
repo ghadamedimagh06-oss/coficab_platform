@@ -4,12 +4,21 @@ Handles weekly Excel planning ingestion, validated-planning comparison,
 J+1 change detection, review operations, and audit history tracking.
 """
 
+import copy
+import os
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 
 import pandas as pd
 from sqlalchemy.orm import Session
+
+# Module-level parse cache keyed by (abs path, mtime_ns, size). The weekly
+# workbook was previously re-parsed on EVERY /transports call (~1-2 s of pandas
+# + openpyxl). The cache makes repeat reads near-instant and auto-invalidates the
+# moment the file changes; callers get a deep copy so they can mutate freely.
+_PARSE_CACHE: dict[tuple, Dict[str, Any]] = {}
+_PARSE_CACHE_MAX = 8
 
 from app.models.planning_version import PlanningVersion
 from app.models.planning_change_log import PlanningChangeLog
@@ -308,6 +317,31 @@ class PlanningService:
         raise ValueError(f"Failed to read Excel planning sheet: {last_error}")
 
     def parse_weekly_planning(self, file_path: str) -> Dict[str, Any]:
+        """Parse the weekly workbook, served from an mtime-keyed cache.
+
+        Returns a deep copy so callers may mutate rows without poisoning the
+        cache. The cache key includes the file's mtime and size, so any edit to
+        the workbook is picked up immediately on the next call.
+        """
+        try:
+            st = os.stat(file_path)
+            key = (os.path.abspath(file_path), st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+
+        if key is not None and key in _PARSE_CACHE:
+            return copy.deepcopy(_PARSE_CACHE[key])
+
+        result = self._parse_weekly_planning_uncached(file_path)
+
+        if key is not None:
+            if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX:
+                _PARSE_CACHE.clear()
+            _PARSE_CACHE[key] = result
+            return copy.deepcopy(result)
+        return result
+
+    def _parse_weekly_planning_uncached(self, file_path: str) -> Dict[str, Any]:
         df = self._read_planning_dataframe(file_path)
         if df.empty:
             raise ValueError("Excel file contains no planning rows")

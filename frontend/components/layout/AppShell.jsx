@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
 import CopilotLauncher from '../chat/CopilotLauncher';
+import DemoDataBanner from './DemoDataBanner';
 
 export default function AppShell({ children }) {
   // Drawer is closed by default on mobile; on lg+ the sidebar is visible unless
@@ -68,6 +69,8 @@ export default function AppShell({ children }) {
             <p className="text-sm font-semibold">OptiRoute</p>
           </div>
         </div>
+
+        <DemoDataBanner />
 
         <div className="px-4 pt-6 lg:px-6">{children}</div>
       </main>

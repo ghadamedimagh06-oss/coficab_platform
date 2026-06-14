@@ -107,6 +107,24 @@ class DailyPlanConfig:
     # well-filled trucks over a few trucks doing a lot of trips.
     extra_trip_cost: int = 2500
 
+    # --- Objective mode (Pareto axis: cost/CO₂ ↔ finish time) -------------
+    # The makespan term above trades total distance (≈ fuel ≈ CO₂) against how
+    # early the LAST truck gets home. `objective` selects an operating point on
+    # that frontier without the caller having to know the raw coefficient:
+    #   "green" / "cost" → minimise distance & CO₂ (fewest, fullest trucks; the
+    #                       day may finish later), makespan weight 0;
+    #   "balanced"       → the default makespan_cost_coef;
+    #   "fast"           → maximise parallelism so the day finishes earliest
+    #                       (more trucks, more km/CO₂), makespan weight boosted.
+    objective: str = "balanced"
+
+    # --- Scenario / stress-test knob -------------------------------------
+    # Scales every delivery's demanded positions and kg by this factor when the
+    # plan is built. 1.0 = the workbook as-is; 1.3 = "what if volume is +30%?".
+    # Used by the stress-test lab to probe fleet resilience without editing the
+    # source workbook. Capacity, time windows and the fleet are untouched.
+    demand_multiplier: float = 1.0
+
 
 @dataclass
 class CostConfig:
@@ -126,6 +144,10 @@ class CostConfig:
     underutil_penalty_per_pos: float = 3.0       # opportunity cost per empty position
     unassigned_delivery_penalty_tnd: float = 2000.0  # per unassigned delivery
     urgent_unassigned_multiplier: float = 3.0    # multiplier for urgent unassigned
+    # Diesel well-to-wheel emission factor: kg of CO₂ released per litre burned.
+    # 2.68 kg/L is the widely used direct-combustion factor for road diesel; it
+    # drives the sustainability/ESG reporting and the "green" objective.
+    co2_kg_per_liter_diesel: float = 2.68
 
 
 class DailyPlanBuilder:
@@ -186,6 +208,7 @@ class DailyPlanBuilder:
 
         clean_trucks = [self._clean_truck(t) for t in trucks]
         estimated_cost_tnd = self._cost_breakdown(trucks, unassigned)
+        sustainability = self._sustainability(trucks, unassigned, routable, depot)
 
         return {
             "plan_id": str(uuid.uuid4()),
@@ -211,9 +234,56 @@ class DailyPlanBuilder:
                 "total_positions": int(sum(self._pos(d) for d in routable)),
                 "total_gross_weight_kg": round(sum(self._kg(d) for d in routable), 2),
             },
+            "objective": str(self.cfg.objective or "balanced").lower(),
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
             "estimated_cost_tnd": estimated_cost_tnd,
+            "estimated_co2_kg": sustainability["co2_kg"],
+            "sustainability": sustainability,
+            "diagnostics": self._diagnostics(trucks, unassigned, routable, self.truck_templates),
+        }
+
+    # ------------------------------------------------------------- replanning
+    def replan(self, day: date, deliveries: list[dict[str, Any]]) -> dict[str, Any]:
+        """Re-optimise an EXPLICIT set of deliveries on this builder's fleet,
+        without touching the workbook or re-splitting. Used for self-healing
+        recovery: feed the still-undelivered stops and a (possibly reduced) fleet
+        and get a fresh plan in the same shape as build(). The caller diffs it
+        against the original plan to show what changed.
+        """
+        depot = self.geo.depot()
+        # Work on copies so _evaluate's in-place tagging never mutates the input.
+        items = [dict(d) for d in deliveries]
+        for d in items:
+            d.setdefault("constraints", {})
+            d.setdefault("priority", "normal")
+        trucks, unassigned, routable, total_cost = self._evaluate(items, depot)
+        clean_trucks = [self._clean_truck(t) for t in trucks]
+        sustainability = self._sustainability(trucks, unassigned, routable, depot)
+        return {
+            "plan_id": str(uuid.uuid4()),
+            "day": day.isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "replanned": True,
+            "algorithm": (
+                "self-healing residual VRPTW (OR-Tools) over the undelivered stops"
+                if HAS_ORTOOLS else
+                "self-healing residual cluster-first heuristic over the undelivered stops"
+            ),
+            "depot": {"lat": depot[0], "lon": depot[1]},
+            "work_window": {"start": self.cfg.work_start, "end": self.cfg.work_end},
+            "objective": str(self.cfg.objective or "balanced").lower(),
+            "summary": {
+                "deliveries_considered": len(items),
+                "deliveries_routed": len(routable),
+                "total_positions": int(sum(self._pos(d) for d in routable)),
+                "total_gross_weight_kg": round(sum(self._kg(d) for d in routable), 2),
+            },
+            "trucks": clean_trucks,
+            "unassigned": [self._clean_stop(d) for d in unassigned],
+            "estimated_cost_tnd": self._cost_breakdown(trucks, unassigned),
+            "estimated_co2_kg": sustainability["co2_kg"],
+            "sustainability": sustainability,
             "diagnostics": self._diagnostics(trucks, unassigned, routable, self.truck_templates),
         }
 
@@ -382,8 +452,10 @@ class DailyPlanBuilder:
             # Global makespan/balance term: penalise (latest return − earliest
             # departure) across the whole fleet, so the solver spreads load onto
             # trucks running in parallel and the LAST truck gets home sooner,
-            # rather than queuing many trips on a few trucks.
-            time_dim.SetGlobalSpanCostCoefficient(max(0, int(self.cfg.makespan_cost_coef)))
+            # rather than queuing many trips on a few trucks. The coefficient is
+            # selected by the objective mode (green/balanced/fast) so the same
+            # model can be re-solved at different points on the cost↔time frontier.
+            time_dim.SetGlobalSpanCostCoefficient(self._makespan_coef())
             for v in range(V):
                 time_dim.CumulVar(routing.Start(v)).SetRange(early, cutoff)
             for i in range(1, n + 1):
@@ -583,6 +655,87 @@ class DailyPlanBuilder:
             "driver": round(cost_driver, 2),
             "underutilization": round(cost_underutil, 2),
             "unassigned_penalty": round(cost_unassigned, 2),
+        }
+
+    # ------------------------------------------------------ objective / ESG
+    # Makespan-coefficient presets per objective mode. Higher = the solver works
+    # harder to finish the day early (more parallel trucks, more km); 0 = pure
+    # distance/CO₂ minimisation (fewest, fullest trucks, day may finish later).
+    _MAKESPAN_PRESETS = {"green": 0, "cost": 0, "balanced": None, "fast": 12}
+
+    def _makespan_coef(self) -> int:
+        preset = self._MAKESPAN_PRESETS.get(str(self.cfg.objective or "balanced").lower(), None)
+        coef = self.cfg.makespan_cost_coef if preset is None else preset
+        return max(0, int(coef))
+
+    def _plan_travel_km(self, trucks) -> float:
+        """Total driven kilometres across every dispatched trip in a plan.
+
+        Derived from each stop's travel_min and the configured average speed, so
+        it stays on the same model as the schedule and the TND cost breakdown."""
+        travel_min = sum(
+            float(s.get("travel_min") or 0)
+            for t in trucks if t.get("trips")
+            for trip in t["trips"]
+            for s in trip.get("stops", [])
+        )
+        return travel_min / 60.0 * self.cfg.avg_speed_kmh
+
+    def _co2_kg(self, km: float) -> float:
+        liters = km * self.cost_config.fuel_consumption_l_per_100km / 100.0
+        return liters * self.cost_config.co2_kg_per_liter_diesel
+
+    def _baseline_km(self, routable, depot) -> float:
+        """Unoptimised 'before' distance: every delivery served by its own direct
+        depot→client→depot round trip (no consolidation, no shared routes). This
+        is the honest manual baseline the optimiser is measured against."""
+        total = 0.0
+        for d in routable:
+            one_way = d.get("distance_km")
+            if one_way is None:
+                one_way = d.get("_table_km")
+            if one_way is None and d.get("lat") is not None:
+                one_way = _haversine_km(depot[0], depot[1], d["lat"], d["lon"]) * ROAD_WINDING_FACTOR
+            total += 2.0 * float(one_way or 0.0)
+        return total
+
+    def _sustainability(self, trucks, unassigned, routable, depot) -> dict[str, Any]:
+        """Carbon & ESG summary for a plan: fuel, CO₂, the distance/CO₂ saved
+        versus the unconsolidated manual baseline, and intuitive equivalences."""
+        planned_km = self._plan_travel_km(trucks)
+        fuel_l = planned_km * self.cost_config.fuel_consumption_l_per_100km / 100.0
+        co2_kg = self._co2_kg(planned_km)
+
+        baseline_km = self._baseline_km(routable, depot)
+        baseline_co2 = self._co2_kg(baseline_km)
+        co2_saved = max(0.0, baseline_co2 - co2_kg)
+        km_saved = max(0.0, baseline_km - planned_km)
+        saved_pct = round(100.0 * co2_saved / baseline_co2, 1) if baseline_co2 > 0 else 0.0
+
+        delivered_pos = sum(
+            self._pos(s)
+            for t in trucks if t.get("trips")
+            for trip in t["trips"]
+            for s in trip.get("stops", [])
+        )
+        co2_per_pos = round(co2_kg / delivered_pos, 2) if delivered_pos else None
+
+        return {
+            "objective": str(self.cfg.objective or "balanced").lower(),
+            "planned_distance_km": round(planned_km, 1),
+            "baseline_distance_km": round(baseline_km, 1),
+            "distance_saved_km": round(km_saved, 1),
+            "fuel_liters": round(fuel_l, 1),
+            "co2_kg": round(co2_kg, 1),
+            "baseline_co2_kg": round(baseline_co2, 1),
+            "co2_saved_kg": round(co2_saved, 1),
+            "co2_saved_pct": saved_pct,
+            "co2_kg_per_position": co2_per_pos,
+            "co2_kg_per_liter": self.cost_config.co2_kg_per_liter_diesel,
+            # Friendly equivalences for the ESG card: a mature tree absorbs
+            # ~21 kg CO₂/yr; an average car emits ~0.12 kg CO₂/km.
+            "trees_year_equivalent": round(co2_saved / 21.0, 1),
+            "car_km_equivalent": round(co2_saved / 0.12, 0),
         }
 
     def _assign_insertion(self, servable, trucks):
@@ -1472,6 +1625,11 @@ class DailyPlanBuilder:
         if constraints.get("time_window"):
             etd, eta = constraints["time_window"]
         positions = float(row.get("position_count") or row.get("quantity") or 0)
+        # Stress-test scaling: probe "+X% volume" scenarios without touching the
+        # workbook. 1.0 is a no-op (the normal path).
+        mult = float(getattr(self.cfg, "demand_multiplier", 1.0) or 1.0)
+        if mult != 1.0:
+            positions = round(positions * mult, 2)
         return {
             "id": int(row.get("row_number") or 0),
             "client": row.get("client") or row.get("end_location") or "Unknown client",
@@ -1482,7 +1640,7 @@ class DailyPlanBuilder:
             # Capacity binds on BOTH positions and the real gross weight declared
             # in the workbook (rows without a weight contribute 0 kg, so weight
             # only constrains where the data exists — it never invents a limit).
-            "quantity_kg": self._weight_from_row(row),
+            "quantity_kg": round(self._weight_from_row(row) * mult, 2),
             "etd": etd,
             "eta": eta,
             "priority": row.get("priority") or "normal",

@@ -288,13 +288,15 @@ class ExcelFileHandler(FileSystemEventHandler):
             error_msg = f"Unexpected error during processing: {str(e)}"
             print(f"❌ {error_msg}")
 
-            # Update log with error
+            # Update log with error. Best-effort: if the session itself is broken
+            # we roll back and log, rather than masking it with a bare except.
             try:
                 log_entry.status = "failed"
                 log_entry.error_message = error_msg
                 db.commit()
-            except:
-                pass
+            except Exception as log_exc:  # pragma: no cover - defensive
+                db.rollback()
+                print(f"⚠️  Could not persist ingestion failure log: {log_exc}")
 
         finally:
             db.close()
