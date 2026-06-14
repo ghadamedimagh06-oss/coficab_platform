@@ -120,6 +120,13 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
 
   const capacityPositions = Number(truck.capacity_positions || 0);
   const usedPositions = allStops.reduce((sum, s) => sum + Number(s.quantity_positions || s.position_count || 0), 0);
+  // Cargo VOLUME: reels cube out before they hit the position/kg limit. Fall
+  // back to positions × 1.8 m³ for older plans whose stops predate volume_m3.
+  const capacityM3 = Number(truck.capacity_m3 || 0);
+  const usedVolume = allStops.reduce(
+    (sum, s) => sum + Number(s.volume_m3 ?? Number(s.quantity_positions || s.position_count || 0) * 1.8),
+    0,
+  );
   const tripCount = trips.length;
   const fillRatio = capacityPositions && tripCount ? usedPositions / (capacityPositions * tripCount) : 0;
   const isIdle = allStops.length === 0;
@@ -205,6 +212,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
             </p>
             <p className="text-[11px] text-[#9e9aa4]">
               {capacityPositions.toLocaleString()} pos · {Number(truck.capacity_kg || 0).toLocaleString()} kg
+              {capacityM3 ? ` · ${capacityM3.toLocaleString()} m³` : ''}
             </p>
           </div>
         </button>
@@ -215,7 +223,9 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
         ) : (
           <div>
             <div className="mb-1 flex items-center justify-between text-[10px] font-medium text-[#9e9aa4]">
-              <span>{usedPositions} pos · {tripCount} trip{tripCount > 1 ? 's' : ''}</span>
+              <span>
+                {usedPositions} pos{capacityM3 ? ` · ${Math.round(usedVolume)} m³` : ''} · {tripCount} trip{tripCount > 1 ? 's' : ''}
+              </span>
               <span className="tabular-nums font-semibold" style={{ color: accent }}>{Math.round(fillRatio * 100)}%</span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-[#f0eee9]">

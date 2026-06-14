@@ -46,7 +46,7 @@
 - [ ] **W1.1 — Single optimizer.** Route all planning through the unified VRPTW; deprecate the legacy dict/DB optimizers (keep thin shims to avoid import breaks, mark deprecated). **(L)**
 - [x] **W1.2 — One KPI source of truth.** ✅ DONE & tested. `/api/metrics/kpi` now prefers ERD snapshots but falls back to LIVE plan-derived KPIs (`dashboard_service.plan_kpis`) — the same source the dashboard uses — so the cards are never empty before snapshots are computed. Returns a `source` field (`snapshots`|`live_plan`) and adds a CO₂-Saved card. Cached (120s TTL). `tests/test_metrics_kpi.py` (2 tests).
 - [x] **W1.3 — Excel parse cache.** ✅ DONE & tested. `PlanningService.parse_weekly_planning` now serves from a module-level cache keyed by (path, mtime_ns, size); returns deep copies so callers can mutate freely; auto-invalidates on any workbook edit. Benefits every caller (`/transports`, the plan builder, the watcher). Measured 159 ms → 0 ms on repeat parse. `tests/test_parse_cache.py` (3 tests).
-- [ ] **W1.4 — Volume / m³ capacity dimension** in the solver (cable reels cube out). **(M)**
+- [x] **W1.4 — Volume / m³ capacity dimension.** ✅ DONE & tested. Volume is now a third, independent capacity dimension alongside positions and gross kg. Each truck declares `capacity_m3` (40 m³ rigids, 85–90 m³ semis); each delivery's volume is its explicit workbook m³ (`volume_m3`/`cbm`/…) or, absent that, positions × `m3_per_position` (1.8). Wired through the **global VRPTW** (a scaled "Volume" capacity dimension), `_feasible_trucks`, the hard-capacity prefilter (a load that cubes out the biggest truck is dropped with a volume reason), the heuristic scheduler & overflow rescue, zone assignment, splits (volume divides proportionally), and reporting (`capacity_m3` per truck, `volume_m3` per stop, `summary.total_volume_m3`, volume-aware under-utilisation). Safe **no-op** for any fleet that doesn't declare `capacity_m3` and **inert** on the position-only workbook (deck headroom set so derived volume never binds), so zero behaviour change today while being correct the moment real reel volumes arrive. Frontend `TruckLane` shows m³ capacity + used m³. `tests/test_volume_dimension.py` (14 tests). **(M)**
 
 ## WAVE 2 — 🏆 Flagship features (the "wooow")
 
@@ -77,11 +77,13 @@
 ---
 
 ## Status snapshot (2026-06-14)
-**Done & green:** Wave 0 (trust) + Wave 2 W2.1–W2.5 (five flagship features) + W3.3
-(board report). Backend **89 test functions pass** (pytest exit 0); frontend production
-build passes. Six features live on `frontend/app/generated-daily-planning/page.jsx`.
-**Next up:** W3.1 agentic copilot wiring · Wave 1 (unify optimizer / one KPI source /
-Excel cache / volume dimension) · W3.2 live control-tower map.
+**Done & green:** Wave 0 (trust) + Wave 1 (W1.2 one KPI source · W1.3 Excel cache ·
+W1.4 volume dimension) + Wave 2 W2.1–W2.5 (five flagship features) + W3.3 (board report)
++ Wave 4 W4.1/W4.4/W4.6/W4.7 (indexes, rate limiting, upload validation, login lockout).
+Backend suite green (pytest exit 0); frontend production build passes. Six features live
+on `frontend/app/generated-daily-planning/page.jsx`.
+**Next up:** W1.1 unify optimizer (de-risk with W4.3 golden tests first) · W3.1 agentic
+copilot wiring · W3.2 live control-tower map · W4.2 structured logging + `/metrics`.
 
 ## Progress Log
 - _2026-06-14_ — Unified plan created from the two source roadmaps; false findings rejected; Wave 0 started.
@@ -96,3 +98,5 @@ Excel cache / volume dimension) · W3.2 live control-tower map.
 - _2026-06-14_ — **Committed ee23fef** (35 files): Wave 0 + 6 features + W1.2/W1.3.
 - _2026-06-14_ — **W4.4 rate limiting + W4.6 upload validation complete & green** (committed 7cbe97a). +7 tests → 101.
 - _2026-06-14_ — **W4.7 login lockout complete & green.** +2 tests → 103. Session: Wave 0 + 6 features + W1.2/W1.3 + W4.4/W4.6/W4.7, all green, on parallel-main.
+- _2026-06-14_ — **W4.1 DB indexes complete & green** (committed d6ab6e3). `index=True` on hot FK/filter columns + `tests/test_db_indexes.py` (10 parametrised). Full backend suite green.
+- _2026-06-14_ — **W1.4 Volume / m³ dimension complete & green.** Third capacity dimension wired through the global VRPTW, feasibility, hard-cap prefilter, schedulers, splits and reporting; frontend `TruckLane` shows m³; `tests/test_volume_dimension.py` (14 tests). Inert on current position-only data, correct the moment reel volumes arrive. Frontend prod build green.

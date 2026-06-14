@@ -36,14 +36,18 @@ from app.services.vrptw_optimizer import cluster_zones
 log = logging.getLogger(__name__)
 
 
+# capacity_m3 is the usable cargo VOLUME of each truck's deck. Cable reels are
+# bulky: a load can "cube out" (run out of m³) before it hits the pallet-position
+# or kg limit, so volume is a third, independent capacity dimension. The 14-pos
+# rigid/box trucks carry ~40 m³ of deck; the 24-pos semi/curtainsider ~85–90 m³.
 DEFAULT_TRUCKS = [
-    {"truck_id": 1, "truck_label": "Truck 1", "capacity_positions": 14, "capacity_kg": 10_200},
-    {"truck_id": 2, "truck_label": "Truck 2", "capacity_positions": 14, "capacity_kg": 10_230},
-    {"truck_id": 3, "truck_label": "Truck 3", "capacity_positions": 14, "capacity_kg": 9_227},
-    {"truck_id": 4, "truck_label": "Truck 4", "capacity_positions": 14, "capacity_kg": 9_200},
-    {"truck_id": 5, "truck_label": "Truck 5", "capacity_positions": 24, "capacity_kg": 24_950},
-    {"truck_id": 6, "truck_label": "Truck 6", "capacity_positions": 14, "capacity_kg": 7_650},
-    {"truck_id": 999, "truck_label": "Rented", "capacity_positions": 24, "capacity_kg": 24_000},
+    {"truck_id": 1, "truck_label": "Truck 1", "capacity_positions": 14, "capacity_kg": 10_200, "capacity_m3": 40.0},
+    {"truck_id": 2, "truck_label": "Truck 2", "capacity_positions": 14, "capacity_kg": 10_230, "capacity_m3": 40.0},
+    {"truck_id": 3, "truck_label": "Truck 3", "capacity_positions": 14, "capacity_kg": 9_227, "capacity_m3": 40.0},
+    {"truck_id": 4, "truck_label": "Truck 4", "capacity_positions": 14, "capacity_kg": 9_200, "capacity_m3": 40.0},
+    {"truck_id": 5, "truck_label": "Truck 5", "capacity_positions": 24, "capacity_kg": 24_950, "capacity_m3": 90.0},
+    {"truck_id": 6, "truck_label": "Truck 6", "capacity_positions": 14, "capacity_kg": 7_650, "capacity_m3": 40.0},
+    {"truck_id": 999, "truck_label": "Rented", "capacity_positions": 24, "capacity_kg": 24_000, "capacity_m3": 85.0},
 ]
 
 PRIORITY_WEIGHT = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
@@ -124,6 +128,22 @@ class DailyPlanConfig:
     # Used by the stress-test lab to probe fleet resilience without editing the
     # source workbook. Capacity, time windows and the fleet are untouched.
     demand_multiplier: float = 1.0
+
+    # --- Volume / m³ capacity dimension (cable reels cube out) ------------
+    # Reels are voluminous: a truck can run out of DECK VOLUME before it reaches
+    # its pallet-position or kg limit. Volume is therefore modelled as a third,
+    # independent capacity dimension alongside positions and gross weight.
+    #   • A delivery's volume is its explicit ``volume_m3`` when the workbook
+    #     provides one, else it is derived as positions × ``m3_per_position``.
+    #   • Trucks declare ``capacity_m3``; the deck headroom on the default fleet
+    #     is set so DERIVED volume never binds before positions (zero behaviour
+    #     change on position-only data), while an explicitly bulky reel load is
+    #     correctly constrained and, if it cubes out the biggest truck, dropped
+    #     with a volume reason.
+    # The whole dimension is a safe no-op for any truck set that does not declare
+    # ``capacity_m3`` (e.g. ad-hoc fleets in tests), so it never invents a limit.
+    enforce_volume: bool = True
+    m3_per_position: float = 1.8   # usable deck volume of one stacked pallet position
 
 
 @dataclass
@@ -233,6 +253,7 @@ class DailyPlanBuilder:
                 "deliveries_routed": len(routable),
                 "total_positions": int(sum(self._pos(d) for d in routable)),
                 "total_gross_weight_kg": round(sum(self._kg(d) for d in routable), 2),
+                "total_volume_m3": round(sum(self._vol(d) for d in routable), 1),
             },
             "objective": str(self.cfg.objective or "balanced").lower(),
             "trucks": clean_trucks,
@@ -278,6 +299,7 @@ class DailyPlanBuilder:
                 "deliveries_routed": len(routable),
                 "total_positions": int(sum(self._pos(d) for d in routable)),
                 "total_gross_weight_kg": round(sum(self._kg(d) for d in routable), 2),
+                "total_volume_m3": round(sum(self._vol(d) for d in routable), 1),
             },
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
@@ -315,10 +337,13 @@ class DailyPlanBuilder:
         # Hard capacity: a drop larger than the biggest truck cannot load at all.
         max_truck_cap = max((t["capacity_positions"] for t in trucks), default=-1)
         max_truck_kg = max((t["capacity_kg"] for t in trucks), default=-1)
+        vol_on = self._volume_enforced(trucks)
+        max_truck_m3 = max((float(t.get("capacity_m3") or 0) for t in trucks), default=-1.0)
         servable: list[dict[str, Any]] = []
         for d in routable:
             qty_pos = self._pos(d)
             qty_kg = self._kg(d)
+            qty_m3 = self._vol(d)
             if not trucks:
                 unassigned.append({**self._clean_stop(d), "unassigned_reason": "No available trucks"})
             elif qty_pos > max_truck_cap:
@@ -329,6 +354,10 @@ class DailyPlanBuilder:
                 unassigned.append({**self._clean_stop(d), "unassigned_reason": (
                     f"{int(qty_kg)} kg exceeds the largest truck "
                     f"({int(max_truck_kg)} kg) — needs a delivery split")})
+            elif vol_on and qty_m3 > max_truck_m3 + 1e-6:
+                unassigned.append({**self._clean_stop(d), "unassigned_reason": (
+                    f"{qty_m3:.1f} m³ exceeds the largest truck "
+                    f"({max_truck_m3:.0f} m³) — the load cubes out; needs a delivery split")})
             else:
                 servable.append(d)
 
@@ -406,6 +435,15 @@ class DailyPlanBuilder:
                 return None
             cap_pos = [int(templates[veh_truck[v]]["capacity_positions"]) for v in range(V)]
             cap_kg = [int(templates[veh_truck[v]]["capacity_kg"]) for v in range(V)]
+            # Volume is a third capacity dimension. Demands/capacities are scaled
+            # by 10 and rounded to integers (OR-Tools dimensions are integer) so
+            # one decimal of m³ precision is preserved. Only enabled when the
+            # fleet declares capacity_m3 for every truck.
+            vol_on = self._volume_enforced(templates)
+            cap_m3 = [
+                int(round(float(templates[veh_truck[v]].get("capacity_m3") or 0) * 10))
+                for v in range(V)
+            ]
 
             manager = pywrapcp.RoutingIndexManager(n + 1, V, 0)
             routing = pywrapcp.RoutingModel(manager)
@@ -444,6 +482,13 @@ class DailyPlanBuilder:
                 return 0 if i == 0 else int(round(self._kg(servable[i - 1])))
             routing.AddDimensionWithVehicleCapacity(
                 routing.RegisterUnaryTransitCallback(kg_dem), 0, cap_kg, True, "Kg")
+
+            if vol_on:
+                def vol_dem(from_idx):
+                    i = manager.IndexToNode(from_idx)
+                    return 0 if i == 0 else int(round(self._vol(servable[i - 1]) * 10))
+                routing.AddDimensionWithVehicleCapacity(
+                    routing.RegisterUnaryTransitCallback(vol_dem), 0, cap_m3, True, "Volume")
 
             # Time dimension (slack lets a truck wait for a window to open).
             routing.AddDimension(tcb, horizon, horizon, False, "Time")
@@ -580,9 +625,34 @@ class DailyPlanBuilder:
         return str(d.get("priority") or "").strip().lower() == "urgent"
 
     def _feasible_trucks(self, d, trucks):
-        """Trucks that can legally carry this drop by BOTH positions and kg."""
+        """Trucks that can legally carry this drop by positions, kg AND volume.
+
+        The volume test only applies where the fleet declares ``capacity_m3``
+        (and volume enforcement is on), so an ad-hoc truck set without volumes
+        keeps the original positions+kg behaviour unchanged."""
         dp, dk = self._pos(d), self._kg(d)
-        return [t for t in trucks if t["capacity_positions"] >= dp and t["capacity_kg"] >= dk]
+        dv = self._vol(d)
+        return [
+            t for t in trucks
+            if t["capacity_positions"] >= dp and t["capacity_kg"] >= dk
+            and self._fits_volume(t, dv)
+        ]
+
+    def _volume_enforced(self, trucks: list[dict[str, Any]]) -> bool:
+        """Volume binds only when enforcement is on AND every truck in the set
+        declares a positive capacity_m3 — otherwise a missing capacity would
+        wrongly forbid all load, so we leave the dimension off for that fleet."""
+        return bool(
+            getattr(self.cfg, "enforce_volume", True)
+            and trucks
+            and all(float(t.get("capacity_m3") or 0) > 0 for t in trucks)
+        )
+
+    def _fits_volume(self, truck: dict[str, Any], volume_m3: float) -> bool:
+        cap = float(truck.get("capacity_m3") or 0)
+        if not getattr(self.cfg, "enforce_volume", True) or cap <= 0:
+            return True  # this truck doesn't constrain volume
+        return cap + 1e-6 >= volume_m3
 
     @staticmethod
     def _pos(d: dict[str, Any]) -> float:
@@ -591,6 +661,20 @@ class DailyPlanBuilder:
     @staticmethod
     def _kg(d: dict[str, Any]) -> float:
         return float(d.get("quantity_kg") or 0)
+
+    def _vol(self, d: dict[str, Any]) -> float:
+        """A delivery's cargo volume in m³: its explicit ``volume_m3`` when set,
+        otherwise derived from positions × the configured per-position deck
+        volume. Always non-negative; never invents volume for a 0-position drop."""
+        explicit = d.get("volume_m3")
+        if explicit is not None:
+            try:
+                v = float(explicit)
+                if v >= 0:
+                    return v
+            except (TypeError, ValueError):
+                pass
+        return self._pos(d) * float(getattr(self.cfg, "m3_per_position", 1.8) or 0.0)
 
     def _run_strategy(self, servable, dur_min, assign_fn):
         """Assign with `assign_fn`, then schedule + rescue on a fresh fleet."""
@@ -824,17 +908,25 @@ class DailyPlanBuilder:
                     "feasible_trucks": [t["truck_label"] for t in feas],
                 })
 
+        vol_on = getattr(self.cfg, "enforce_volume", True)
         under = []
         for t in trucks:
             cap_p = float(t["capacity_positions"]) or 1.0
             cap_k = float(t["capacity_kg"]) or 1.0
+            cap_v = float(t.get("capacity_m3") or 0)
             for trip in t.get("trips", []):
                 stops = trip.get("stops", [])
                 if not stops:
                     continue
                 pos = sum(self._pos(s) for s in stops)
                 kg = sum(self._kg(s) for s in stops)
+                vol = sum(self._vol(s) for s in stops)
+                # The binding dimension is whichever fills the truck most. Volume
+                # counts only when the truck declares a capacity, so a load that
+                # cubes out (full m³, light kg) is correctly seen as full.
                 util = max(pos / cap_p, kg / cap_k)
+                if vol_on and cap_v > 0:
+                    util = max(util, vol / cap_v)
                 if util < self.UTIL_TARGET:
                     under.append({
                         "truck": t["truck_label"], "trip": trip.get("trip_id"),
@@ -911,6 +1003,7 @@ class DailyPlanBuilder:
             return [delivery]
 
         base_kg = float(delivery.get("quantity_kg") or 0)
+        base_vol = float(delivery.get("volume_m3") or 0)
         base_id = delivery.get("id") or 0
         original_client = delivery.get("client") or ""
         orig_pos = int(round(float(delivery.get("quantity_positions") or 0)))
@@ -980,6 +1073,7 @@ class DailyPlanBuilder:
                 "quantity_positions": float(pos),
                 "position_count": float(pos),
                 "quantity_kg": round(base_kg * pos / total_pos, 1),
+                "volume_m3": round(base_vol * pos / total_pos, 3),
                 "_split_parent": base_id,
                 # --- Explainability / traceability of the automatic split ---
                 "is_split": True,
@@ -1146,9 +1240,11 @@ class DailyPlanBuilder:
                 break
             max_pos = max((float(d.get("quantity_positions") or 0) for d in zone), default=0.0)
             max_kg = max((float(d.get("quantity_kg") or 0) for d in zone), default=0.0)
+            max_m3 = max((self._vol(d) for d in zone), default=0.0)
             choice = next(
                 (t for t in available
-                 if t["capacity_positions"] >= max_pos and t["capacity_kg"] >= max_kg),
+                 if t["capacity_positions"] >= max_pos and t["capacity_kg"] >= max_kg
+                 and self._fits_volume(t, max_m3)),
                 None,
             )
             if choice is None:
@@ -1176,6 +1272,8 @@ class DailyPlanBuilder:
         order = self._order_stops(items, dur_min)
         capacity = truck["capacity_positions"]
         cap_kg = float(truck["capacity_kg"])
+        cap_m3 = float(truck.get("capacity_m3") or 0)
+        vol_on = self._volume_enforced([truck])
         max_depart = self._minutes(self.cfg.max_depart)
         work_start = self._minutes(self.cfg.work_start)
         early_start = self._minutes(self.cfg.early_start)
@@ -1190,11 +1288,12 @@ class DailyPlanBuilder:
         depart_at = float(cursor)
         load = 0.0       # positions on the open trip
         load_kg = 0.0    # gross weight on the open trip
+        load_m3 = 0.0    # cargo volume on the open trip
         t = float(cursor)
         prev = 0  # depot node
 
         def close_trip() -> None:
-            nonlocal cursor, trip_stops, load, load_kg, prev, t, depart_at
+            nonlocal cursor, trip_stops, load, load_kg, load_m3, prev, t, depart_at
             if not trip_stops:
                 return
             # The trip already passed the depart-by-max_depart gate when it left
@@ -1211,6 +1310,7 @@ class DailyPlanBuilder:
             trip_stops = []
             load = 0.0
             load_kg = 0.0
+            load_m3 = 0.0
             prev = 0
             t = float(cursor)
             depart_at = float(cursor)
@@ -1219,18 +1319,21 @@ class DailyPlanBuilder:
             mi = d["_mi"]
             qty = float(d.get("quantity_positions") or 0)
             qty_kg = float(d.get("quantity_kg") or 0)
-            if qty > capacity or qty_kg > cap_kg:
+            qty_m3 = self._vol(d)
+            if qty > capacity or qty_kg > cap_kg or (vol_on and qty_m3 > cap_m3 + 1e-6):
                 # Servable in principle (it fits a bigger truck), but every
                 # larger truck is already committed to a heavier zone today.
-                limit = (
-                    f"{capacity} positions" if qty > capacity
-                    else f"{int(cap_kg)} kg"
-                )
+                if qty > capacity:
+                    limit = f"{capacity} positions"
+                elif qty_kg > cap_kg:
+                    limit = f"{int(cap_kg)} kg"
+                else:
+                    limit = f"{cap_m3:.0f} m³"
                 overflow.append({
                     **d,
                     "unassigned_reason": (
-                        f"{qty:.0f} pos / {qty_kg:.0f} kg exceeds this truck's "
-                        f"{limit} — all larger trucks are committed today"
+                        f"{qty:.0f} pos / {qty_kg:.0f} kg / {qty_m3:.1f} m³ exceeds this "
+                        f"truck's {limit} — all larger trucks are committed today"
                     ),
                 })
                 continue
@@ -1246,6 +1349,7 @@ class DailyPlanBuilder:
             if in_trip and (
                 load + qty > capacity
                 or load_kg + qty_kg > cap_kg
+                or (vol_on and load_m3 + qty_m3 > cap_m3 + 1e-6)
                 or forced_wait > self.LONG_WAIT_SPLIT_MIN
             ):
                 close_trip()
@@ -1298,6 +1402,7 @@ class DailyPlanBuilder:
             prev = mi
             load += qty
             load_kg += qty_kg
+            load_m3 += qty_m3
 
         close_trip()
         return overflow
@@ -1334,6 +1439,7 @@ class DailyPlanBuilder:
         for d in ordered:
             qty = float(d.get("quantity_positions") or 0)
             qty_kg = float(d.get("quantity_kg") or 0)
+            qty_m3 = self._vol(d)
             km = d.get("distance_km")
             if km is None:
                 still.append(d)
@@ -1350,6 +1456,7 @@ class DailyPlanBuilder:
             candidates = [
                 t for t in trucks
                 if t["capacity_positions"] >= qty and float(t["capacity_kg"]) >= qty_kg
+                and self._fits_volume(t, qty_m3)
             ]
             # Owned before hired, smallest adequate first, then earliest free.
             candidates.sort(key=lambda t: (
@@ -1553,19 +1660,22 @@ class DailyPlanBuilder:
 
     @staticmethod
     def _clean_truck(truck: dict[str, Any]) -> dict[str, Any]:
-        return {
+        clean = {
             "truck_id": truck["truck_id"],
             "truck_label": truck["truck_label"],
             "capacity_positions": truck["capacity_positions"],
             "capacity_kg": truck["capacity_kg"],
             "trips": truck["trips"],
         }
+        if truck.get("capacity_m3") is not None:
+            clean["capacity_m3"] = truck["capacity_m3"]
+        return clean
 
     @staticmethod
     def _clean_stop(delivery: dict[str, Any]) -> dict[str, Any]:
         keep = (
             "id", "client", "start_location", "end_location", "quantity_positions",
-            "position_count", "quantity_kg", "etd", "eta", "priority", "status",
+            "position_count", "quantity_kg", "volume_m3", "etd", "eta", "priority", "status",
             "constraints", "raw", "lat", "lon", "distance_km", "resolved_location",
             "travel_min", "unassigned_reason",
             # Split explainability / traceability:
@@ -1630,6 +1740,17 @@ class DailyPlanBuilder:
         mult = float(getattr(self.cfg, "demand_multiplier", 1.0) or 1.0)
         if mult != 1.0:
             positions = round(positions * mult, 2)
+        # Cargo volume: explicit m³ from the workbook if present, else derived
+        # from positions × the per-position deck volume. Scaled with the same
+        # stress-test multiplier as positions/kg so a "+X% volume" scenario also
+        # inflates the m³ load.
+        explicit_vol = self._volume_from_row(row)
+        volume_m3 = (
+            explicit_vol if explicit_vol is not None
+            else positions * float(getattr(self.cfg, "m3_per_position", 1.8) or 0.0)
+        )
+        if explicit_vol is not None and mult != 1.0:
+            volume_m3 = explicit_vol * mult
         return {
             "id": int(row.get("row_number") or 0),
             "client": row.get("client") or row.get("end_location") or "Unknown client",
@@ -1641,6 +1762,7 @@ class DailyPlanBuilder:
             # in the workbook (rows without a weight contribute 0 kg, so weight
             # only constrains where the data exists — it never invents a limit).
             "quantity_kg": round(self._weight_from_row(row) * mult, 2),
+            "volume_m3": round(volume_m3, 3),
             "etd": etd,
             "eta": eta,
             "priority": row.get("priority") or "normal",
@@ -1663,6 +1785,23 @@ class DailyPlanBuilder:
             except (TypeError, ValueError):
                 continue
         return 0.0
+
+    @staticmethod
+    def _volume_from_row(row: dict[str, Any]) -> Optional[float]:
+        """Explicit cargo volume in m³ from the workbook, if any column carries
+        it. Returns None when no volume is declared so the caller derives it
+        from positions instead of inventing a limit."""
+        for key in ("total_volume_m3", "volume_m3", "volume_cbm", "cbm", "m3"):
+            value = row.get(key)
+            if value is None:
+                continue
+            try:
+                v = float(value)
+                if v >= 0:
+                    return v
+            except (TypeError, ValueError):
+                continue
+        return None
 
     # --------------------------------------------------------------- time util
     @staticmethod
