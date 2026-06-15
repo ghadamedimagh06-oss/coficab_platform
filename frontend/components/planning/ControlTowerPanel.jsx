@@ -10,11 +10,17 @@ import { getControlTower } from '../../app/services/api';
 const ControlTowerMap = dynamic(() => import('./ControlTowerMap'), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[460px] w-full items-center justify-center rounded-[1.25rem] border border-[#ece8e1] bg-[#f0eee9] text-sm text-[#9e9aa4]">
+    <div className="flex h-[480px] w-full items-center justify-center rounded-[1.25rem] border border-[#ece8e1] bg-[#f0eee9] text-sm text-[#9e9aa4]">
       Loading map…
     </div>
   ),
 });
+
+// Per-truck route colours — must match ControlTowerMap's ROUTE_PALETTE so the
+// filter chips and the map routes agree.
+const ROUTE_PALETTE = [
+  '#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#0891b2', '#9333ea', '#65a30d',
+];
 
 const STATE_COLOR = {
   en_route: '#2563eb',
@@ -61,7 +67,7 @@ function dayBounds(plan) {
  * delivery window — the predicted-late / geofence alerts turn red before the
  * customer ever notices. All derived from the current plan (no GPS feed).
  */
-export default function ControlTowerPanel({ plan, day }) {
+export default function ControlTowerPanel({ plan, day, selectedTruckId = null, onSelectTruck }) {
   const [start, end] = useMemo(() => dayBounds(plan), [plan]);
   const [asOf, setAsOf] = useState(null);          // minutes; null → server midpoint
   const [delays, setDelays] = useState({});         // { [truckId]: minutes }
@@ -69,6 +75,19 @@ export default function ControlTowerPanel({ plan, day }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const reqId = useRef(0);
+
+  // Trucks with routed work, tagged with their route colour + stop count for the
+  // filter chips. Colour is keyed by index in plan.trucks to match the map.
+  const routeChips = useMemo(() => (
+    (plan?.trucks || [])
+      .map((t, ti) => ({
+        truck_id: t.truck_id,
+        truck_label: t.truck_label,
+        color: ROUTE_PALETTE[ti % ROUTE_PALETTE.length],
+        stops: (t.trips || []).reduce((n, trip) => n + (trip.stops || []).length, 0),
+      }))
+      .filter((t) => t.stops > 0)
+  ), [plan]);
 
   const activeTrucks = (plan?.trucks || []).filter((t) => t.trips && t.trips.length);
 
@@ -171,9 +190,46 @@ export default function ControlTowerPanel({ plan, day }) {
 
       {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
-      {/* Map */}
+      {/* Truck filter chips — focus one truck's route (syncs with the timeline). */}
+      {routeChips.length ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {routeChips.map((r) => {
+            const on = String(r.truck_id) === String(selectedTruckId);
+            return (
+              <button
+                key={r.truck_id}
+                type="button"
+                onClick={() => onSelectTruck?.(on ? null : r.truck_id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  on ? 'border-brand-600 bg-brand-600/10 text-brand-600' : 'border-border text-ink hover:bg-canvas'
+                }`}
+              >
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.color }} />
+                {r.truck_label}
+                <span className="text-[#9e9aa4]">· {r.stops}</span>
+              </button>
+            );
+          })}
+          {selectedTruckId != null ? (
+            <button
+              type="button"
+              onClick={() => onSelectTruck?.(null)}
+              className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted transition hover:bg-canvas"
+            >
+              Show all trucks
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Map — planned routes (real roads) + live truck positions in one view. */}
       <div className="mt-4">
-        <ControlTowerMap plan={plan} snapshot={snapshot} />
+        <ControlTowerMap
+          plan={plan}
+          snapshot={snapshot}
+          selectedTruckId={selectedTruckId}
+          onSelectTruck={onSelectTruck}
+        />
       </div>
 
       {/* Delay injection */}
@@ -277,9 +333,9 @@ function Header() {
         <Radio size={18} />
       </span>
       <div>
-        <h2 className="text-lg font-semibold text-ink">Live Control Tower</h2>
+        <h2 className="text-lg font-semibold text-ink">Routes &amp; Live Control Tower</h2>
         <p className="text-xs text-muted">
-          Scrub the day forward — see where every truck is and which drops are about to miss their window.
+          Today’s routes on the map — scrub the day forward to see where every truck is and which drops are about to miss their window.
         </p>
       </div>
     </div>

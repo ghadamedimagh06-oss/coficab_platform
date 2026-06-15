@@ -34,6 +34,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import StatusBadge from '../../components/shared/StatusBadge';
+import SustainabilityPanel from '../../components/planning/SustainabilityPanel';
 import { generateDailyPlan } from '../services/api';
 import { useDailyDashboard } from '../../hooks/useDailyDashboard';
 import { useFleet } from '../../hooks/useFleet';
@@ -591,6 +592,23 @@ export default function DashboardPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Carbon & ESG — derived from the same day's generated plan. */}
+      {plan?.sustainability && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.15 }}
+          className="mb-8"
+        >
+          <SustainabilityPanel
+            plan={plan}
+            day={dashboard?.day}
+            activeTrucks={activeTrucks}
+            onApplyPlan={setPlan}
+          />
+        </motion.div>
+      )}
     </div>
   );
 }
