@@ -1,33 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, ShieldCheck, ShieldOff, Wand2 } from 'lucide-react';
 import { exportDailyPlan, generateDailyPlan } from '../services/api';
 import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
-import ConstraintsPanel from '../../components/planning/ConstraintsPanel';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
 import JustificationModal from '../../components/planning/JustificationModal';
 import PlanChangeLog from '../../components/planning/PlanChangeLog';
 import PlanTable from '../../components/planning/PlanTable';
-import SustainabilityPanel from '../../components/planning/SustainabilityPanel';
 import StressTestPanel from '../../components/planning/StressTestPanel';
 import ConfidencePanel from '../../components/planning/ConfidencePanel';
 import DisruptionPanel from '../../components/planning/DisruptionPanel';
 import ExplainPanel from '../../components/planning/ExplainPanel';
 import ControlTowerPanel from '../../components/planning/ControlTowerPanel';
-import CopilotActionBar from '../../components/planning/CopilotActionBar';
-
-// Leaflet touches `window` at import time, so load the map client-side only.
-const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
-import { trucks as fallbackTrucks } from '../../data/coficabData';
-import { useFleet } from '../../hooks/useFleet';
+import { drivers as fallbackDrivers, trucks as fallbackTrucks } from '../../data/coficabData';
+import { useDrivers, useFleet } from '../../hooks/useFleet';
 import {
+  applyDriverStatusOverrides,
+  applyTruckAssignmentOverrides,
   applyTruckStatusOverrides,
+  normalizeDriverStatus,
   normalizeTruckStatus,
+  UNAVAILABLE_DRIVER_STATUSES,
   UNAVAILABLE_TRUCK_STATUSES,
 } from '../../utils/truckStatus';
 
@@ -50,27 +47,33 @@ function todayIso() {
 const PLAN_MEMORY_CACHE = new Map();
 const CACHE_PREFIX = 'coficab:dailyPlan:';
 
-function readCachedPlan(day) {
+function cacheKey(day, resourceSignature) {
+  return `${CACHE_PREFIX}${day}:${resourceSignature || 'resources'}`;
+}
+
+function readCachedPlan(day, resourceSignature) {
   if (!day) return null;
-  if (PLAN_MEMORY_CACHE.has(day)) return PLAN_MEMORY_CACHE.get(day);
+  const key = cacheKey(day, resourceSignature);
+  if (PLAN_MEMORY_CACHE.has(key)) return PLAN_MEMORY_CACHE.get(key);
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.sessionStorage.getItem(CACHE_PREFIX + day);
+    const raw = window.sessionStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    PLAN_MEMORY_CACHE.set(day, parsed);
+    PLAN_MEMORY_CACHE.set(key, parsed);
     return parsed;
   } catch {
     return null;
   }
 }
 
-function writeCachedPlan(day, plan) {
+function writeCachedPlan(day, resourceSignature, plan) {
   if (!day || !plan) return;
-  PLAN_MEMORY_CACHE.set(day, plan);
+  const key = cacheKey(day, resourceSignature);
+  PLAN_MEMORY_CACHE.set(key, plan);
   if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.setItem(CACHE_PREFIX + day, JSON.stringify(plan));
+    window.sessionStorage.setItem(key, JSON.stringify(plan));
   } catch {
     // Quota or serialization issue — the in-memory cache still covers navigation.
   }
@@ -197,24 +200,91 @@ function withManualMarkers(plan) {
   };
 }
 
-function toDailyTruckPayload(truck) {
-  const status = normalizeTruckStatus(truck.status);
-  if (UNAVAILABLE_TRUCK_STATUSES.has(status)) return null;
+function normalizeResourceDriver(driver) {
+  const id = driver.id;
+  return {
+    ...driver,
+    id,
+    full_name: driver.full_name,
+    status: normalizeDriverStatus(driver.status),
+    assigned_truck: driver.assigned_truck ?? driver.camion_defaut_id ?? null,
+  };
+}
 
+function toDailyTruckPayload(truck, driverById, drivers) {
+  const status = normalizeTruckStatus(truck.status);
+  const truckId = truck.id ?? truck.truck_id;
+  const assignedDriver = (
+    truck.assigned_driver
+    ?? truck.chauffeur_defaut_id
+    ?? drivers.find((candidate) => String(candidate.assigned_truck) === String(truckId))?.id
+    ?? null
+  );
+  const driver = assignedDriver != null ? driverById[String(assignedDriver)] : null;
   const capacityPositions = Number(truck.capacity_positions ?? truck.max_palettes ?? truck.max_pallets ?? 0);
   const capacityKg = Number(truck.capacity_kg ?? truck.capacite_kg ?? truck.capacity ?? 0);
   if (!capacityPositions) return null;
 
+  const truckUnavailable = UNAVAILABLE_TRUCK_STATUSES.has(status);
+  const hasAssignedDriver = assignedDriver != null && assignedDriver !== '';
+  const driverUnavailable = !hasAssignedDriver || (
+    driver && (UNAVAILABLE_DRIVER_STATUSES.has(driver.status) || driver.status === 'En pause')
+  );
+  const outOfServiceReason = truckUnavailable
+    ? status
+    : driverUnavailable
+      ? (driver ? `Driver ${driver.status}` : 'No assigned driver')
+      : null;
+
   return {
-    truck_id: truck.id ?? truck.truck_id,
-    truck_label: truck.plate_number || truck.truck_label || `Truck ${truck.id ?? truck.truck_id}`,
+    truck_id: truckId,
+    truck_label: truck.plate_number || truck.truck_label || `Truck ${truckId}`,
     capacity_positions: capacityPositions,
     capacity_kg: capacityKg,
+    capacity_m3: truck.capacity_m3,
+    driver_id: driver?.id ?? assignedDriver ?? null,
+    driver: driver?.full_name ?? null,
+    resource_status: outOfServiceReason ? 'out_of_service' : 'available',
+    resource_reason: outOfServiceReason,
+    truck_status: status,
   };
 }
 
+function withResourceLanes(plan, resourceFleet) {
+  if (!plan) return plan;
+  const byId = new Map((resourceFleet || []).map((truck) => [String(truck.truck_id), truck]));
+  const enriched = (plan.trucks || []).map((truck) => ({
+    ...truck,
+    ...(byId.get(String(truck.truck_id)) || {}),
+    trips: truck.trips || [],
+  }));
+  const plannedIds = new Set(enriched.map((truck) => String(truck.truck_id)));
+  const unavailable = (resourceFleet || [])
+    .filter((truck) => truck.resource_status === 'out_of_service' && !plannedIds.has(String(truck.truck_id)))
+    .map((truck) => ({ ...truck, trips: [] }));
+  return {
+    ...plan,
+    trucks: [...enriched, ...unavailable],
+    resource_summary: {
+      total: resourceFleet.length,
+      available: resourceFleet.filter((truck) => truck.resource_status !== 'out_of_service').length,
+      out_of_service: resourceFleet.filter((truck) => truck.resource_status === 'out_of_service').length,
+    },
+  };
+}
+
+function resourceSignature(resourceFleet) {
+  return JSON.stringify((resourceFleet || []).map((truck) => ({
+    id: truck.truck_id,
+    status: truck.resource_status,
+    reason: truck.resource_reason,
+    driver: truck.driver_id,
+  })));
+}
+
 export default function GeneratedDailyPlanningPage() {
-  const { trucks: apiTrucks } = useFleet();
+  const { trucks: apiTrucks, isLoading: trucksLoading } = useFleet();
+  const { drivers: apiDrivers, isLoading: driversLoading } = useDrivers();
   // Start empty so server and client first-render match; the real date is set
   // after mount (avoids a Date-driven hydration mismatch).
   const [day, setDay] = useState('');
@@ -238,19 +308,31 @@ export default function GeneratedDailyPlanningPage() {
     unassigned: plan?.unassigned?.length || 0,
   }), [plan]);
 
-  const activeTrucks = useMemo(() => (
-    applyTruckStatusOverrides(apiTrucks.length ? apiTrucks : fallbackTrucks)
-      .map(toDailyTruckPayload)
+  const resourceReady = !trucksLoading && !driversLoading;
+
+  const resourceFleet = useMemo(() => {
+    const drivers = applyDriverStatusOverrides((apiDrivers.length ? apiDrivers : fallbackDrivers).map(normalizeResourceDriver));
+    const driverById = Object.fromEntries(drivers.map((driver) => [String(driver.id), driver]));
+    return applyTruckAssignmentOverrides(applyTruckStatusOverrides(apiTrucks.length ? apiTrucks : fallbackTrucks))
+      .map((truck) => toDailyTruckPayload(truck, driverById, drivers))
       .filter(Boolean)
-  ), [apiTrucks]);
+      .sort((a, b) => Number(a.truck_id) - Number(b.truck_id));
+  }, [apiDrivers, apiTrucks]);
+
+  const activeTrucks = useMemo(
+    () => resourceFleet.filter((truck) => truck.resource_status !== 'out_of_service'),
+    [resourceFleet],
+  );
+  const currentResourceSignature = useMemo(() => resourceSignature(resourceFleet), [resourceFleet]);
 
   async function regenerate(nextDay = day) {
     setStatus('generating');
     setError(null);
     try {
-      const nextPlan = withManualMarkers(await generateDailyPlan(nextDay, undefined, activeTrucks));
+      const generated = await generateDailyPlan(nextDay, undefined, activeTrucks);
+      const nextPlan = withManualMarkers(withResourceLanes(generated, resourceFleet));
       setPlan(nextPlan);
-      writeCachedPlan(nextDay, nextPlan);
+      writeCachedPlan(nextDay, currentResourceSignature, nextPlan);
       setStatus('ready');
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Unable to generate the daily plan.');
@@ -261,9 +343,10 @@ export default function GeneratedDailyPlanningPage() {
   // Show a cached plan instantly when one exists for `nextDay`; only fall back
   // to the slow backend build on a cache miss. Returns true when served cached.
   function showCachedOrRegenerate(nextDay) {
-    const cached = readCachedPlan(nextDay);
+    if (!resourceReady) return false;
+    const cached = readCachedPlan(nextDay, currentResourceSignature);
     if (cached) {
-      setPlan(withManualMarkers(cached));
+      setPlan(withManualMarkers(withResourceLanes(cached, resourceFleet)));
       setError(null);
       setStatus('ready');
       return true;
@@ -275,14 +358,18 @@ export default function GeneratedDailyPlanningPage() {
   useEffect(() => {
     const initial = todayIso();
     setDay(initial);
-    showCachedOrRegenerate(initial);
   }, []);
+
+  useEffect(() => {
+    if (!day || !resourceReady) return;
+    showCachedOrRegenerate(day);
+  }, [day, resourceReady, currentResourceSignature]);
 
   // Keep the cache in step with local edits (moves, adds, deletes) so a reload
   // restores the latest state rather than the pristine generated plan.
   useEffect(() => {
-    if (plan && status === 'ready' && day) writeCachedPlan(day, plan);
-  }, [plan, status, day]);
+    if (plan && status === 'ready' && day) writeCachedPlan(day, currentResourceSignature, plan);
+  }, [plan, status, day, currentResourceSignature]);
 
   function moveDelivery(deliveryId, targetTruckId, targetMinute = WORK_START) {
     if (!deliveryId || !plan) return;
@@ -342,6 +429,11 @@ export default function GeneratedDailyPlanningPage() {
     const requiredTruck = moved.constraints?.required_truck_id;
     if (requiredTruck && String(requiredTruck) !== String(targetTruckId)) {
       setError(`${moved.client} is fixed to Truck ${requiredTruck}.`);
+      return;
+    }
+    const targetTruck = plan.trucks.find((truck) => String(truck.truck_id) === String(targetTruckId));
+    if (targetTruck?.resource_status === 'out_of_service') {
+      setError(`${targetTruck.truck_label} is out of service (${targetTruck.resource_reason || 'resource unavailable'}).`);
       return;
     }
 
@@ -722,60 +814,37 @@ export default function GeneratedDailyPlanningPage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
-          {status === 'generating' && !plan ? (
-            <div className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
-              <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
-            </div>
-          ) : (
-            // Wrap in a single grid cell: GanttBoard's <DndContext> renders
-            // several sibling nodes (marker toolbar, the scroller, and dnd-kit's
-            // hidden a11y live regions). Without this wrapper those siblings are
-            // auto-placed as separate grid items and the timeline gets squeezed
-            // into the narrow side column. min-w-0 lets the scroller shrink so
-            // its 1800px content stays inside the cell and scrolls horizontally.
-            <div className="min-w-0">
-              <GanttBoard
-                plan={plan}
-                selectedTruckId={selectedTruckId}
-                onSelectTruck={setSelectedTruckId}
-                onDropDelivery={moveDelivery}
-                onResizeDelivery={resizeDelivery}
-                onCancel={cancelDelivery}
-                onRestore={restoreDelivery}
-                onDropMarker={addMarker}
-                onMoveMarker={moveMarker}
-                onDeleteMarker={deleteMarker}
-              />
-            </div>
-          )}
-          <ConstraintsPanel plan={plan} onRestore={restoreDelivery} />
-        </div>
+        {status === 'generating' && !plan ? (
+          <div className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
+            <div className="h-96 rounded-2xl bg-[#f0eee9] animate-pulse" />
+          </div>
+        ) : (
+          // min-w-0 lets GanttBoard's 1800px scroller shrink inside the column
+          // and scroll horizontally instead of overflowing the page.
+          <div className="min-w-0">
+            <GanttBoard
+              plan={plan}
+              selectedTruckId={selectedTruckId}
+              onSelectTruck={setSelectedTruckId}
+              onDropDelivery={moveDelivery}
+              onResizeDelivery={resizeDelivery}
+              onCancel={cancelDelivery}
+              onRestore={restoreDelivery}
+              onDropMarker={addMarker}
+              onMoveMarker={moveMarker}
+              onDeleteMarker={deleteMarker}
+            />
+          </div>
+        )}
 
+        {/* Single unified map: today's routes (real roads, per-truck filter,
+            selection synced with the timeline) + the live control tower. */}
         {plan && (
-          <RouteMap
+          <ControlTowerPanel
             plan={plan}
+            day={day}
             selectedTruckId={selectedTruckId}
             onSelectTruck={setSelectedTruckId}
-          />
-        )}
-
-        {plan && <ControlTowerPanel plan={plan} day={day} />}
-
-        {plan && (
-          <CopilotActionBar
-            plan={plan}
-            day={day}
-            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
-          />
-        )}
-
-        {plan && (
-          <SustainabilityPanel
-            plan={plan}
-            day={day}
-            activeTrucks={activeTrucks}
-            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
           />
         )}
 
@@ -783,7 +852,7 @@ export default function GeneratedDailyPlanningPage() {
           <DisruptionPanel
             plan={plan}
             day={day}
-            onApplyPlan={(next) => setPlan(withManualMarkers(next))}
+            onApplyPlan={(next) => setPlan(withManualMarkers(withResourceLanes(next, resourceFleet)))}
           />
         )}
 

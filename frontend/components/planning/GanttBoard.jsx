@@ -116,6 +116,7 @@ export default function GanttBoard({
   const trucks = plan?.trucks || [];
   const hasStops = trucks.some((truck) => (truck.trips || []).some((trip) => (trip.stops || []).length > 0));
   const activeTrucks = trucks.filter((t) => (t.trips || []).some((tr) => (tr.stops || []).length > 0)).length;
+  const outOfServiceTrucks = trucks.filter((t) => t.resource_status === 'out_of_service').length;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor),
@@ -162,6 +163,11 @@ export default function GanttBoard({
             <span className="rounded-full bg-brand-600/10 px-2 py-0.5 text-[11px] font-semibold text-brand-600">
               {activeTrucks} active
             </span>
+            {outOfServiceTrucks > 0 && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                {outOfServiceTrucks} out of service
+              </span>
+            )}
             <span className="hidden h-4 w-px bg-[#ece8e1] sm:block" />
             <div className="hidden flex-wrap items-center gap-3.5 sm:flex">
               <LegendChip swatch={<span className="h-3 w-1.5 rounded-sm bg-[#ef4444]" />}>Urgent</LegendChip>

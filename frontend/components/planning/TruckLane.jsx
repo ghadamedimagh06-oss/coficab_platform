@@ -81,9 +81,11 @@ function fillColor(ratio) {
 
 export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, hosWarning = null, selected = false, onSelectTruck, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
   const spanMin = Math.max(1, windowEnd - WORK_START);
+  const isOutOfService = truck.resource_status === 'out_of_service';
   const { isOver, setNodeRef } = useDroppable({
     id: `truck-lane-${truck.truck_id}`,
     data: { truckId: truck.truck_id },
+    disabled: isOutOfService,
   });
   const [laneNode, setLaneNode] = useState(null);
   const [laneWidth, setLaneWidth] = useState(0);
@@ -130,7 +132,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
   const tripCount = trips.length;
   const fillRatio = capacityPositions && tripCount ? usedPositions / (capacityPositions * tripCount) : 0;
   const isIdle = allStops.length === 0;
-  const accent = isIdle ? '#c4bfb6' : fillColor(fillRatio);
+  const accent = isOutOfService ? '#ef4444' : isIdle ? '#c4bfb6' : fillColor(fillRatio);
   const nowLeft = nowMinute != null ? pctIn(`${Math.floor(nowMinute / 60)}:${nowMinute % 60}`, windowEnd) : null;
 
   // Each trip is bookended by COFICAB markers — the departure (its ETD) and the
@@ -217,8 +219,10 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
           </div>
         </button>
         {isIdle ? (
-          <span className="inline-flex w-fit items-center rounded-full bg-[#f0eee9] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#a39e96]">
-            Idle
+          <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+            isOutOfService ? 'bg-red-50 text-red-600' : 'bg-[#f0eee9] text-[#a39e96]'
+          }`}>
+            {isOutOfService ? `Out of service${truck.resource_reason ? `: ${truck.resource_reason}` : ''}` : 'Idle'}
           </span>
         ) : (
           <div>
@@ -238,7 +242,7 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
       {/* Timeline track */}
       <div
         ref={setTimelineRef}
-        className={`relative transition-colors ${isOver ? 'bg-brand-50' : isIdle ? 'bg-[#fcfbf9]' : 'bg-white'}`}
+        className={`relative transition-colors ${isOutOfService ? 'bg-red-50/30' : isOver ? 'bg-brand-50' : isIdle ? 'bg-[#fcfbf9]' : 'bg-white'}`}
         style={{
           // one faint vertical gridline per hour (06–20 → 14 columns)
           backgroundImage: 'linear-gradient(to right,#f1ede6 1px,transparent 1px)',
@@ -316,7 +320,9 @@ export default function TruckLane({ truck, markers = [], nowMinute = null, windo
           <DepotMarker key={marker.id} marker={marker} left={pctIn(marker.time, windowEnd)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
         ))}
         {isIdle && (
-          <div className="absolute inset-0 flex items-center px-6 text-xs font-medium text-[#c4bfb6]">No deliveries assigned</div>
+          <div className={`absolute inset-0 flex items-center px-6 text-xs font-medium ${isOutOfService ? 'text-red-400' : 'text-[#c4bfb6]'}`}>
+            {isOutOfService ? (truck.resource_reason || 'Resource unavailable') : 'No deliveries assigned'}
+          </div>
         )}
       </div>
     </div>

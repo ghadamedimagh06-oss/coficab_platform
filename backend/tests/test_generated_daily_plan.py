@@ -123,6 +123,48 @@ def test_daily_plan_builder_assigns_real_workbook_rows():
     )
 
 
+def test_daily_plan_api_filters_out_unavailable_resource_payload():
+    from app.routes.optimization import _sanitize_daily_plan_trucks
+
+    trucks = _sanitize_daily_plan_trucks([
+        {"truck_id": 1, "truck_label": "Ready", "capacity_positions": 14, "capacity_kg": 10000, "resource_status": "available"},
+        {"truck_id": 2, "truck_label": "Broken", "capacity_positions": 14, "capacity_kg": 10000, "resource_status": "out_of_service"},
+        {"truck_id": 3, "truck_label": "Paused Driver", "capacity_positions": 14, "capacity_kg": 10000, "driver_status": "En pause"},
+    ])
+
+    assert [truck["truck_id"] for truck in trucks] == [1]
+
+
+def test_daily_plan_db_fleet_requires_available_truck_and_active_driver(db):
+    from app.database import Base
+    from app.models.camion import Camion, CamionStatus, CamionType
+    from app.models.chauffeur import Chauffeur, ChauffeurStatus, PermisType
+    from app.routes.optimization import _available_trucks_for_daily_plan
+
+    Base.metadata.create_all(bind=db.get_bind(), checkfirst=True)
+
+    active = Chauffeur(id=501, full_name="Active Driver", permis_type=PermisType.C, status=ChauffeurStatus.ACTIF)
+    paused = Chauffeur(id=502, full_name="Paused Driver", permis_type=PermisType.C, status=ChauffeurStatus.CONGE)
+    ready = Camion(
+        id=601, plate_number="READY-601", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.DISPONIBLE, chauffeur_defaut_id=501,
+    )
+    broken = Camion(
+        id=602, plate_number="BROKEN-602", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.PANNE, chauffeur_defaut_id=501,
+    )
+    no_driver = Camion(
+        id=603, plate_number="PAUSED-603", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.DISPONIBLE, chauffeur_defaut_id=502,
+    )
+    db.add_all([active, paused, ready, broken, no_driver])
+    db.commit()
+
+    fleet = _available_trucks_for_daily_plan(db)
+
+    assert [truck["truck_id"] for truck in fleet] == [601]
+
+
 def test_daily_plan_builder_does_not_parallelize_one_truck():
     plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
 

@@ -426,7 +426,7 @@ def generate_daily_plan(
     # cold cache. FastAPI runs sync handlers in a threadpool, so concurrent
     # requests are not stalled. See scripts/prewarm_geocode.py to warm offline.
     try:
-        trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+        trucks = _sanitize_daily_plan_trucks(request.trucks) if request.trucks is not None else _available_trucks_for_daily_plan(db)
         builder = DailyPlanBuilder(WEEKLY_DIR, trucks=trucks)
         return builder.build(day=_parse_day(request.day), source_file=request.source_file)
     except Exception as exc:
@@ -500,7 +500,7 @@ def daily_pareto(
         seen: set = set()
         objectives = [o for o in objectives if not (o in seen or seen.add(o))]
 
-        trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+        trucks = _sanitize_daily_plan_trucks(request.trucks) if request.trucks is not None else _available_trucks_for_daily_plan(db)
 
         points: List[Dict[str, Any]] = []
         plans: Dict[str, Any] = {}
@@ -681,7 +681,7 @@ def daily_stress_test(
         day = _parse_day(request.day)
         obj = request.objective.lower() if request.objective.lower() in _VALID_OBJECTIVES else "balanced"
         base_fleet = (
-            request.trucks
+            _sanitize_daily_plan_trucks(request.trucks)
             if request.trucks is not None
             else (_available_trucks_for_daily_plan(db) or list(DEFAULT_TRUCKS))
         )
@@ -873,7 +873,7 @@ def daily_replan(
         day = _parse_day(request.day)
         return compute_replan(
             request.plan, day, request.disrupted_truck_ids,
-            request.completed_stop_ids, request.objective, request.trucks,
+            request.completed_stop_ids, request.objective, _sanitize_daily_plan_trucks(request.trucks),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1041,7 +1041,7 @@ def daily_confidence(
         if plan is None:
             day = _parse_day(request.day)
             obj = request.objective.lower() if request.objective.lower() in _VALID_OBJECTIVES else "balanced"
-            trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+            trucks = _sanitize_daily_plan_trucks(request.trucks) if request.trucks is not None else _available_trucks_for_daily_plan(db)
             builder = DailyPlanBuilder(
                 WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True, objective=obj), trucks=trucks,
             )
@@ -1077,7 +1077,7 @@ def daily_control_tower(
         if plan is None:
             day = _parse_day(request.day)
             obj = request.objective.lower() if request.objective.lower() in _VALID_OBJECTIVES else "balanced"
-            trucks = request.trucks if request.trucks is not None else _available_trucks_for_daily_plan(db)
+            trucks = _sanitize_daily_plan_trucks(request.trucks) if request.trucks is not None else _available_trucks_for_daily_plan(db)
             builder = DailyPlanBuilder(
                 WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True, objective=obj), trucks=trucks,
             )
@@ -1178,7 +1178,7 @@ def daily_dashboard(
             try:
                 parsed = json.loads(trucks)
                 if isinstance(parsed, list) and parsed:
-                    fleet = parsed
+                    fleet = _sanitize_daily_plan_trucks(parsed)
             except (ValueError, TypeError):
                 fleet = None
         if fleet is None:
@@ -1256,12 +1256,54 @@ def _parse_day(raw: str) -> _date:
     return _date.fromisoformat(raw)
 
 
+def _sanitize_daily_plan_trucks(trucks: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    if trucks is None:
+        return None
+    unavailable_truck = {"PANNE", "MAINTENANCE", "BROKEN DOWN", "MAINTENANCE", "EN PANNE", "EN MAINTENANCE"}
+    unavailable_driver = {"CONGE", "ARRET_MALADIE", "INACTIF", "EN PAUSE"}
+    clean: List[Dict[str, Any]] = []
+    for truck in trucks:
+        status = str(truck.get("resource_status") or truck.get("truck_status") or truck.get("status") or "").upper()
+        driver_status = str(truck.get("driver_status") or "").upper()
+        if status == "OUT_OF_SERVICE" or status in unavailable_truck:
+            continue
+        if driver_status and driver_status in unavailable_driver:
+            continue
+        truck_id = truck.get("truck_id", truck.get("id"))
+        capacity_positions = truck.get("capacity_positions", truck.get("max_palettes", truck.get("max_pallets", 0)))
+        capacity_kg = truck.get("capacity_kg", truck.get("capacite_kg", truck.get("capacity", 0)))
+        try:
+            capacity_positions = int(capacity_positions or 0)
+            capacity_kg = float(capacity_kg or 0)
+        except (TypeError, ValueError):
+            continue
+        if truck_id is None or capacity_positions <= 0:
+            continue
+        item = {
+            **truck,
+            "truck_id": truck_id,
+            "truck_label": truck.get("truck_label") or truck.get("plate_number") or f"Truck {truck_id}",
+            "capacity_positions": capacity_positions,
+            "capacity_kg": capacity_kg,
+        }
+        clean.append(item)
+    return clean
+
+
 def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dict[str, Any]]]:
     if not db:
         return None
     try:
         from app.models.camion import Camion, CamionStatus
+        from app.models.chauffeur import Chauffeur, ChauffeurStatus
 
+        all_rows = db.query(Camion).all()
+        if not all_rows:
+            return None
+        active_drivers = {
+            driver.id: driver
+            for driver in db.query(Chauffeur).filter(Chauffeur.status == ChauffeurStatus.ACTIF).all()
+        }
         rows = (
             db.query(Camion)
             .filter(Camion.status == CamionStatus.DISPONIBLE)
@@ -1269,16 +1311,18 @@ def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dic
             .all()
         )
         if not rows:
-            return None
+            return []
         return [
             {
                 "truck_id": truck.id,
                 "truck_label": truck.plate_number,
                 "capacity_positions": int(truck.max_palettes or 0),
                 "capacity_kg": float(truck.capacite_kg or 0),
+                "driver_id": truck.chauffeur_defaut_id,
+                "driver": active_drivers[truck.chauffeur_defaut_id].full_name,
             }
             for truck in rows
-            if (truck.max_palettes or 0) > 0
-        ] or None
+            if (truck.max_palettes or 0) > 0 and truck.chauffeur_defaut_id in active_drivers
+        ]
     except Exception:
         return None
