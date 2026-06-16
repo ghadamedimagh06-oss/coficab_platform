@@ -1,0 +1,101 @@
+erDiagram
+    UTILISATEUR {
+        int id PK
+        varchar username
+        enum role
+    }
+    PLAN {
+        int id PK
+        enum statut_plan
+    }
+    PLANNING_HEBDO {
+        int id PK
+        date week
+        varchar status
+        int created_by FK
+        int validated_by FK
+        int reviewed_by FK
+        varchar file_name
+    }
+    LIGNE_PLANNING {
+        int id PK
+        int planning_id FK
+        varchar delivery_day
+        varchar client
+        varchar driver
+        varchar vehicle
+        float distance_km
+        int quantity
+        varchar status
+    }
+    DIFF_PLANNING {
+        int id PK
+        int planning_id FK
+        int delivery_id FK
+        varchar field_name
+        text old_value
+        text new_value
+        bool is_j_plus_1
+    }
+    SPLIT_LIVRAISON {
+        int id PK
+        int original_delivery_id FK
+        int parent_split_id FK
+        int split_sequence
+        int quantity
+        varchar state
+        int validated_by FK
+    }
+    AUDIT_SPLIT {
+        int id PK
+        int original_delivery_id FK
+        varchar state
+        varchar decision_action
+        int decided_by FK
+    }
+    CHANGEMENT_PLAN {
+        int id PK
+        int plan_version_id FK
+        varchar field_changed
+        text old_value
+        text new_value
+        int user_id FK
+    }
+    KPI_DEFINITION {
+        int id PK
+        varchar code
+        text nom
+        varchar unite
+        enum frequence
+        enum direction
+    }
+    KPI_JOURNALIER {
+        int id PK
+        int kpi_def_id FK
+        date date_mesure
+        varchar plant
+        dec valeur
+    }
+    KPI_MENSUEL {
+        int id PK
+        int kpi_def_id FK
+        smallint annee
+        smallint mois
+        varchar plant
+        dec valeur
+        enum status
+    }
+
+    UTILISATEUR    ||--o{ PLANNING_HEBDO  : "cree"
+    UTILISATEUR    |o--o{ PLANNING_HEBDO  : "valide"
+    PLANNING_HEBDO |o--o{ LIGNE_PLANNING  : "contient"
+    PLANNING_HEBDO ||--o{ DIFF_PLANNING   : "differencie"
+    LIGNE_PLANNING |o--o{ DIFF_PLANNING   : "concerne"
+    LIGNE_PLANNING ||--o{ SPLIT_LIVRAISON : "scinde"
+    SPLIT_LIVRAISON |o--o{ SPLIT_LIVRAISON : "parent"
+    LIGNE_PLANNING ||--o{ AUDIT_SPLIT     : "audite"
+    UTILISATEUR    |o--o{ SPLIT_LIVRAISON : "valide_split"
+    PLAN           ||--o{ CHANGEMENT_PLAN : "trace"
+    UTILISATEUR    |o--o{ CHANGEMENT_PLAN : "auteur"
+    KPI_DEFINITION ||--o{ KPI_JOURNALIER  : "mesure_jour"
+    KPI_DEFINITION ||--o{ KPI_MENSUEL     : "mesure_mois"

@@ -1,0 +1,48 @@
+erDiagram
+    DIM_CLIENT {
+        int id_client PK
+        varchar nom
+        varchar secteur
+        time fenetre_ouverture
+        time fenetre_fermeture
+    }
+    DIM_TRANSPORTEUR {
+        int id_transporteur PK
+        varchar nom
+        varchar type
+        dec capacite_nominale
+    }
+    DIM_DESTINATION {
+        int id_destination PK
+        varchar ville
+        dec distance_depot_km
+        dec latitude
+        dec longitude
+    }
+    DIM_TEMPS {
+        int id_temps PK
+        date date
+        int jour
+        int semaine_iso
+        int mois
+        int annee
+    }
+    FAIT_LIVRAISONS {
+        int id_client FK
+        int id_transporteur FK
+        int id_destination FK
+        int id_temps FK
+        date date_planifiee
+        time heure_planifiee
+        date date_effective
+        time heure_effective
+        dec cout
+        dec distance
+        dec volume_livre
+        int otif
+    }
+
+    DIM_CLIENT       ||--o{ FAIT_LIVRAISONS : "client"
+    DIM_TRANSPORTEUR ||--o{ FAIT_LIVRAISONS : "transporteur"
+    DIM_DESTINATION  ||--o{ FAIT_LIVRAISONS : "destination"
+    DIM_TEMPS        ||--o{ FAIT_LIVRAISONS : "temps"

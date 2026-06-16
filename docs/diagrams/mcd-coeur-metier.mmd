@@ -1,0 +1,119 @@
+erDiagram
+    UTILISATEUR {
+        int id PK
+        varchar username
+        varchar email
+        varchar password_hash
+        enum role
+        bool is_active
+    }
+    CLIENT {
+        int id PK
+        text nom
+        text city
+        dec latitude
+        dec longitude
+        time fenetre_ouverture
+        time fenetre_fermeture
+    }
+    CAMION {
+        int id PK
+        varchar plate_number
+        enum type
+        dec capacite_kg
+        smallint max_palettes
+        enum status
+        int chauffeur_defaut_id FK
+    }
+    CHAUFFEUR {
+        int id PK
+        varchar full_name
+        varchar phone
+        enum permis_type
+        enum status
+        int camion_defaut_id FK
+    }
+    DEMANDE_LIVRAISON {
+        int id PK
+        int client_id FK
+        dec quantite_kg
+        smallint nombre_palettes
+        date date_livraison
+        enum statut
+        enum priorite
+        bool livree_a_temps
+    }
+    PLAN {
+        int id PK
+        int plan_id
+        smallint version_number
+        enum periode
+        date date_debut
+        date date_fin
+        enum statut_plan
+    }
+    MISSION {
+        int id PK
+        int plan_version_id FK
+        int camion_id FK
+        int chauffeur_id FK
+        date date_mission
+        enum statut
+        enum mode
+        dec km_parcourus
+        dec load_eff_pct
+    }
+    ARRET_LIVRAISON {
+        int id PK
+        int mission_id FK
+        int demande_id FK
+        smallint ordre_livraison
+        ts eta_prevue
+        enum statut
+    }
+    PREUVE_LIVRAISON {
+        int id PK
+        int mission_demande_id FK
+        int demande_id FK
+        enum statut
+        ts delivered_at
+        bool on_time
+    }
+    EVENEMENT {
+        int id PK
+        int plan_version_id FK
+        int mission_id FK
+        int demande_id FK
+        enum type
+        int impact_delai_min
+        bool resolu
+    }
+    NOTIFICATION {
+        int id PK
+        int mission_id FK
+        int chauffeur_id FK
+        varchar status
+        ts sent_at
+    }
+    AFFECTATION {
+        int id PK
+        int chauffeur_id FK
+        int camion_id FK
+        date date_affectation
+    }
+
+    CLIENT            ||--o{ DEMANDE_LIVRAISON : "passe"
+    PLAN              ||--|{ MISSION           : "regroupe"
+    CAMION            ||--o{ MISSION           : "utilise"
+    CHAUFFEUR         ||--o{ MISSION           : "conduit"
+    MISSION           ||--|{ ARRET_LIVRAISON   : "comprend"
+    DEMANDE_LIVRAISON ||--o| ARRET_LIVRAISON   : "realise"
+    ARRET_LIVRAISON   ||--o| PREUVE_LIVRAISON  : "atteste"
+    PLAN              |o--o{ EVENEMENT         : "impacte"
+    MISSION           |o--o{ EVENEMENT         : "impacte"
+    DEMANDE_LIVRAISON |o--o{ EVENEMENT         : "impacte"
+    MISSION           ||--o{ NOTIFICATION      : "notifiee_par"
+    CHAUFFEUR         ||--o{ NOTIFICATION      : "destinataire"
+    CAMION            ||--o{ AFFECTATION       : "affecte"
+    CHAUFFEUR         ||--o{ AFFECTATION       : "affecte"
+    CAMION            |o--o{ CHAUFFEUR         : "chauffeur_defaut"
