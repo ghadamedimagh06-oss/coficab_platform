@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Home,
   CalendarDays,
@@ -12,6 +12,7 @@ import {
   Wand2,
   X,
   PanelLeft,
+  LogOut,
 } from 'lucide-react';
 
 const mainNavItems = [
@@ -55,6 +56,14 @@ function NavLink({ icon: Icon, label, href, active, onNavigate, collapsed }) {
 
 export default function Sidebar({ isOpen = false, onClose = () => {}, isCollapsed = false, onToggleCollapse = () => {} }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  function handleLogout() {
+    try {
+      localStorage.removeItem('optiroute_auth');
+    } catch {}
+    router.replace('/login');
+  }
 
   return (
     <>
@@ -153,6 +162,17 @@ export default function Sidebar({ isOpen = false, onClose = () => {}, isCollapse
               <p className="text-sm font-semibold">Ghada Medimagh</p>
               <p className="text-xs text-white/70">Administrator</p>
             </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Sign out"
+              aria-label="Sign out"
+              className={`ml-auto inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 ${
+                isCollapsed ? 'lg:hidden' : ''
+              }`}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
