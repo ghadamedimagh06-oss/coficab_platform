@@ -26,10 +26,10 @@ class DemandeLocal(Base):
     __tablename__ = "demandes_local"
 
     id = Column(Integer, primary_key=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index=True)
     quantite_kg = Column(Numeric(10, 2), nullable=False)
     nombre_palettes = Column(SmallInteger)
-    date_livraison = Column(Date, nullable=False)
+    date_livraison = Column(Date, nullable=False, index=True)
     heure_arrivee_prevue = Column(DateTime(timezone=True))
     heure_arrivee_reelle = Column(DateTime(timezone=True))
     quantite_livree_kg = Column(Numeric(10, 2))

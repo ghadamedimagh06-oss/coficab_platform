@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:17
+    image: postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -31,15 +31,6 @@ services:
     volumes:
       - redis_data:/data
 
-  osrm:
-    image: osrm/osrm-backend:latest
-    command: osrm-routed --algorithm mld /data/tunisia-latest.osrm
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./osrm-data:/data
-    restart: unless-stopped
-
   backend:
     build:
       context: ./backend
@@ -49,8 +40,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BACKEND_API_URL: http://backend:8000
-      OSRM_BASE_URL: http://osrm:5000
-      OSRM_PROFILE: driving
+      WEEKLY_PLANNING_FILE_PATH: "/weekly planning/Weekly Delivery planning W0526.xlsx"
     ports:
       - "8000:8000"
     depends_on:
@@ -60,6 +50,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - "./weekly planning:/weekly planning"
+      - "./archive:/archive"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
@@ -104,6 +96,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BACKEND_URL: http://backend:8000
+      WATCH_FOLDER: /data/watch
+    volumes:
+      - ./shared_folder:/data/watch
     depends_on:
       - redis
       - backend

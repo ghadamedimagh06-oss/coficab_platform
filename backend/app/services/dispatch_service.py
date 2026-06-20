@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -84,7 +84,7 @@ class DispatchService:
                 status=status,
                 error=error,
                 body=body,
-                sent_at=datetime.utcnow(),
+                sent_at=datetime.now(timezone.utc),
             )
         )
         self.db.commit()

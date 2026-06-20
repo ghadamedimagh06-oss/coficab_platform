@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db, get_db_optional
 from app.agents.monitor import SLA_TOLERANCE_MIN
@@ -90,11 +90,11 @@ async def mark_stop_delivered(
     if stop.demande is None:
         raise HTTPException(status_code=400, detail="stop has no linked demande")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     demande = stop.demande
     on_time = None
     if stop.eta_prevue is not None:
-        on_time = now <= stop.eta_prevue + timedelta(minutes=SLA_TOLERANCE_MIN)
+        on_time = now <= _as_utc(stop.eta_prevue) + timedelta(minutes=SLA_TOLERANCE_MIN)
 
     demande.quantite_livree_kg = payload.quantite_livree_kg
     demande.heure_arrivee_reelle = now
@@ -141,7 +141,7 @@ async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db_op
             "status": "skipped",
             "count": 0,
             "persisted": False,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     stored = 0
@@ -167,7 +167,7 @@ async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db_op
             continue
 
     db.commit()
-    return {"status": "synced", "count": stored, "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "synced", "count": stored, "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 def _active_missions(db: Session) -> list[dict[str, Any]]:
@@ -288,10 +288,16 @@ def _mission_slip_minutes(stops: list[MissionDemande]) -> int:
 def _stop_slip_minutes(stop: MissionDemande) -> int:
     if not stop.eta_prevue:
         return 0
-    actual = stop.eta_reelle or datetime.utcnow()
-    slip = int((actual - stop.eta_prevue).total_seconds() // 60)
+    actual = stop.eta_reelle or datetime.now(timezone.utc)
+    slip = int((_as_utc(actual) - _as_utc(stop.eta_prevue)).total_seconds() // 60)
     return max(0, slip)
 
 
 def _status_value(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Make a datetime UTC-aware. DB columns are DateTime(timezone=True) but
+    SQLite returns them naive, so coerce before comparing to an aware now()."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)

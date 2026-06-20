@@ -1,93 +1,151 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { getLiveTracking } from '../services/api';
+import Link from 'next/link';
+import { motion } from 'framer-motion';
+import { CalendarDays, RefreshCcw, Route } from 'lucide-react';
+import { generateDailyPlan } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
-import { clients as initialClients, getClientPosition } from '../../data/coficabData';
+import { palette } from '@/lib/theme';
 
-const TruckMap = dynamic(() => import('../../components/map/TruckMap'), { ssr: false });
+// Leaflet touches `window` at import time, so load the map client-side only.
+const RouteMap = dynamic(() => import('../../components/planning/RouteMap'), { ssr: false });
 
-const fallbackMapClients = initialClients.map((client, index) => {
-  const [lat, lng] = getClientPosition(client.destination, index);
-  return { ...client, lat, lng };
-});
+const container = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.08 } },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+};
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function countStops(plan) {
+  return (plan?.trucks || []).reduce(
+    (sum, t) => sum + (t.trips || []).reduce((n, trip) => n + (trip.stops || []).length, 0),
+    0,
+  );
+}
 
 export default function MapPage() {
-  const [tracking, setTracking] = useState([]);
-  const [mapClients, setMapClients] = useState(fallbackMapClients);
-  const [chatMessages, setChatMessages] = useState([]);
+  const [day, setDay] = useState('');
+  const [plan, setPlan] = useState(null);
+  const [status, setStatus] = useState('loading');
+  const [selectedTruckId, setSelectedTruckId] = useState(null);
+  const [messages, setMessages] = useState([]);
+
+  async function load(nextDay) {
+    setStatus('loading');
+    try {
+      const next = await generateDailyPlan(nextDay);
+      setPlan(next);
+      setSelectedTruckId(null);
+      setStatus('ready');
+      setMessages((prev) => [`Loaded ${countStops(next)} client stops for ${nextDay}. Click a truck to trace its road.`, ...prev]);
+    } catch (err) {
+      setStatus('ready');
+      setMessages((prev) => [`Unable to load the plan for ${nextDay}: ${err?.response?.data?.detail || err.message}`, ...prev]);
+    }
+  }
 
   useEffect(() => {
-    async function loadTracking() {
-      try {
-        const live = await getLiveTracking();
-        const items = live?.tracking_data ? Object.values(live.tracking_data) : live || [];
-        setTracking(items);
-        if (Array.isArray(live?.clients) && live.clients.length) {
-          setMapClients(live.clients);
-        }
-        setChatMessages((prev) => [
-          'Real-time truck positions refreshed. Click a marker for ETA and status details.',
-          ...prev,
-        ]);
-      } catch (error) {
-        setChatMessages((prev) => ['Unable to refresh map data. Check backend polling settings.', ...prev]);
-      }
-    }
-    loadTracking();
+    const initial = todayIso();
+    setDay(initial);
+    load(initial);
   }, []);
 
-  const statusCounts = tracking.reduce(
-    (acc, item) => {
-      const status = item.status?.toLowerCase();
-      if (status?.includes('critical')) acc.critical += 1;
-      else if (status?.includes('delay')) acc.warning += 1;
-      else acc.onTime += 1;
-      return acc;
-    },
-    { onTime: 0, warning: 0, critical: 0 }
-  );
+  const stats = useMemo(() => {
+    const trucksUsed = (plan?.trucks || []).filter((t) => (t.trips || []).length > 0).length;
+    return { trucksUsed, clients: countStops(plan), unassigned: plan?.unassigned?.length || 0 };
+  }, [plan]);
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[1.5fr_0.9fr]">
-      <section className="space-y-6">
-        <div className="grid gap-6 sm:grid-cols-3">
-          <StatCard title="Total trucks" value={tracking.length} hint="Active vehicles in the fleet" icon={<IconBubble kind="truck" />} />
-          <StatCard title="On time" value={statusCounts.onTime} hint="Healthy routes" icon={<IconBubble kind="chart" />} />
-          <StatCard title="Critical delays" value={statusCounts.critical} hint="Requires intervention" icon={<IconBubble kind="bolt" />} />
-        </div>
-
-        <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
-          <TruckMap trucks={tracking} clients={mapClients} />
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Route stability</p>
-            <p className="mt-3 text-3xl font-semibold text-brand">{tracking.length ? ((statusCounts.onTime / tracking.length) * 100).toFixed(0) : 0}%</p>
+    <div className="p-8 min-h-screen bg-canvas">
+      <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
+        <motion.div variants={item} className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Live Map</p>
+              <h1 className="mt-3 text-4xl font-bold text-ink">Today’s clients &amp; truck routes</h1>
+              <p className="mt-2 text-sm leading-6 text-muted">Every delivery for the day plotted across Tunisia, with each truck’s road from the COFICAB Sidi Hassine depot.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-2 rounded-2xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink">
+                <CalendarDays size={16} className="text-brand-600" />
+                <input
+                  type="date"
+                  value={day}
+                  onChange={(e) => { setDay(e.target.value); load(e.target.value); }}
+                  className="bg-transparent outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => load(day)}
+                disabled={status === 'loading'}
+                className="inline-flex items-center gap-2 rounded-2xl border border-border bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-60"
+              >
+                <RefreshCcw size={16} className={status === 'loading' ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+              <Link
+                href="/generated-daily-planning"
+                className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 shadow-sm"
+              >
+                <Route size={16} />
+                Open planning
+              </Link>
+            </div>
           </div>
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Delay risk</p>
-            <p className="mt-3 text-3xl font-semibold text-orange-400">{statusCounts.warning}</p>
-          </div>
-          <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-5">
-            <p className="text-sm text-slate-400">Critical alerts</p>
-            <p className="mt-3 text-3xl font-semibold text-red-500">{statusCounts.critical}</p>
-          </div>
-        </div>
-      </section>
+        </motion.div>
 
-      <aside className="space-y-6">
-        <div className="rounded-[2rem] border border-slate-800 bg-[var(--surface)] p-6 shadow-xl shadow-black/20">
-          <h2 className="text-xl font-semibold">Map insights</h2>
-          <p className="mt-3 text-sm text-slate-400">The live map reflects current vehicle positions, ETA, and route status. Polling refresh keeps the view aligned with backend tracking data.</p>
-        </div>
+        <motion.div variants={container} className="grid gap-6 xl:grid-cols-[1.5fr_0.9fr]">
+          <section className="space-y-6">
+            <motion.div variants={item} className="grid gap-6 sm:grid-cols-3">
+              <StatCard title="Trucks routed" value={status === 'loading' ? '—' : stats.trucksUsed} hint="Vehicles on the road today" icon={<IconBubble kind="truck" />} />
+              <StatCard title="Clients" value={status === 'loading' ? '—' : stats.clients} hint="Delivery stops planned" icon={<IconBubble kind="chart" />} />
+              <StatCard title="Unassigned" value={status === 'loading' ? '—' : stats.unassigned} hint="Need dispatcher review" icon={<IconBubble kind="bolt" />} />
+            </motion.div>
 
-        <ChatPanel messages={chatMessages} />
-      </aside>
+            <motion.div variants={item}>
+              {status === 'loading' && !plan ? (
+                <div className="rounded-[2rem] border border-border bg-white p-5 shadow-sm">
+                  <div className="h-[560px] rounded-[1.5rem] bg-[#f0eee9] animate-pulse" />
+                </div>
+              ) : (
+                <RouteMap plan={plan} selectedTruckId={selectedTruckId} onSelectTruck={setSelectedTruckId} height={560} />
+              )}
+            </motion.div>
+          </section>
+
+          <motion.aside variants={item} className="space-y-6">
+            <div className="rounded-[2rem] border border-border bg-white p-6 shadow-sm">
+              <p className="text-sm text-muted">Reference</p>
+              <h2 className="text-2xl font-semibold text-ink">Map legend</h2>
+              <ul className="mt-4 space-y-3 text-sm text-muted">
+                <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#facc15' }} /> COFICAB Sidi Hassine depot</li>
+                <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: palette.brand[600] }} /> Client stop (coloured by truck)</li>
+                <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#9ca3af' }} /> Unassigned client</li>
+              </ul>
+              <p className="mt-4 text-xs leading-5 text-[#9e9aa4]">Click a truck chip or its route to trace that vehicle’s ordered stops. Routes follow the real road network via OSRM.</p>
+            </div>
+
+            <ChatPanel
+              messages={messages}
+              title="Map Optiroute"
+              context={{ page: 'map', day, status, selectedTruckId, plan }}
+            />
+          </motion.aside>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }

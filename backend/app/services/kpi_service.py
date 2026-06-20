@@ -35,6 +35,58 @@ FRIENDLY_LABELS = {
 }
 
 
+# Presentation metadata for the dashboard KPI cards. Kept here (not in the DB)
+# so the cards still render their names/units/icons offline. Icon names must
+# exist in the frontend iconMap.
+DASHBOARD_KPI_META = {
+    "R4-06":    {"id": "otif",          "icon": "truck",         "unit": "%",       "hint": "delivered on-time & in-full ÷ delivered"},
+    "R4-02":    {"id": "otd",           "icon": "clock",         "unit": "%",       "hint": "delivered on time ÷ delivered"},
+    "R4-02-PF": {"id": "premium_cost",  "icon": "bar-chart-3",   "unit": "Eur",     "hint": "extra / premium transport cost"},
+    "R4-03":    {"id": "premium_occ",   "icon": "alert-triangle","unit": "Nb",      "hint": "premium freight occurrences"},
+    "R4-13":    {"id": "fuel",          "icon": "gauge",         "unit": "mL/T.km", "hint": "fuel per tonne-kilometre"},
+    "R5-10":    {"id": "logistics_cost","icon": "bar-chart-3",   "unit": "€/T",     "hint": "logistics cost per tonne"},
+    "R4-12":    {"id": "incidents",     "icon": "alert-triangle","unit": "Nb",      "hint": "customer incidents per MKm sold"},
+    "R4":       {"id": "load",          "icon": "gauge",         "unit": "%",       "hint": "max(pallet, weight) fill"},
+}
+
+
+def dashboard_kpi_cards(db: Optional[Session], start: date, end: date) -> list[dict]:
+    """The official Coficab KPI cards over [start, end] for the dashboard.
+
+    With a DB session → real values from the live computers (delivery actuals);
+    offline (db is None) → the same cards greyed out with a 'needs delivery
+    data' hint, so the dashboard never shows fabricated KPI numbers.
+    """
+    defs: dict[str, KpiDefinition] = {}
+    svc: Optional["KpiService"] = None
+    if db is not None:
+        try:
+            svc = KpiService(db)
+            defs = {d.code: d for d in db.query(KpiDefinition).all()}
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("KPI definitions unavailable: %s", exc)
+            svc = None
+
+    cards: list[dict] = []
+    for code in KPI_CODES_ORDERED:
+        meta = DASHBOARD_KPI_META.get(code, {"id": code, "icon": "bar-chart-3", "unit": "", "hint": ""})
+        kd = defs.get(code)
+        value = svc._compute_live(code, start, end) if svc is not None else None
+        color = compute_color(kd, value) if (kd is not None and value is not None) else "grey"
+        cards.append({
+            "code": code,
+            "id": meta["id"],
+            "label": FRIENDLY_LABELS.get(code, code),
+            "value": round(value, 4) if value is not None else None,
+            "unit": (kd.unite if (kd and kd.unite) else meta["unit"]),
+            "target": float(kd.target_2025) if (kd and kd.target_2025 is not None) else None,
+            "color": color,
+            "icon": meta["icon"],
+            "hint": meta["hint"] if value is not None else f"{meta['hint']} · needs delivery data",
+        })
+    return cards
+
+
 def compute_color(kpi_def: KpiDefinition, value: float) -> str:
     if value is None:
         return "grey"

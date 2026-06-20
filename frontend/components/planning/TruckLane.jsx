@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
+import { Truck, Warehouse } from 'lucide-react';
 import DeliveryBlock from './DeliveryBlock';
 import DepotMarker from './DepotMarker';
-import { WORK_START, WORK_MINUTES, toMinutes as minutes, pct } from './timeline';
+import { LANE_LABEL_CLASS } from './TimeAxis';
+import { WORK_START, WORK_END, toMinutes as minutes, pctIn } from './timeline';
+import { palette } from '@/lib/theme';
 
-function deliveryBox(delivery) {
+function deliveryBox(delivery, spanMin) {
   const start = minutes(delivery.etd);
   const end = Math.max(minutes(delivery.eta), start + 30);
   const duration = Math.max(30, end - start);
@@ -12,25 +15,22 @@ function deliveryBox(delivery) {
     ...delivery,
     _start: start,
     _end: end,
-    _left: ((start - WORK_START) / WORK_MINUTES) * 100,
-    _width: Math.max((duration / WORK_MINUTES) * 100, 8),
+    _left: ((start - WORK_START) / spanMin) * 100,
+    _width: Math.max((duration / spanMin) * 100, 6),
   };
 }
 
-// A delivery block is rendered at least this wide (in timeline minutes) so its
-// label stays readable. Row packing reserves this width too: a truck's stops are
-// sequential, so two stops only drop onto a second row when their *rendered*
-// boxes would physically overlap — never because of a tiny clock gap. This kills
-// the old illusion of one truck running "parallel" deliveries.
-const MIN_BLOCK_MINUTES = 55;
-
-function packedStops(stops) {
+// Row packing reserves each card's *rendered* width (minBlockMinutes, derived
+// from the card's pixel min-width), so two stops drop onto a second row only
+// when their drawn boxes would truly overlap — never for a tiny clock gap, and
+// never leaving boxes overlapping on one row.
+function packedStops(stops, minBlockMinutes, spanMin) {
   const rows = [];
   return stops
-    .map(deliveryBox)
+    .map((s) => deliveryBox(s, spanMin))
     .sort((a, b) => a._start - b._start)
     .map((stop) => {
-      const renderedEnd = Math.max(stop._end, stop._start + MIN_BLOCK_MINUTES);
+      const renderedEnd = Math.max(stop._end, stop._start + minBlockMinutes);
       let rowIndex = rows.findIndex((rowEnd) => stop._start >= rowEnd);
       if (rowIndex === -1) {
         rowIndex = rows.length;
@@ -42,10 +42,50 @@ function packedStops(stops) {
     });
 }
 
-export default function TruckLane({ truck, markers = [], onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+// Consecutive drops at the SAME site (e.g. a delivery split into parts that the
+// same truck unloads back-to-back, zero drive between them) are merged into one
+// block: combined positions/weight and the full time span. Without this they
+// overlap and get bumped onto separate rows, looking like duplicates.
+function mergeSameLocation(stops) {
+  // Base customer ignoring an auto-split "(Site)" suffix, so split parts of one
+  // customer merge but two genuinely different customers never do.
+  const baseName = (x) => String(x.original_client || x.client || '').trim().toLowerCase();
+  const out = [];
+  stops.forEach((s) => {
+    const prev = out[out.length - 1];
+    const sameSite = prev
+      && baseName(prev) === baseName(s)
+      && Number(s.travel_min || 0) <= 1;
+    if (sameSite) {
+      out[out.length - 1] = {
+        ...prev,
+        eta: s.eta,
+        quantity_positions: Number(prev.quantity_positions || prev.position_count || 0) + Number(s.quantity_positions || s.position_count || 0),
+        position_count: Number(prev.position_count || prev.quantity_positions || 0) + Number(s.position_count || s.quantity_positions || 0),
+        quantity_kg: Number(prev.quantity_kg || 0) + Number(s.quantity_kg || 0),
+        _parts: (prev._parts || 1) + 1,
+      };
+    } else {
+      out.push({ ...s });
+    }
+  });
+  return out;
+}
+
+function fillColor(ratio) {
+  if (ratio >= 0.9) return '#22c55e';
+  if (ratio >= 0.7) return palette.brand[600];
+  if (ratio >= 0.45) return '#f59e0b';
+  return '#ef4444';
+}
+
+export default function TruckLane({ truck, markers = [], nowMinute = null, windowEnd = WORK_END, hosWarning = null, selected = false, onSelectTruck, onResizeDelivery, onCancel, onRestore, onDeleteMarker }) {
+  const spanMin = Math.max(1, windowEnd - WORK_START);
+  const isOutOfService = truck.resource_status === 'out_of_service';
   const { isOver, setNodeRef } = useDroppable({
     id: `truck-lane-${truck.truck_id}`,
     data: { truckId: truck.truck_id },
+    disabled: isOutOfService,
   });
   const [laneNode, setLaneNode] = useState(null);
   const [laneWidth, setLaneWidth] = useState(0);
@@ -68,74 +108,221 @@ export default function TruckLane({ truck, markers = [], onResizeDelivery, onCan
   }, [laneNode]);
 
   const trips = truck.trips || [];
-  const allStops = trips.flatMap((trip) => trip.stops || []);
-  const packed = packedStops(allStops);
+  const tripStops = trips.map((trip) => mergeSameLocation(trip.stops || []));
+  const allStops = tripStops.flat();
+  // Card min-width is 148px; reserve the same span (in minutes) for packing so
+  // the row layout matches what's actually drawn.
+  const MIN_BLOCK_PX = 132;
+  const minBlockMinutes = laneWidth ? (MIN_BLOCK_PX / laneWidth) * spanMin : 55;
+  const packed = packedStops(allStops, minBlockMinutes, spanMin);
   const truckMarkers = markers.filter((marker) => String(marker.truck_id) === String(truck.truck_id));
   const rowCount = Math.max(1, packed.reduce((max, stop) => Math.max(max, stop._row + 1), 1));
-  const laneHeight = Math.max(118, rowCount * 94 + 24);
-  const minutesPerPixel = laneWidth ? WORK_MINUTES / laneWidth : 1;
+  const laneHeight = Math.max(allStops.length ? 124 : 84, rowCount * 104 + 24);
+  const minutesPerPixel = laneWidth ? spanMin / laneWidth : 1;
+
+  const capacityPositions = Number(truck.capacity_positions || 0);
+  const usedPositions = allStops.reduce((sum, s) => sum + Number(s.quantity_positions || s.position_count || 0), 0);
+  // Cargo VOLUME: reels cube out before they hit the position/kg limit. Fall
+  // back to positions × 1.8 m³ for older plans whose stops predate volume_m3.
+  const capacityM3 = Number(truck.capacity_m3 || 0);
+  const usedVolume = allStops.reduce(
+    (sum, s) => sum + Number(s.volume_m3 ?? Number(s.quantity_positions || s.position_count || 0) * 1.8),
+    0,
+  );
+  const tripCount = trips.length;
+  const fillRatio = capacityPositions && tripCount ? usedPositions / (capacityPositions * tripCount) : 0;
+  const isIdle = allStops.length === 0;
+  const accent = isOutOfService ? '#ef4444' : isIdle ? '#c4bfb6' : fillColor(fillRatio);
+  const nowLeft = nowMinute != null ? pctIn(`${Math.floor(nowMinute / 60)}:${nowMinute % 60}`, windowEnd) : null;
+
+  // Each trip is bookended by COFICAB markers — the departure (its ETD) and the
+  // return — with dashed "in transit" connectors showing the truck driving
+  // between consecutive stops (gaps are travel, not idle). The return marker is
+  // anchored just past the last card's drawn edge so it never sits inside it.
+  const byId = new Map(packed.map((s) => [String(s.id), s]));
+  const minWidthPct = laneWidth ? (MIN_BLOCK_PX / laneWidth) * 100 : 8;
+  const connectors = [];
+  const depots = [];
+  const renderedRight = (s) => Math.max(0, s._left) + Math.max(s._width, minWidthPct);
+  trips.forEach((trip, ti) => {
+    const ts = tripStops[ti];
+    if (!ts.length) return;
+    const first = byId.get(String(ts[0].id));
+    const last = byId.get(String(ts[ts.length - 1].id));
+
+    // COFICAB departure (the trip's ETD) → drive to the first stop
+    if (first) {
+      const depotLeft = pctIn(trip.depart_at, windowEnd);
+      const firstLeft = Math.max(0, first._left);
+      depots.push({ key: `dep-${trip.trip_id}`, type: 'depart', left: depotLeft, row: first._row, time: trip.depart_at });
+      if (firstLeft - depotLeft > 1) {
+        connectors.push({ key: `cdep-${trip.trip_id}`, left: depotLeft, width: firstLeft - depotLeft, row: first._row, travel: first.travel_min });
+      }
+    }
+
+    // drive between consecutive stops of the same trip
+    for (let i = 1; i < ts.length; i += 1) {
+      const a = byId.get(String(ts[i - 1].id));
+      const b = byId.get(String(ts[i].id));
+      if (!a || !b || a._row !== b._row) continue;
+      const aRight = renderedRight(a);
+      const bLeft = Math.max(0, b._left);
+      if (bLeft - aRight > 1) {
+        connectors.push({ key: `${a.id}-${b.id}`, left: aRight, width: bLeft - aRight, row: b._row, travel: b.travel_min });
+      }
+    }
+
+    // last stop → drive back to COFICAB (the return), anchored after the card
+    if (last && trip.return_at) {
+      const lastRight = renderedRight(last);
+      const retPos = Math.max(pctIn(trip.return_at, windowEnd), lastRight);
+      depots.push({ key: `ret-${trip.trip_id}`, type: 'return', left: retPos, row: last._row, time: trip.return_at });
+      if (retPos - lastRight > 1) {
+        const homeMin = minutes(trip.return_at) - minutes(last.eta);
+        connectors.push({ key: `cret-${trip.trip_id}`, left: lastRight, width: retPos - lastRight, row: last._row, travel: homeMin > 0 ? homeMin : null });
+      }
+    }
+  });
 
   return (
-    <div className="grid grid-cols-[10rem_1fr] border-b border-[#e8e5df] last:border-b-0" style={{ minHeight: laneHeight }}>
-      <div className="flex items-center border-r border-[#e8e5df] bg-white px-4">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#1a1a2e]">{truck.truck_label}</p>
-          <p className="text-xs text-[#6b6b7b]">{Number(truck.capacity_positions || 0).toLocaleString()} positions</p>
-          <p className="text-xs text-[#6b6b7b]">{Number(truck.capacity_kg || 0).toLocaleString()} kg</p>
-        </div>
+    <div className={`grid ${LANE_LABEL_CLASS} border-b border-[#ece8e1] last:border-b-0`} style={{ minHeight: laneHeight }}>
+      {/* Sticky truck card */}
+      <div className={`sticky left-0 z-20 flex flex-col justify-center gap-2 border-r border-[#ece8e1] px-5 py-3 transition-colors ${selected ? 'bg-brand-600/5 ring-2 ring-inset ring-brand-600' : isIdle ? 'bg-[#fbfaf8]' : 'bg-white'}`}>
+        <button
+          type="button"
+          onClick={() => onSelectTruck?.(truck.truck_id)}
+          title={selected ? 'Hide this truck on the map' : 'Show this truck’s route on the map'}
+          className="flex items-center gap-2.5 rounded-lg text-left transition hover:opacity-80"
+        >
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm"
+            style={{ backgroundColor: accent }}
+          >
+            <Truck size={16} />
+          </span>
+          <div className="min-w-0">
+            <p className="flex items-center gap-1 truncate text-sm font-semibold text-ink">
+              <span className="truncate">{truck.truck_label}</span>
+              {hosWarning && (
+                <span
+                  className="shrink-0 text-[#d97706]"
+                  title={`HOS: ${hosWarning.driving_minutes}m driving / ${hosWarning.on_duty_minutes}m on-duty exceeds the 9h/13h limit`}
+                >
+                  ⚠
+                </span>
+              )}
+            </p>
+            <p className="text-[11px] text-[#9e9aa4]">
+              {capacityPositions.toLocaleString()} pos · {Number(truck.capacity_kg || 0).toLocaleString()} kg
+              {capacityM3 ? ` · ${capacityM3.toLocaleString()} m³` : ''}
+            </p>
+          </div>
+        </button>
+        {isIdle ? (
+          <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+            isOutOfService ? 'bg-red-50 text-red-600' : 'bg-[#f0eee9] text-[#a39e96]'
+          }`}>
+            {isOutOfService ? `Out of service${truck.resource_reason ? `: ${truck.resource_reason}` : ''}` : 'Idle'}
+          </span>
+        ) : (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] font-medium text-[#9e9aa4]">
+              <span>
+                {usedPositions} pos{capacityM3 ? ` · ${Math.round(usedVolume)} m³` : ''} · {tripCount} trip{tripCount > 1 ? 's' : ''}
+              </span>
+              <span className="tabular-nums font-semibold" style={{ color: accent }}>{Math.round(fillRatio * 100)}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#f0eee9]">
+              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.round(fillRatio * 100))}%`, backgroundColor: accent }} />
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Timeline track */}
       <div
         ref={setTimelineRef}
-        className={`relative bg-[linear-gradient(to_right,#e8e5df_1px,transparent_1px)] transition-colors ${isOver ? 'bg-[#faf8f5]' : ''}`}
-        // One vertical gridline per hour, aligned with the TimeAxis ticks
-        // (06:00–20:00 → 14 columns). 100/14 ≈ 7.142857%.
-        style={{ backgroundSize: '7.142857% 100%' }}
+        className={`relative transition-colors ${isOutOfService ? 'bg-red-50/30' : isOver ? 'bg-brand-50' : isIdle ? 'bg-[#fcfbf9]' : 'bg-white'}`}
+        style={{
+          // one faint vertical gridline per hour (06–20 → 14 columns)
+          backgroundImage: 'linear-gradient(to right,#f1ede6 1px,transparent 1px)',
+          backgroundSize: '7.142857% 100%',
+        }}
       >
-        {allStops.length > 0 && (
+        {/* live "now" line — z-0 keeps it behind the delivery cards */}
+        {nowLeft != null && (
+          <div className="pointer-events-none absolute top-0 bottom-0 z-0 w-px bg-brand-600/40" style={{ left: `${nowLeft}%` }} />
+        )}
+
+        {!isIdle && (
           <>
+            {depots.map((d) => (
+              <div
+                key={d.key}
+                className="pointer-events-none absolute z-[2] flex items-center"
+                style={{
+                  left: `${d.left}%`,
+                  top: `${12 + d.row * 104 + 44}px`,
+                  transform: 'translate(0, -50%)',
+                }}
+                title={d.type === 'depart' ? `Leaves COFICAB at ${d.time}` : `Back at COFICAB at ${d.time}`}
+              >
+                <span
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm"
+                  style={{ backgroundColor: d.type === 'depart' ? palette.brand[600] : '#a39e96' }}
+                >
+                  <Warehouse size={9} />
+                  {d.time}
+                </span>
+              </div>
+            ))}
+            {connectors.map((c) => (
+              <div
+                key={c.key}
+                className="pointer-events-none absolute z-0 flex items-center"
+                style={{ left: `${c.left}%`, width: `${c.width}%`, top: `${12 + c.row * 104}px`, height: 88 }}
+              >
+                <div className="h-0 flex-1 border-t border-dashed border-[#d8d3ca]" />
+                {c.width > 4 && c.travel != null && (
+                  <span className="mx-1 inline-flex shrink-0 items-center gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-[9px] font-semibold text-[#9e9aa4] shadow-sm ring-1 ring-[#ece8e1]">
+                    <Truck size={9} /> {c.travel}′
+                  </span>
+                )}
+                <div className="h-0 flex-1 border-t border-dashed border-[#d8d3ca]" />
+              </div>
+            ))}
             {truckMarkers.map((marker) => (
-              <DepotMarker
-                key={marker.id}
-                marker={marker}
-                left={pct(marker.time)}
-                label={marker.label || 'Manual marker'}
-                onDelete={onDeleteMarker}
-              />
+              <DepotMarker key={marker.id} marker={marker} left={pctIn(marker.time, windowEnd)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
             ))}
             {packed.map((delivery) => (
-                <div
-                  key={delivery.id}
-                  className="absolute h-20"
-                  style={{
-                    left: `${Math.max(0, delivery._left)}%`,
-                    top: `${12 + delivery._row * 94}px`,
-                    width: `${Math.min(delivery._width, 100 - Math.max(0, delivery._left))}%`,
-                    minWidth: 108,
-                  }}
-                >
-                  <DeliveryBlock
-                    delivery={delivery}
-                    compact={delivery._width < 13}
-                    minutesPerPixel={minutesPerPixel}
-                    onResize={onResizeDelivery}
-                    onCancel={onCancel}
-                    onRestore={onRestore}
-                  />
-                </div>
-              ))}
+              <div
+                key={delivery.id}
+                className="absolute h-[88px]"
+                style={{
+                  left: `${Math.max(0, delivery._left)}%`,
+                  top: `${12 + delivery._row * 104}px`,
+                  width: `${Math.min(delivery._width, 100 - Math.max(0, delivery._left))}%`,
+                  minWidth: MIN_BLOCK_PX,
+                }}
+              >
+                <DeliveryBlock
+                  delivery={delivery}
+                  minutesPerPixel={minutesPerPixel}
+                  onResize={onResizeDelivery}
+                  onCancel={onCancel}
+                  onRestore={onRestore}
+                />
+              </div>
+            ))}
           </>
         )}
-        {allStops.length === 0 && truckMarkers.map((marker) => (
-          <DepotMarker
-            key={marker.id}
-            marker={marker}
-            left={pct(marker.time)}
-            label={marker.label || 'Manual marker'}
-            onDelete={onDeleteMarker}
-          />
+        {isIdle && truckMarkers.map((marker) => (
+          <DepotMarker key={marker.id} marker={marker} left={pctIn(marker.time, windowEnd)} label={marker.label || 'Manual marker'} onDelete={onDeleteMarker} />
         ))}
-        {allStops.length === 0 && (
-          <div className="absolute inset-0 flex items-center px-6 text-sm text-[#b0abb5]">idle</div>
+        {isIdle && (
+          <div className={`absolute inset-0 flex items-center px-6 text-xs font-medium ${isOutOfService ? 'text-red-400' : 'text-[#c4bfb6]'}`}>
+            {isOutOfService ? (truck.resource_reason || 'Resource unavailable') : 'No deliveries assigned'}
+          </div>
         )}
       </div>
     </div>

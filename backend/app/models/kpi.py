@@ -52,8 +52,8 @@ class KpiJournalier(Base):
     __tablename__ = "kpi_journalier"
 
     id = Column(Integer, primary_key=True)
-    kpi_def_id = Column(Integer, ForeignKey("kpi_definition.id"), nullable=False)
-    date_mesure = Column(Date, nullable=False)
+    kpi_def_id = Column(Integer, ForeignKey("kpi_definition.id"), nullable=False, index=True)
+    date_mesure = Column(Date, nullable=False, index=True)
     plant = Column(String(50))
     valeur = Column(Numeric(12, 4))
     color = Column(String(10))

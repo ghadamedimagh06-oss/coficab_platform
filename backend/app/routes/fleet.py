@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.database import get_db
+from app.database import get_db, get_db_optional
 from app.models.camion import Camion, CamionStatus
 from app.models.chauffeur import Chauffeur, ChauffeurStatus
 from app.models.client import Client
@@ -19,8 +19,10 @@ clients_router = APIRouter()  # mounted at /api/clients
 @router.get("/trucks")
 def list_trucks(
     status: Optional[str] = None,
-    db: Session = Depends(get_db),
+    db: Optional[Session] = Depends(get_db_optional),
 ):
+    if not db:  # offline mode — the frontend falls back to its bundled fleet
+        return []
     q = db.query(Camion)
     if status:
         try:
@@ -83,8 +85,10 @@ def update_truck_status(
 
 
 @router.get("/utilization")
-def fleet_utilization(db: Session = Depends(get_db)):
+def fleet_utilization(db: Optional[Session] = Depends(get_db_optional)):
     """Summary counts by status — used by dashboard fleet chart."""
+    if not db:
+        return {"total": 0, "by_status": {}, "utilization_pct": 0}
     trucks = db.query(Camion).all()
     counts = {}
     for t in trucks:
@@ -105,8 +109,10 @@ def fleet_utilization(db: Session = Depends(get_db)):
 @router.get("/drivers")
 def list_drivers(
     status: Optional[str] = None,
-    db: Session = Depends(get_db),
+    db: Optional[Session] = Depends(get_db_optional),
 ):
+    if not db:
+        return []
     q = db.query(Chauffeur)
     if status:
         try:
@@ -152,8 +158,10 @@ def get_driver(driver_id: int, db: Session = Depends(get_db)):
 @clients_router.get("")
 def list_clients(
     city: Optional[str] = None,
-    db: Session = Depends(get_db),
+    db: Optional[Session] = Depends(get_db_optional),
 ):
+    if not db:
+        return []
     q = db.query(Client)
     if city:
         q = q.filter(Client.city.ilike(f"%{city}%"))

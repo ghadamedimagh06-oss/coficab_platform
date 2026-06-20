@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -43,7 +43,7 @@ class IncidentService:
             description=description,
             impact_delai_min=impact_delai_min or 0,
             cause=cause,
-            date_evenement=datetime.utcnow(),
+            date_evenement=datetime.now(timezone.utc),
         )
         self.db.add(incident)
         self._apply_side_effects(type, mission_id, demande_id)
@@ -57,7 +57,7 @@ class IncidentService:
             raise ValueError(f"incident not found: {incident_id}")
 
         incident.resolu = True
-        incident.date_resolution = datetime.utcnow()
+        incident.date_resolution = datetime.now(timezone.utc)
         if note:
             incident.description = f"{incident.description or ''}\nRESOLU: {note}".strip()
         self.db.commit()

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -139,7 +139,7 @@ async def validate_planning(
         raise HTTPException(status_code=400, detail="Planning version must be DRAFT to validate")
 
     planning.status = "VALIDATED"
-    planning.validated_at = datetime.utcnow()
+    planning.validated_at = datetime.now(timezone.utc)
     planning.validated_by = request.user_id
     db.add(planning)
     db.commit()
@@ -164,7 +164,7 @@ async def update_planning(
 
         audit_entry = PlanningChangeLog(
             planning_id=request.planning_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             source="USER",
             modified_by=request.user_id,
             field_name=request.field_changed,
@@ -288,7 +288,7 @@ async def review_planning(
         if planning.status != "MODIFIED_AFTER_VALIDATION":
             raise HTTPException(status_code=400, detail="Planning must be modified after validation to request review")
         planning.status = "PENDING_REVIEW"
-        planning.last_review_at = datetime.utcnow()
+        planning.last_review_at = datetime.now(timezone.utc)
         planning.reviewed_by = request.user_id
         db.add(planning)
         db.commit()

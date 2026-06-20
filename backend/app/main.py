@@ -24,10 +24,14 @@ from app.routes import (
     fleet,
     incidents,
     dispatch,
+    copilot,
+    execution,
 )
 from app.database import engine, Base
 from app.agents.scheduler import start_scheduler
 from app.services.excel_watcher import ExcelWatcherService
+from app.rate_limit import install_rate_limiting
+from app.observability import install_observability
 import app.models
 
 _default_watch = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "weekly planning")
@@ -104,6 +108,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Per-IP rate limiting (tighter budget for solver/LLM endpoints). Env-gated;
+# disabled in the test suite. See app/rate_limit.py.
+install_rate_limiting(app)
+
+# Request metrics + structured logging, exposed at /metrics and /metrics.json.
+# Added after rate limiting so it wraps outermost and measures every request
+# (including 429s). See app/observability.py.
+install_observability(app)
+
 # Include routers
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(tracking.router, prefix="/api/tracking", tags=["tracking"])
@@ -120,6 +133,8 @@ app.include_router(fleet.router, prefix="/api/fleet", tags=["fleet"])
 app.include_router(fleet.clients_router, prefix="/api/clients", tags=["clients"])
 app.include_router(incidents.router, prefix="/api/incidents", tags=["incidents"])
 app.include_router(dispatch.router, prefix="/api/dispatch", tags=["dispatch"])
+app.include_router(copilot.router, prefix="/api/copilot", tags=["copilot"])
+app.include_router(execution.router, prefix="/api/execution", tags=["execution"])
 
 
 @app.get("/")

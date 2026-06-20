@@ -4,12 +4,21 @@ Handles weekly Excel planning ingestion, validated-planning comparison,
 J+1 change detection, review operations, and audit history tracking.
 """
 
-from datetime import datetime, date, timedelta
+import copy
+import os
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
 
 import pandas as pd
 from sqlalchemy.orm import Session
+
+# Module-level parse cache keyed by (abs path, mtime_ns, size). The weekly
+# workbook was previously re-parsed on EVERY /transports call (~1-2 s of pandas
+# + openpyxl). The cache makes repeat reads near-instant and auto-invalidates the
+# moment the file changes; callers get a deep copy so they can mutate freely.
+_PARSE_CACHE: dict[tuple, Dict[str, Any]] = {}
+_PARSE_CACHE_MAX = 8
 
 from app.models.planning_version import PlanningVersion
 from app.models.planning_change_log import PlanningChangeLog
@@ -308,6 +317,31 @@ class PlanningService:
         raise ValueError(f"Failed to read Excel planning sheet: {last_error}")
 
     def parse_weekly_planning(self, file_path: str) -> Dict[str, Any]:
+        """Parse the weekly workbook, served from an mtime-keyed cache.
+
+        Returns a deep copy so callers may mutate rows without poisoning the
+        cache. The cache key includes the file's mtime and size, so any edit to
+        the workbook is picked up immediately on the next call.
+        """
+        try:
+            st = os.stat(file_path)
+            key = (os.path.abspath(file_path), st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+
+        if key is not None and key in _PARSE_CACHE:
+            return copy.deepcopy(_PARSE_CACHE[key])
+
+        result = self._parse_weekly_planning_uncached(file_path)
+
+        if key is not None:
+            if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX:
+                _PARSE_CACHE.clear()
+            _PARSE_CACHE[key] = result
+            return copy.deepcopy(result)
+        return result
+
+    def _parse_weekly_planning_uncached(self, file_path: str) -> Dict[str, Any]:
         df = self._read_planning_dataframe(file_path)
         if df.empty:
             raise ValueError("Excel file contains no planning rows")
@@ -390,7 +424,7 @@ class PlanningService:
             start_location = self._text(row.get("start_location")) or ""
             end_location = self._text(row.get("end_location")) or ""
             if not start_location:
-                start_location = "COFICAB Mégrine"
+                start_location = "COFICAB Sidi Hassine"
             if not end_location:
                 end_location = client or "Unknown destination"
 
@@ -535,7 +569,7 @@ class PlanningService:
 
             driver = row["driver"] or ""
             vehicle = row["vehicle"] or ""
-            start_location = row["start_location"] or "COFICAB Mégrine"
+            start_location = row["start_location"] or "COFICAB Sidi Hassine"
             end_location = row["end_location"] or row["client"] or "Unknown destination"
             if row["distance_km"] is None:
                 distance_km = 0.0
@@ -661,7 +695,7 @@ class PlanningService:
             for diff in diffs:
                 audit = PlanningChangeLog(
                     planning_id=planning.id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     source=AUDIT_SOURCE_WATCHDOG,
                     modified_by=0,
                     field_name=diff["field_name"],
@@ -675,7 +709,7 @@ class PlanningService:
 
             status_set = "PENDING_REVIEW" if any(d["is_j_plus_1"] for d in diffs) else "MODIFIED_AFTER_VALIDATION"
             planning.status = status_set
-            planning.last_review_at = datetime.utcnow()
+            planning.last_review_at = datetime.now(timezone.utc)
             self.db.add(planning)
             self.db.commit()
 
@@ -743,10 +777,10 @@ class PlanningService:
             raise ValueError("Planning version must be pending review or modified after validation to revalidate")
 
         planning.status = "REVALIDATED"
-        planning.validated_at = datetime.utcnow()
+        planning.validated_at = datetime.now(timezone.utc)
         planning.validated_by = user_id
         planning.reviewed_by = user_id
-        planning.last_review_at = datetime.utcnow()
+        planning.last_review_at = datetime.now(timezone.utc)
         self.db.add(planning)
         self.db.commit()
         self.db.refresh(planning)
@@ -785,7 +819,7 @@ class PlanningService:
 
         planning.status = "REJECTED_CHANGES"
         planning.reviewed_by = user_id
-        planning.last_review_at = datetime.utcnow()
+        planning.last_review_at = datetime.now(timezone.utc)
         self.db.add(planning)
 
         audit = PlanningChangeLog(

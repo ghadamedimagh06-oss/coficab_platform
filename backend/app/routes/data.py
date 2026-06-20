@@ -20,17 +20,40 @@ from app.data.synthetic_daily_planning import MOCK_TRANSPORTS
 
 router = APIRouter()
 
-# Prefer explicit environment configuration, otherwise fall back to the user's local Excel file if present.
-env_weekly_file = os.getenv("WEEKLY_PLANNING_FILE_PATH")
-if env_weekly_file:
-    WEEKLY_PLANNING_FILE = Path(env_weekly_file).resolve()
-else:
-    default_local_file = Path(r"C:\Users\USER\OneDrive\Desktop\coficab\DB\weekly planning\Weekly Delivery planning W0526.xlsx")
-    repo_default_file = Path(__file__).resolve().parents[3] / "weekly planning" / "Weekly Delivery planning W0526.xlsx"
-    if default_local_file.exists():
-        WEEKLY_PLANNING_FILE = default_local_file
-    else:
-        WEEKLY_PLANNING_FILE = repo_default_file
+# Resolve the weekly-planning workbook with NO machine-specific paths:
+#   1. WEEKLY_PLANNING_FILE_PATH env var (explicit override), else
+#   2. the canonical workbook in the repo's "weekly planning/" folder, else
+#   3. the most recent *.xlsx in that folder (so a renamed week still works).
+# This keeps the backend portable across machines and CI; the previous
+# hardcoded "C:\Users\USER\..." default leaked a username and broke elsewhere.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_WEEKLY_DIR = _REPO_ROOT / "weekly planning"
+
+
+def _resolve_weekly_planning_file() -> Path:
+    env_weekly_file = os.getenv("WEEKLY_PLANNING_FILE_PATH")
+    if env_weekly_file:
+        return Path(env_weekly_file).expanduser().resolve()
+
+    canonical = _WEEKLY_DIR / "Weekly Delivery planning W0526.xlsx"
+    if canonical.exists():
+        return canonical
+
+    if _WEEKLY_DIR.is_dir():
+        candidates = sorted(
+            (p for p in _WEEKLY_DIR.glob("*.xlsx") if not p.name.startswith("~$")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return candidates[0]
+
+    # Nothing found — return the canonical path so callers report a clear,
+    # non-machine-specific "file not found" against the repo location.
+    return canonical
+
+
+WEEKLY_PLANNING_FILE = _resolve_weekly_planning_file()
 
 
 def _transport_from_row(row):
@@ -166,7 +189,9 @@ async def get_transports(
 
             return {
                 "transports": transport_list,
-                "total": total
+                "total": total,
+                "source": "database",
+                "used_mock": False,
             }
         else:
             transports, total, meta = _load_weekly_planning_transports(status=status, day=day, limit=limit, offset=offset)
@@ -181,6 +206,43 @@ async def get_transports(
             **meta,
             "error": meta.get("error") or f"Database error: {str(e)}"
         }
+
+@router.get("/source-status")
+async def get_source_status(db: Optional[Session] = Depends(get_db_optional)):
+    """Report where the platform is currently sourcing operational data from.
+
+    The frontend uses this to show a persistent "DEMO DATA" banner whenever the
+    app is serving mock/file data instead of the live database, so fabricated
+    numbers can never be mistaken for real ones.
+    """
+    db_connected = False
+    db_has_data = False
+    if db is not None:
+        try:
+            db_has_data = db.query(Livraison).limit(1).count() > 0
+            db_connected = True
+        except Exception:
+            db_connected = False
+
+    file_exists = WEEKLY_PLANNING_FILE.exists()
+
+    if db_connected and db_has_data:
+        source = "database"
+    elif file_exists:
+        source = "excel"
+    else:
+        source = "mock"
+
+    return {
+        "source": source,
+        "used_mock": source == "mock",
+        "is_live": source == "database",
+        "db_connected": db_connected,
+        "db_has_data": db_has_data,
+        "file_exists": file_exists,
+        "file_name": WEEKLY_PLANNING_FILE.name if file_exists else None,
+    }
+
 
 @router.get("/ingestion-history")
 async def get_ingestion_history(

@@ -91,3 +91,14 @@ dump.rdb
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime OSRM road-distance cache (regenerated on demand, falls back to haversine)
+backend/app/data/road_matrix_cache.json
+
+# Local OSRM routing dataset — ~1.1 GB of build artifacts generated from the
+# Tunisia map extract (osrm-extract/partition/customize). Far too large for git
+# (caused HTTP 408 push failures). Rebuild locally instead of committing.
+osrm-data/
+*.osm.pbf
+*.osrm
+*.osrm.*

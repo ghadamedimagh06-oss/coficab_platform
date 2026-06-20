@@ -1,6 +1,8 @@
 import pytest
 
-from app.services.vrptw_complete_optimizer import VRPTWCompleteOptimizer
+# Was the redundant VRPTWCompleteOptimizer passthrough wrapper (removed in W1.1);
+# these now exercise the real dict-based legacy optimizer directly.
+from app.services.vrptw_optimizer import VRPTWOptimizer
 
 
 def make_delivery(i):
@@ -10,8 +12,7 @@ def make_delivery(i):
 def test_vrptw_returns_valid_plan():
     deliveries = [make_delivery(i) for i in range(5)]
     trucks = [{"id": "t1", "capacity": 100}]
-    opt = VRPTWCompleteOptimizer(deliveries, trucks)
-    result = opt.run()
+    result = VRPTWOptimizer(deliveries, trucks).optimize()
     assert isinstance(result, dict)
     assert "routes" in result
 
@@ -20,8 +21,7 @@ def test_vrptw_respects_capacity():
     # make total load > single truck capacity to force multiple routes
     deliveries = [{"id": f"d{i}", "lat": 36.5, "lng": 10.1, "quantity": 60} for i in range(3)]
     trucks = [{"id": "t1", "capacity": 100}]
-    opt = VRPTWCompleteOptimizer(deliveries, trucks)
-    result = opt.run()
+    result = VRPTWOptimizer(deliveries, trucks).optimize()
     assert isinstance(result, dict)
     # if optimizer splits, route count should be >= 2 when total 180 and capacity 100
     routes = result.get("routes") or []
@@ -29,8 +29,7 @@ def test_vrptw_respects_capacity():
 
 
 def test_vrptw_handles_empty_input():
-    opt = VRPTWCompleteOptimizer([], [])
-    result = opt.run()
+    result = VRPTWOptimizer([], []).optimize()
     assert isinstance(result, dict)
     assert "routes" in result
 
@@ -39,7 +38,6 @@ def test_vrptw_time_windows():
     # time windows are not strictly enforced in fallback optimizer, but function should handle the field
     deliveries = [{"id": "d1", "lat": 36.5, "lng": 10.1, "quantity": 10, "time_window": [9, 11]}]
     trucks = [{"id": "t1", "capacity": 100}]
-    opt = VRPTWCompleteOptimizer(deliveries, trucks)
-    result = opt.run()
+    result = VRPTWOptimizer(deliveries, trucks).optimize()
     assert isinstance(result, dict)
     assert "routes" in result

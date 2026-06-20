@@ -189,8 +189,8 @@ export default function GeneratedPlanningPage() {
 
   if (loading && !plan) {
     return (
-      <div className="min-h-screen bg-[#f8f7f3] p-8">
-        <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-8 shadow-sm">
+      <div className="min-h-screen bg-canvas p-8">
+        <div className="rounded-[1.75rem] border border-border bg-white p-8 shadow-sm">
           <div className="h-64 rounded-2xl bg-[#f0eee9] animate-pulse" />
         </div>
       </div>
@@ -202,17 +202,17 @@ export default function GeneratedPlanningPage() {
   const costs = plan?.costs || {};
 
   return (
-    <div className="min-h-screen bg-[#f8f7f3] p-8">
+    <div className="min-h-screen bg-canvas p-8">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#7c3aed]">AI VRPTW Optimizer</p>
-          <h1 className="mt-3 text-3xl font-semibold text-[#1a1a2e]">Generated Planning</h1>
-          <p className="mt-2 text-sm text-[#6b6b7b]">
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">AI VRPTW Optimizer</p>
+          <h1 className="mt-3 text-3xl font-semibold text-ink">Generated Planning</h1>
+          <p className="mt-2 text-sm text-muted">
             Extracted from {sourceLabel}{selectedDay ? ` for ${selectedDay}` : ''}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <label className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a2e]">
+          <label className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-ink">
             <CalendarDays size={16} />
             <select
               value={selectedDay}
@@ -226,7 +226,7 @@ export default function GeneratedPlanningPage() {
             type="button"
             onClick={loadWorkbook}
             disabled={loading}
-            className="inline-flex items-center gap-2 rounded-full border border-[#e8e5df] bg-white px-5 py-2 text-sm font-semibold text-[#1a1a2e] transition hover:bg-[#faf8f5] disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:bg-canvas disabled:opacity-60"
           >
             <RefreshCcw size={16} />
             Refresh
@@ -250,19 +250,19 @@ export default function GeneratedPlanningPage() {
           ['Savings', `${Number(costs.savings_percent || 0).toFixed(0)}%`, TrendingDown],
           ['Positions', totalPositions(plan), Package],
         ].map(([label, value, Icon]) => (
-          <motion.div key={label} variants={item} className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-            <div className="mb-3 inline-flex rounded-2xl bg-[#7c3aed]/10 p-3 text-[#7c3aed]"><Icon size={18} /></div>
-            <p className="text-xs uppercase tracking-[0.18em] text-[#6b6b7b]">{label}</p>
-            <p className="mt-2 text-3xl font-semibold text-[#1a1a2e]">{loading ? '--' : value}</p>
+          <motion.div key={label} variants={item} className="rounded-[1.75rem] border border-border bg-white p-6 shadow-sm">
+            <div className="mb-3 inline-flex rounded-2xl bg-brand-600/10 p-3 text-brand-600"><Icon size={18} /></div>
+            <p className="text-xs uppercase tracking-[0.18em] text-muted">{label}</p>
+            <p className="mt-2 text-3xl font-semibold text-ink">{loading ? '--' : value}</p>
           </motion.div>
         ))}
       </motion.div>
 
-      <div className="mb-8 rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-lg font-semibold text-[#1a1a2e]">Cost comparison</h2>
+      <div className="mb-8 rounded-[1.75rem] border border-border bg-white p-6 shadow-sm">
+        <h2 className="mb-4 text-lg font-semibold text-ink">Cost comparison</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <p className="mb-2 text-sm text-[#6b6b7b]">Before optimization</p>
+            <p className="mb-2 text-sm text-muted">Before optimization</p>
             <p className="text-3xl font-semibold text-red-600">{money(costs.before)}</p>
           </div>
           <div className="flex items-center justify-center">
@@ -272,7 +272,7 @@ export default function GeneratedPlanningPage() {
             </div>
           </div>
           <div>
-            <p className="mb-2 text-sm text-[#6b6b7b]">After optimization</p>
+            <p className="mb-2 text-sm text-muted">After optimization</p>
             <p className="text-3xl font-semibold text-emerald-600">{money(costs.after)}</p>
           </div>
         </div>
@@ -287,8 +287,8 @@ export default function GeneratedPlanningPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {plan.unassigned.map((delivery) => (
               <div key={`${delivery.delivery_day}-${delivery.id}`} className="rounded-2xl border border-red-200 bg-white p-4">
-                <p className="font-semibold text-[#1a1a2e]">{delivery.customer || `Row ${delivery.id}`}</p>
-                <p className="mt-1 text-xs text-[#6b6b7b]">{delivery.quantity} positions</p>
+                <p className="font-semibold text-ink">{delivery.customer || `Row ${delivery.id}`}</p>
+                <p className="mt-1 text-xs text-muted">{delivery.quantity} positions</p>
               </div>
             ))}
           </div>
@@ -302,45 +302,45 @@ export default function GeneratedPlanningPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: routeIdx * 0.05 }}
-            className="overflow-hidden rounded-[1.75rem] border border-[#e8e5df] bg-white shadow-sm"
+            className="overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-sm"
           >
             <button
               type="button"
               onClick={() => setExpandedRoute(expandedRoute === routeIdx ? -1 : routeIdx)}
-              className="flex w-full items-center justify-between gap-4 border-b border-[#e8e5df] bg-[#f8f7f3] p-6 text-left transition hover:bg-[#f0eee9]"
+              className="flex w-full items-center justify-between gap-4 border-b border-border bg-canvas p-6 text-left transition hover:bg-[#f0eee9]"
             >
               <div className="flex min-w-0 items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#7c3aed] font-semibold text-white">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-600 font-semibold text-white">
                   {routeIdx + 1}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="truncate font-semibold text-[#1a1a2e]">{route.truck_id}</h3>
-                  <p className="mt-1 text-sm text-[#6b6b7b]">
+                  <h3 className="truncate font-semibold text-ink">{route.truck_id}</h3>
+                  <p className="mt-1 text-sm text-muted">
                     {formatTime(route.start_time)} - {formatTime(route.end_time)} - {route.stops?.length || 0} stops - {Number(route.total_distance || 0).toFixed(1)} km
                   </p>
-                  <p className="mt-1 text-xs text-[#6b6b7b]">
+                  <p className="mt-1 text-xs text-muted">
                     Capacity {route.capacity ?? 'N/A'} positions - Load {route.load ?? 0} positions
                   </p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="font-semibold text-[#1a1a2e]">{money(route.total_cost)}</p>
-                <p className="text-xs text-[#6b6b7b]">Route cost</p>
+                <p className="font-semibold text-ink">{money(route.total_cost)}</p>
+                <p className="text-xs text-muted">Route cost</p>
               </div>
             </button>
 
             {expandedRoute === routeIdx && (
               <div className="space-y-4 p-6">
                 <div className="flex gap-4">
-                  <div className="w-20 text-right font-semibold text-[#7c3aed]">{formatTime(route.start_time)}</div>
-                  <div className="flex-1 rounded-2xl border border-[#ddd6fe] bg-[#f5f3ff] p-3 font-semibold text-[#4c1d95]">Departure from depot</div>
+                  <div className="w-20 text-right font-semibold text-brand-600">{formatTime(route.start_time)}</div>
+                  <div className="flex-1 rounded-2xl border border-brand-200 bg-brand-50 p-3 font-semibold text-brand-900">Departure from depot</div>
                 </div>
 
                 {(route.stops || []).map((stop) => (
                   <div key={`${route.truck_id}-${stop.client_id}-${stop.arrival_time}`} className="flex gap-4">
                     <div className="w-20 text-right">
-                      <p className="font-semibold text-[#1a1a2e]">{formatTime(stop.arrival_time)}</p>
-                      <p className="text-xs text-[#6b6b7b]">{formatTime(stop.departure_time)}</p>
+                      <p className="font-semibold text-ink">{formatTime(stop.arrival_time)}</p>
+                      <p className="text-xs text-muted">{formatTime(stop.departure_time)}</p>
                     </div>
                     <div className={`flex-1 rounded-2xl border p-4 ${
                       stop.status === 'OK' ? 'border-emerald-200 bg-emerald-50' :
@@ -349,18 +349,18 @@ export default function GeneratedPlanningPage() {
                     }`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-[#1a1a2e]">{stop.client_name}</p>
-                          <p className="mt-1 text-xs text-[#6b6b7b]">Row {stop.client_id} - {stop.quantity || 0} positions</p>
+                          <p className="font-semibold text-ink">{stop.client_name}</p>
+                          <p className="mt-1 text-xs text-muted">Row {stop.client_id} - {stop.quantity || 0} positions</p>
                         </div>
-                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#1a1a2e]">{stop.status}</span>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink">{stop.status}</span>
                       </div>
                     </div>
                   </div>
                 ))}
 
                 <div className="flex gap-4">
-                  <div className="w-20 text-right font-semibold text-[#7c3aed]">{formatTime(route.end_time)}</div>
-                  <div className="flex-1 rounded-2xl border border-[#ddd6fe] bg-[#f5f3ff] p-3 font-semibold text-[#4c1d95]">Return to depot</div>
+                  <div className="w-20 text-right font-semibold text-brand-600">{formatTime(route.end_time)}</div>
+                  <div className="flex-1 rounded-2xl border border-brand-200 bg-brand-50 p-3 font-semibold text-brand-900">Return to depot</div>
                 </div>
               </div>
             )}
@@ -368,23 +368,23 @@ export default function GeneratedPlanningPage() {
         ))}
 
         {(plan?.routes || []).length === 0 && (
-          <div className="rounded-[1.75rem] border border-[#e8e5df] bg-white p-8 text-sm text-[#6b6b7b] shadow-sm">
+          <div className="rounded-[1.75rem] border border-border bg-white p-8 text-sm text-muted shadow-sm">
             No route was generated for the selected day.
           </div>
         )}
       </div>
 
       {suggestions.length > 0 && (
-        <div className="mt-8 rounded-[1.75rem] border border-[#e8e5df] bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-[#1a1a2e]">Recommendations</h2>
+        <div className="mt-8 rounded-[1.75rem] border border-border bg-white p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-ink">Recommendations</h2>
           <div className="space-y-3">
             {suggestions.map((suggestion, idx) => (
-              <div key={`${suggestion.message}-${idx}`} className="rounded-2xl border border-[#e8e5df] bg-[#f8f7f3] p-4">
+              <div key={`${suggestion.message}-${idx}`} className="rounded-2xl border border-border bg-canvas p-4">
                 <div className="flex gap-3">
                   <AlertCircle size={18} className={suggestion.severity === 'high' ? 'text-red-500' : suggestion.severity === 'warning' ? 'text-amber-500' : 'text-blue-500'} />
                   <div>
-                    <p className="font-semibold text-[#1a1a2e]">{suggestion.message}</p>
-                    <p className="mt-1 text-sm text-[#6b6b7b]">{suggestion.action}</p>
+                    <p className="font-semibold text-ink">{suggestion.message}</p>
+                    <p className="mt-1 text-sm text-muted">{suggestion.action}</p>
                   </div>
                 </div>
               </div>

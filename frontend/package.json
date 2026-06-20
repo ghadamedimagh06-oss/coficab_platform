@@ -4,9 +4,9 @@
   "description": "CofICab Platform React Dashboard",
   "private": true,
   "scripts": {
-    "dev": "npm run build && next start",
-    "dev:hmr": "next dev",
+    "dev": "next dev",
     "build": "next build",
+    "build:prod": "npm run build && next start",
     "start": "next start",
     "lint": "next lint"
   },

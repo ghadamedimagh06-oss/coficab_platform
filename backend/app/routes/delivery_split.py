@@ -9,7 +9,7 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import json
 import logging
@@ -106,7 +106,7 @@ async def propose_split(
     audit = DeliverySplitAudit(
         original_delivery_id=delivery_id,
         state=OversizedDeliveryState.DETECTED.value,
-        detected_at=datetime.utcnow(),
+        detected_at=datetime.now(timezone.utc),
         proposal_json=json.loads(proposal.model_dump_json()),
         max_vehicle_capacity=max_vehicle_capacity,
         proposed_splits_count=len(proposal.proposed_sub_deliveries),
@@ -210,7 +210,7 @@ async def _validate_split(
             quantity=sub.quantity,
             unit_increment=sub.unit_increment,
             state=OversizedDeliveryState.VALIDATED.value,
-            validated_at=datetime.utcnow(),
+            validated_at=datetime.now(timezone.utc),
             validated_by=current_user.id,
             proposal_json=json.loads(sub.model_dump_json()),
             constraint_check_json=proposal.constraint_check
@@ -222,7 +222,7 @@ async def _validate_split(
     # Update audit record
     audit.state = OversizedDeliveryState.VALIDATED.value
     audit.decision_action = "VALIDATE"
-    audit.decided_at = datetime.utcnow()
+    audit.decided_at = datetime.now(timezone.utc)
     audit.decided_by = current_user.id
     audit.linked_sub_deliveries_json = sub_delivery_ids
     
@@ -278,7 +278,7 @@ async def _modify_split(
             quantity=qty,
             unit_increment=proposal.proposed_sub_deliveries[0].unit_increment,
             state=OversizedDeliveryState.MODIFIED.value,
-            validated_at=datetime.utcnow(),
+            validated_at=datetime.now(timezone.utc),
             validated_by=current_user.id,
             proposal_json={
                 "sequence": seq,
@@ -294,7 +294,7 @@ async def _modify_split(
     # Update audit record
     audit.state = OversizedDeliveryState.MODIFIED.value
     audit.decision_action = "MODIFY"
-    audit.decided_at = datetime.utcnow()
+    audit.decided_at = datetime.now(timezone.utc)
     audit.decided_by = current_user.id
     audit.modified_quantities_json = modified_quantities
     audit.linked_sub_deliveries_json = sub_delivery_ids
@@ -328,14 +328,14 @@ async def _reject_split(
     # Update audit record
     audit.state = OversizedDeliveryState.REJECTED.value
     audit.decision_action = "REJECT"
-    audit.decided_at = datetime.utcnow()
+    audit.decided_at = datetime.now(timezone.utc)
     audit.decided_by = current_user.id
     audit.decision_reason = reason
     
     # Create exception alert (would be linked to external location/transport service)
     # TODO: Integrate with exception alert system
     audit.exception_alert_created = True
-    audit.exception_alert_id = f"EXC-{delivery.id}-{datetime.utcnow().timestamp()}"
+    audit.exception_alert_id = f"EXC-{delivery.id}-{datetime.now(timezone.utc).timestamp()}"
     
     db.commit()
     
@@ -413,7 +413,11 @@ async def get_pending_splits(
             "detected_at": audit.detected_at.isoformat(),
             "proposal": proposal,
             "status": "AWAITING_DECISION",
-            "time_pending_seconds": (datetime.utcnow() - audit.detected_at).total_seconds()
+            "time_pending_seconds": (
+                datetime.now(timezone.utc)
+                - (audit.detected_at if audit.detected_at.tzinfo
+                   else audit.detected_at.replace(tzinfo=timezone.utc))
+            ).total_seconds()
         })
     
     return {

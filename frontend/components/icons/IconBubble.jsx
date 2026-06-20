@@ -45,7 +45,7 @@ export default function IconBubble({ kind = 'default', size = 40 }) {
     ),
   };
 
-  const bg = kind === 'truck' || kind === 'bolt' ? 'bg-[#7c3aed]' : 'bg-[#6b7280]';
+  const bg = kind === 'truck' || kind === 'bolt' ? 'bg-brand-600' : 'bg-[#6b7280]';
 
   return (
     <div className={`${common} ${bg}`} style={{ width: size, height: size }}>

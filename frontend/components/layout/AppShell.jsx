@@ -1,26 +1,82 @@
 "use client";
 
+import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import Sidebar from './Sidebar';
+import CopilotLauncher from '../chat/CopilotLauncher';
+import DemoDataBanner from './DemoDataBanner';
 
 export default function AppShell({ children }) {
+  // Drawer is closed by default on mobile; on lg+ the sidebar is visible unless
+  // the user collapses it. `isSidebarOpen` drives the mobile overlay, while
+  // `isCollapsed` drives the desktop show/hide toggle.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  // Restore the persisted desktop collapse state on mount.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('sidebarCollapsed') === '1') setIsCollapsed(true);
+    } catch {}
+  }, []);
+
+  // Persist the collapse state whenever it changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+    } catch {}
+  }, [isCollapsed]);
+
+  // Ctrl/Cmd+B toggles the sidebar, mirroring the common editor shortcut.
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        setIsCollapsed((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
-    <div className="flex min-h-screen bg-[#faf8f5] text-[#1a1a2e]">
-      <Sidebar />
-      <main className="flex-1 pb-12 pl-72">
-        <div className="sticky top-0 z-20 bg-[#faf8f5]/95 backdrop-blur-xl border-b border-[#e8e5df] px-6 py-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.32em] text-[#6b6b7b]">COFICAB Control Tower</p>
-              <h1 className="text-2xl font-semibold">Live operations</h1>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <span className="rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm text-[#6b6b7b]">Live state</span>
-              <span className="rounded-2xl border border-[#e8e5df] bg-white px-4 py-2 text-sm text-[#6b6b7b]">Audit ready</span>
-            </div>
+    <div className="flex min-h-screen bg-canvas text-ink">
+      <Sidebar
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={() => setIsCollapsed((v) => !v)}
+      />
+
+      <main
+        className={`min-w-0 flex-1 pb-12 transition-[padding] duration-300 ease-in-out ${
+          isCollapsed ? 'lg:pl-20' : 'lg:pl-72'
+        }`}
+      >
+        {/* Mobile-only top bar: holds the hamburger. On lg+ each page owns
+            its own header, so this bar is hidden to avoid a double header. */}
+        <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-canvas/95 px-4 py-3 backdrop-blur-xl lg:hidden">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-ink"
+            aria-label="Open navigation menu"
+          >
+            <Menu size={20} />
+          </button>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-muted">COFICAB</p>
+            <p className="text-sm font-semibold">OptiRoute</p>
           </div>
         </div>
-        <div className="px-6 pt-6">{children}</div>
+
+        <DemoDataBanner />
+
+        <div className="px-4 pt-6 lg:px-6">{children}</div>
       </main>
+
+      {/* Global assistant — reachable from every page */}
+      <CopilotLauncher />
     </div>
   );
 }

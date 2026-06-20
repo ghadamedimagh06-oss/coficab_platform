@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -60,7 +60,7 @@ class PlanValidationService:
 
         old_status = plan.statut_plan.value
         plan.statut_plan = StatutPlan.VALIDE
-        plan.date_validation = datetime.utcnow()
+        plan.date_validation = datetime.now(timezone.utc)
         plan.valide_par = username
         self.db.add(
             PlanningChangeLog(

@@ -83,20 +83,137 @@ def _minutes(value):
     return int(hours) * 60 + int(minutes)
 
 
+def test_hos_warnings_flag_long_days():
+    builder = DailyPlanBuilder(WEEKLY_DIR)
+    trucks = [{
+        "truck_label": "Truck X", "truck_id": 1,
+        "trips": [
+            {"depart_at": "03:00", "return_at": "12:00", "stops": [{"travel_min": 300}]},
+            {"depart_at": "12:30", "return_at": "18:30", "stops": [{"travel_min": 260}]},
+        ],
+    }]
+    warnings = builder._hos_warnings(trucks)
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert w["truck"] == "Truck X"
+    assert w["driving_minutes"] == 560 and w["driving_overflow_minutes"] == 20
+    assert w["on_duty_minutes"] == 930 and w["on_duty_overflow_minutes"] == 150
+
+
+def test_hos_no_warning_for_compliant_day():
+    builder = DailyPlanBuilder(WEEKLY_DIR)
+    trucks = [{
+        "truck_label": "T", "truck_id": 2,
+        "trips": [{"depart_at": "08:00", "return_at": "12:00", "stops": [{"travel_min": 120}]}],
+    }]
+    assert builder._hos_warnings(trucks) == []
+
+
+def test_plan_exposes_hos_warnings_list():
+    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    assert isinstance(plan["diagnostics"]["hos_warnings"], list)
+
+
+def test_plan_reports_estimated_cost_in_tnd():
+    plan = DailyPlanBuilder(WEEKLY_DIR).build(date(2026, 5, 26))
+    cost = plan["estimated_cost_tnd"]
+    assert isinstance(cost, dict)
+    assert cost["total"] > 0
+    for key in ("trucks", "fuel", "driver", "underutilization", "unassigned_penalty"):
+        assert key in cost
+        assert cost[key] >= 0
+
+
+def test_cost_config_is_injectable():
+    from app.services.daily_plan_builder import CostConfig
+
+    cheap = CostConfig(fuel_price_tnd_per_liter=0.0, driver_hourly_cost_tnd=0.0,
+                       truck_dispatch_fixed_tnd=0.0, underutil_penalty_per_pos=0.0,
+                       unassigned_delivery_penalty_tnd=0.0, rental_truck_per_day_tnd=0.0)
+    builder = DailyPlanBuilder(WEEKLY_DIR, cost_config=cheap)
+    assert builder.cost_config.fuel_price_tnd_per_liter == 0.0
+
+
+def test_clock_does_not_clamp_midnight():
+    result = DailyPlanBuilder._clock(1514)  # 25h 14min
+    assert result != "23:59", "_clock must not clamp late returns"
+    assert result == "25:14"
+
+
+def test_clock_formats_normal_time():
+    assert DailyPlanBuilder._clock(6 * 60 + 5) == "06:05"
+
+
 def test_daily_plan_builder_assigns_real_workbook_rows():
     plan = _builder().build(date(2026, 5, 26))
 
-    assigned_count = sum(
-        len(trip["stops"])
+    assigned_stops = [
+        stop
         for truck in plan["trucks"]
         for trip in truck["trips"]
-    )
+        for stop in trip["stops"]
+    ]
+
+    # Conservation is per ORIGINAL delivery, not per stop: a split delivery is
+    # served across several stops but is still one considered delivery, so we
+    # collapse each stop back to its parent (split_parent_id when split, else id)
+    # before counting. Every considered delivery is either served or unassigned.
+    def _parent(stop):
+        return stop.get("split_parent_id", stop.get("id"))
+
+    assigned_deliveries = {_parent(s) for s in assigned_stops}
+    unassigned_deliveries = {_parent(s) for s in plan["unassigned"]}
 
     assert plan["source_file"] == SOURCE_FILE.name
     assert plan["day"] == "2026-05-26"
     assert plan["summary"]["selected_delivery_rows"] > 0
-    assert assigned_count > 0
-    assert assigned_count + len(plan["unassigned"]) == plan["summary"]["deliveries_considered"]
+    assert len(assigned_stops) > 0
+    assert (
+        len(assigned_deliveries | unassigned_deliveries)
+        == plan["summary"]["deliveries_considered"]
+    )
+
+
+def test_daily_plan_api_filters_out_unavailable_resource_payload():
+    from app.routes.optimization import _sanitize_daily_plan_trucks
+
+    trucks = _sanitize_daily_plan_trucks([
+        {"truck_id": 1, "truck_label": "Ready", "capacity_positions": 14, "capacity_kg": 10000, "resource_status": "available"},
+        {"truck_id": 2, "truck_label": "Broken", "capacity_positions": 14, "capacity_kg": 10000, "resource_status": "out_of_service"},
+        {"truck_id": 3, "truck_label": "Paused Driver", "capacity_positions": 14, "capacity_kg": 10000, "driver_status": "En pause"},
+    ])
+
+    assert [truck["truck_id"] for truck in trucks] == [1]
+
+
+def test_daily_plan_db_fleet_requires_available_truck_and_active_driver(db):
+    from app.database import Base
+    from app.models.camion import Camion, CamionStatus, CamionType
+    from app.models.chauffeur import Chauffeur, ChauffeurStatus, PermisType
+    from app.routes.optimization import _available_trucks_for_daily_plan
+
+    Base.metadata.create_all(bind=db.get_bind(), checkfirst=True)
+
+    active = Chauffeur(id=501, full_name="Active Driver", permis_type=PermisType.C, status=ChauffeurStatus.ACTIF)
+    paused = Chauffeur(id=502, full_name="Paused Driver", permis_type=PermisType.C, status=ChauffeurStatus.CONGE)
+    ready = Camion(
+        id=601, plate_number="READY-601", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.DISPONIBLE, chauffeur_defaut_id=501,
+    )
+    broken = Camion(
+        id=602, plate_number="BROKEN-602", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.PANNE, chauffeur_defaut_id=501,
+    )
+    no_driver = Camion(
+        id=603, plate_number="PAUSED-603", type=CamionType.PORTEUR, capacite_kg=10000,
+        max_palettes=14, status=CamionStatus.DISPONIBLE, chauffeur_defaut_id=502,
+    )
+    db.add_all([active, paused, ready, broken, no_driver])
+    db.commit()
+
+    fleet = _available_trucks_for_daily_plan(db)
+
+    assert [truck["truck_id"] for truck in fleet] == [601]
 
 
 def test_daily_plan_builder_does_not_parallelize_one_truck():
@@ -124,9 +241,17 @@ def test_daily_plan_builder_does_not_parallelize_one_truck():
 
 def test_no_trip_exceeds_truck_capacity_or_working_hours():
     """Every trip must fit its truck by BOTH positions and gross weight, and
-    return to the depot before the working day ends. Guards the kg-capacity
-    enforcement and the rescue pass against regressions."""
-    work_end = 20 * 60  # 20:00, matches DailyPlanConfig.work_end
+    must DEPART within the legal dispatch window. The binding daily constraint is
+    the departure cut-off, not the return: by design a truck serving a far zone
+    may drive the empty truck home in the evening (see DailyPlanConfig). Guards
+    the kg-capacity enforcement and the depart-by-cutoff rule against regressions.
+    """
+    from app.services.daily_plan_builder import DailyPlanConfig
+
+    cfg = DailyPlanConfig()
+    earliest_depart = _minutes(cfg.early_start)   # 05:00 (long hauls may stage early)
+    latest_depart = _minutes(cfg.max_depart)      # 18:00 (hard depart cut-off)
+    end_of_day = 24 * 60                           # returns must still land same calendar day
 
     for day in (date(2026, 5, 25), date(2026, 5, 26), date(2026, 5, 28)):
         plan = _builder().build(day)
@@ -144,9 +269,14 @@ def test_no_trip_exceeds_truck_capacity_or_working_hours():
                     f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
                     f"overweight: {load_kg} > {truck['capacity_kg']} kg"
                 )
-                assert _minutes(trip["return_at"]) <= work_end, (
+                depart = _minutes(trip["depart_at"])
+                assert earliest_depart <= depart <= latest_depart, (
                     f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
-                    f"returns after the working day ({trip['return_at']})"
+                    f"departs outside the legal window ({trip['depart_at']})"
+                )
+                assert _minutes(trip["return_at"]) <= end_of_day, (
+                    f"{day} truck {truck['truck_id']} trip {trip['trip_id']} "
+                    f"returns after midnight ({trip['return_at']})"
                 )
 
         # The hired truck (id 999) is a last resort: it must never carry load

@@ -1,53 +1,70 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from app.models.user import User
 from app.models.transport import UserCreate, TokenData
-import os
+from app.config import auth_enforced, dev_bypass_allowed, jwt_secret
 
-SECRET_KEY = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# bcrypt operates on at most 72 bytes; longer inputs are silently truncated by
+# most libs, so we truncate explicitly for deterministic behaviour. We call the
+# bcrypt package directly (not passlib, which is unmaintained and reads the
+# removed bcrypt.__about__ on bcrypt>=4.1, emitting errors).
+_BCRYPT_MAX_BYTES = 72
+
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pw = (password or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
+    return bcrypt.hashpw(pw, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password:
+        return False
+    pw = (plain_password or "").encode("utf-8")[:_BCRYPT_MAX_BYTES]
+    try:
+        return bcrypt.checkpw(pw, hashed_password.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def create_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, jwt_secret(), algorithm=ALGORITHM)
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, jwt_secret(), algorithms=[ALGORITHM])
     except JWTError:
         return None
 
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+    # The dev fallback hands out a 'dev' admin when no token is present so the
+    # tokenless offline frontend works. It is DISABLED in production (and when
+    # REQUIRE_AUTH is set), where a missing token is rejected. See app.config.
     if creds is None:
-        return {"username": "dev", "role": "admin"}
+        if dev_bypass_allowed():
+            return {"username": "dev", "role": "admin"}
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = decode_token(creds.credentials)
     if not payload or not payload.get("sub"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    return {"username": payload["sub"], "role": payload.get("role", "admin")}
+    # Least privilege: a token without an explicit role claim is treated as a
+    # read-only viewer, never an admin.
+    return {"username": payload["sub"], "role": payload.get("role", "viewer")}
 
 
 def require_role(*roles: str):
@@ -56,6 +73,33 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
         return user
     return _dep
+
+
+# auto_error=False so we control the no-credentials case ourselves.
+_protected_bearer = HTTPBearer(auto_error=False)
+
+
+def require_auth(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_protected_bearer),
+) -> dict:
+    """Auth dependency for production-sensitive routes (plan generation,
+    dashboards, execution/ePOD).
+
+    - A present-but-invalid/expired token is ALWAYS rejected with 401.
+    - A missing token returns 403 when auth is enforced (production or
+      REQUIRE_AUTH), otherwise falls back to the offline dev user so the
+      tokenless frontend still works. See app.config.auth_enforced.
+    """
+    if credentials is None:
+        if auth_enforced():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
+        return {"username": "dev", "role": "admin"}
+    payload = decode_token(credentials.credentials)
+    if not payload or not payload.get("sub"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    # Least privilege: a token without an explicit role claim is treated as a
+    # read-only viewer, never an admin.
+    return {"username": payload["sub"], "role": payload.get("role", "viewer")}
 
 
 class AuthService:

@@ -18,6 +18,52 @@ class KpiRecomputeRequest(BaseModel):
     end: date
 
 
+# Small TTL cache for the live KPI fallback so /kpi doesn't re-run the optimiser
+# on every poll. Keyed by day; mirrors the daily dashboard's caching.
+_LIVE_KPI_CACHE: dict[str, tuple] = {}
+_LIVE_KPI_TTL_SECONDS = 120
+
+
+def _live_plan_kpis(ref_date: Optional[date]) -> dict:
+    """Single source of truth fallback: derive the headline KPIs directly from
+    the day's generated plan — the SAME numbers the operations dashboard shows —
+    so /api/metrics/kpi is never empty before monthly snapshots are computed.
+    Adds a CO₂-saved card so the sustainability story rides on the main KPIs too.
+    """
+    import time
+    from pathlib import Path
+    from app.services.daily_plan_builder import DailyPlanBuilder, DailyPlanConfig
+    from app.services import dashboard_service
+
+    day = ref_date or date.today()
+    key = day.isoformat()
+    now = time.time()
+    cached = _LIVE_KPI_CACHE.get(key)
+    if cached and now - cached[0] < _LIVE_KPI_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        # routes/metrics.py → parents[3] is the repo root (matches optimization.py).
+        weekly_dir = Path(__file__).resolve().parents[3] / "weekly planning"
+        plan = DailyPlanBuilder(weekly_dir, cfg=DailyPlanConfig(prefer_ortools=True)).build(day)
+        kpis = dashboard_service.plan_kpis(plan)
+        s = plan.get("sustainability", {})
+        if s.get("co2_saved_kg") is not None:
+            kpis.append({
+                "code": "ESG-CO2", "id": "co2_saved", "label": "CO₂ Saved",
+                "value": s.get("co2_saved_kg"), "unit": "kg", "target": None,
+                "color": "green", "direction": "up", "icon": "leaf",
+                "hint": f"{s.get('co2_saved_pct')}% vs manual baseline", "basis": "planned",
+            })
+        payload = {"kpis": kpis, "source": "live_plan", "day": key}
+        if len(_LIVE_KPI_CACHE) > 16:
+            _LIVE_KPI_CACHE.clear()
+        _LIVE_KPI_CACHE[key] = (now, payload)
+        return payload
+    except Exception as exc:
+        return {"kpis": [], "source": "none", "error": str(exc)}
+
+
 @router.get("/kpi")
 async def get_kpi(
     ref_date: Optional[date] = Query(None, description="Reference date (default: today)"),
@@ -25,14 +71,18 @@ async def get_kpi(
     db: Optional[Session] = Depends(get_db_optional),
 ):
     """
-    Return the 8 official Coficab KPIs for the month containing ref_date.
-    Each entry includes value, unit, color band, target, and month-over-month trend.
+    Return the headline Coficab KPIs. Prefers materialised ERD snapshots; when
+    those are empty (snapshots not yet computed) it falls back to LIVE
+    plan-derived KPIs — the same source the operations dashboard uses — so the
+    cards are always real and consistent across the app. The `source` field says
+    which path produced the numbers.
     """
-    if not db:
-        return {"kpis": []}
-    svc = KpiService(db)
-    kpis = svc.get_dashboard_kpis(ref_date)
-    return {"kpis": kpis}
+    if db:
+        svc = KpiService(db)
+        kpis = svc.get_dashboard_kpis(ref_date)
+        if kpis:
+            return {"kpis": kpis, "source": "snapshots"}
+    return _live_plan_kpis(ref_date)
 
 
 @router.get("/kpi/snapshot/daily")

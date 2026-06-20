@@ -33,16 +33,21 @@ log = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 GEOCODE_CACHE = DATA_DIR / "geocode_cache.json"
+# Cached OSRM road-distance matrices, keyed by a hash of the rounded coordinate
+# set, so repeat builds of the same day don't re-hit the routing server.
+ROAD_MATRIX_CACHE = DATA_DIR / "road_matrix_cache.json"
 # Authoritative customer directory (destination + real road km from the depot),
 # generated from the frontend Clients page data (frontend/data/coficabData.js).
 CLIENTS_DIRECTORY = DATA_DIR / "clients_directory.json"
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# Public OSRM demo server — same one the frontend map uses for road geometry.
+OSRM_TABLE_URL = "https://router.project-osrm.org/table/v1/driving/"
 USER_AGENT = "coficab-daily-planner/1.0 (logistics planning)"
 
-# COFICAB Mégrine depot — geocoded once, kept as a stable fallback.
-DEPOT_QUERY = "Mégrine, Ben Arous, Tunisia"
-DEPOT_FALLBACK: Tuple[float, float] = (36.7703, 10.2316)
+# COFICAB Sidi Hassine depot — geocoded once, kept as a stable fallback.
+DEPOT_QUERY = "Sidi Hassine, Tunis, Tunisia"
+DEPOT_FALLBACK: Tuple[float, float] = (36.7708, 10.1103)
 
 # Factor that turns straight-line km into approximate road km (used by the
 # builder for client↔client legs that have no directory distance).
@@ -105,6 +110,63 @@ SUPPLEMENTAL_CITY = {
     "JETTY": "Hammam Lif, Ben Arous, Tunisia",
     "COFICAB MED": "Mjez El Bab, Beja, Tunisia",
     "PLASTEKNIQUE": "Mghira, Ben Arous, Tunisia",
+}
+
+# Authoritative EXACT site coordinates per client (lat, lon, locality label),
+# keyed by the normalised customer name (same _norm() form the resolver uses).
+# These are the real factory/warehouse locations — used verbatim so two clients
+# in the same town are not collapsed onto a single city-centroid point, and so
+# the optimiser's distance/time reflect each site. Alias spellings are included
+# so workbook variants resolve to the same site.
+CLIENT_COORDS: Dict[str, Tuple[float, float, str]] = {
+    "AEC WIRING TECHNOLOGY":              (36.72422, 10.18543, "Mghira"),
+    "AMPHENOL TUNISIE":                   (36.38624,  9.91497, "El Fahs"),
+    "APTIV SERVICES TUNISIA":             (36.63183,  9.61988, "Medjez el Bab"),
+    "CABLISYS TUNISIE":                   (35.90557, 10.53103, "Akouda / Sousse"),
+    "COELEC TUNISIA":                     (36.78757, 10.07286, "Agba / Tunis"),
+    "COFAT MATEUR":                       (37.04846,  9.68369, "Mateur"),
+    "COFAT TUNIS":                        (36.76191, 10.11649, "Tunis"),
+    "COFICAB MED":                        (36.63330,  9.61888, "Medjez el Bab"),
+    "DIS DRAXLMAIER INDUST SOLUTION":     (36.09985,  9.35774, "Siliana"),
+    "DIS DRAXLMAIER INDUST. SOLUTION":    (36.09985,  9.35774, "Siliana"),
+    "DIS DRAXLMAIER":                     (36.09985,  9.35774, "Siliana"),
+    "ELECTROCONTACT TUNISIE":             (35.65602, 10.88034, "Ksar Hellal"),
+    "ERA CONTACTS TUNISIA":               (37.17707,  9.96126, "El Azib / Bizerte"),
+    "I.C.EM":                             (36.63280, 10.56735, "Bni Khalled"),
+    "KAB-LEM TUNISIA":                    (37.21750,  9.93854, "Menzel Jemil / Bizerte"),
+    "KAB-LEM":                            (37.21750,  9.93854, "Menzel Jemil / Bizerte"),
+    "KROMBERG & SCHUBERT TUNISIE":        (36.73376,  9.20496, "Beja"),
+    "KROMBERG & SCHUBERT CABLE&WIRE":     (36.73376,  9.20496, "Beja"),
+    "LECTRIC":                            (36.38624,  9.91497, "El Fahs"),
+    "LEONI MENZEL HAYET":                 (35.56120, 10.61933, "Manzel Hayet"),
+    "LEONI SOUSSE":                       (35.75726, 10.60193, "Messadine / Sousse"),
+    "LEONI WIRING SYSTEMS TUNISIA NORD":  (37.04683,  9.68219, "Mateur"),
+    "LEONI WIRING SYSTEMS TUNISIA SUD":   (35.75726, 10.60193, "Messadine / Sousse"),
+    "MEDITERRANEAN ELECTRIC WIRING":      (36.11489, 10.06021, "Nadhour"),
+    "METS MANUFAC ELECTRO.DE SOUSSE":     (35.85031, 10.60712, "Sousse"),
+    "REFLEXALLEN":                        (36.35762, 10.20660, "Hammam Zriba"),
+    "PROD-ELEC":                          (35.86943, 10.54224, "Kaala Kebira"),
+    "SCHULTE AUTOMOTIVE TUNISIA":         (36.35393,  9.63358, "Bouarada"),
+    "SCHULTE AUTOMOTIVE TUN ZAGHOUAN":    (36.55923, 10.07932, "Jebel Oust / Zaghouan"),
+    "SCHULTE ZAGHOUANE":                  (36.55923, 10.07932, "Jebel Oust / Zaghouan"),
+    "SEBN":                               (36.57104,  8.79706, "Jendouba"),
+    "SEBN SUMITOMO":                      (36.57104,  8.79706, "Jendouba"),
+    "SE BORDNETZE EL FEJJA":              (36.67612,  9.96586, "El Fejja"),
+    "SEWS TN":                            (35.72389, 10.74911, "Monastir"),
+    "STE S.C.E.E.T":                      (36.38411,  9.91080, "El Fahs"),
+    "TTE INTERNATIONAL":                  (37.19885,  9.95498, "El Azib / Bizerte"),
+    "TTE INTERNATIONAL / FUJIKURA":       (37.19885,  9.95498, "El Azib / Bizerte"),
+    "WEWIRE HAMMAMET TUNISIA":            (36.41160, 10.52893, "Hammamet"),
+    "YAZAKI AUTOMOTIVE PRODUCTS TUNISIA": (37.17305,  9.96520, "Bizerte"),
+    "YAZAKI GAFSA":                       (34.41551,  8.73951, "Gafsa"),
+    "YURA CORPORATION TUNISIA":           (35.69373, 10.11254, "Kairouan"),
+    "COFAT KAIROUAN":                     (35.81832, 10.15357, "Kairouan (Sbikha)"),
+    "A C T ASSEMBLAGE CABLE TUNISIE":     (36.69253, 10.45185, "Soliman"),
+    "JETTY":                              (36.70427, 10.38539, "Borj Cedria / Hammam Lif"),
+    "PERPLASTIC TN":                      (36.70883, 10.17373, "Mghira"),
+    "ADC SOUSSE":                         (35.83748, 10.59457, "Sousse"),
+    "CHAKIRA":                            (36.75711, 10.11703, "Tunis"),
+    "CHAKIRA CABLE":                      (36.75711, 10.11703, "Tunis"),
 }
 
 # Client-directory destination labels → proper Tunisian city geocoding queries.
@@ -205,6 +267,7 @@ class GeoService:
         self.timeout = timeout
         self._lock = threading.Lock()
         self._geocode_cache: Dict[str, Optional[List[float]]] = self._load(GEOCODE_CACHE)
+        self._road_cache: Dict[str, List[List[float]]] = self._load(ROAD_MATRIX_CACHE)
         self._last_nominatim = 0.0
         self._city_from_synthetic = self._load_synthetic_cities()
         self._client_directory = self._load_client_directory()
@@ -277,6 +340,22 @@ class GeoService:
         we use its stored delivery-site coordinates. Online geocoding is only a
         fallback for missing directory coordinates or customers not listed there.
         """
+        # Exact per-client site coordinates take precedence over everything: a
+        # client's real factory location, never the shared city centroid, so the
+        # map and the client↔client legs use the true site. The authoritative
+        # depot↔client road distance (km) from the client directory is still
+        # used when available — haversine from the depot would over-estimate
+        # long hauls and wrongly drop far deliveries.
+        exact = CLIENT_COORDS.get(_norm(customer))
+        if exact:
+            lat, lon, label = exact
+            entry = self.lookup_client(customer)
+            return {
+                "lat": lat, "lon": lon,
+                "km": entry.get("km") if entry else None,
+                "label": label, "source": "exact-client",
+            }
+
         entry = self.lookup_client(customer)
         if entry:
             dest = entry["destination"]
@@ -384,6 +463,66 @@ class GeoService:
         except Exception:
             pass
         return None
+
+    # --------------------------------------------------- road-distance matrix
+    @staticmethod
+    def _road_key(coords: List[Tuple[float, float]]) -> str:
+        """Order-sensitive cache key (the matrix is indexed by position)."""
+        return "|".join(f"{lat:.4f},{lon:.4f}" for lat, lon in coords)
+
+    def road_km_matrix(
+        self, coords: List[Tuple[float, float]]
+    ) -> Optional[List[List[float]]]:
+        """Real driving-distance matrix (km) for ``coords`` ([(lat, lon), ...])
+        via the OSRM ``/table`` service, so depot↔client and client↔client legs
+        use actual road distance instead of straight-line estimates.
+
+        One request returns the whole NxN matrix; results are cached on disk by
+        a hash of the rounded coordinates so a repeated build is instant.
+        Returns None on any failure (caller falls back to the haversine matrix).
+        """
+        if not coords or len(coords) < 2:
+            return None
+        key = self._road_key(coords)
+        if key in self._road_cache:
+            return self._road_cache[key]
+        locs = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
+        url = f"{OSRM_TABLE_URL}{locs}?annotations=distance"
+        matrix, ok = self._osrm_table(url, len(coords))
+        if ok and matrix is not None:  # only cache deterministic outcomes
+            with self._lock:
+                self._road_cache[key] = matrix
+                self._save(ROAD_MATRIX_CACHE, self._road_cache)
+        return matrix
+
+    def _osrm_table(
+        self, url: str, size: int
+    ) -> Tuple[Optional[List[List[float]]], bool]:
+        """Return (km_matrix_or_none, ok). ok=False marks a network error so the
+        result is not cached and the next build retries."""
+        last_exc: Optional[Exception] = None
+        for attempt in range(2):  # tolerate a transient hiccup
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    data = json.loads(resp.read())
+                if data.get("code") != "Ok":
+                    return None, True  # OSRM answered but couldn't route — definitive
+                dist = data.get("distances")
+                if not dist or len(dist) != size:
+                    return None, True
+                km = [
+                    [(v / 1000.0 if v is not None else None) for v in row]
+                    for row in dist
+                ]
+                if any(v is None for row in km for v in row):
+                    return None, True  # an unroutable pair — use the fallback
+                return km, True
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(0.5 * (attempt + 1))
+        log.warning("GeoService: OSRM table failed — %s", last_exc)
+        return None, False
 
     def depot(self) -> Tuple[float, float]:
         return self.geocode(DEPOT_QUERY) or DEPOT_FALLBACK

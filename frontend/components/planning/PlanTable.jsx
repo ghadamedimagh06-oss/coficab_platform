@@ -12,7 +12,7 @@ const STATUS_STYLE = {
 const PRIORITY_STYLE = {
   urgent: 'text-red-600 font-semibold',
   high:   'text-amber-600 font-semibold',
-  normal: 'text-[#6b6b7b]',
+  normal: 'text-muted',
   low:    'text-[#9b9bab]',
 };
 
@@ -21,10 +21,28 @@ function fmt(n) {
 }
 
 function Badge({ value, styles }) {
-  const cls = styles[value] || 'bg-[#f0eee9] text-[#6b6b7b] ring-1 ring-[#e8e5df]';
+  const cls = styles[value] || 'bg-[#f0eee9] text-muted ring-1 ring-border';
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>
       {value || '—'}
+    </span>
+  );
+}
+
+// Shown on deliveries the optimizer auto-split. The full explanation (original
+// positions, truck capacity, resulting parts) is on hover via the title.
+function SplitBadge({ row }) {
+  const counter = row.split_total_parts ? ` ${row.split_part}/${row.split_total_parts}` : '';
+  const warn = !!row.split_warning;
+  const cls = warn
+    ? 'bg-red-100 text-red-800 ring-1 ring-red-300'
+    : 'bg-amber-100 text-amber-800 ring-1 ring-amber-300';
+  return (
+    <span
+      title={warn ? `⚠ ${row.split_warning}` : (row.planning_comment || 'Auto-split delivery')}
+      className={`shrink-0 cursor-help rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}
+    >
+      {warn ? '⚠' : '🔀'} Auto-split{counter}
     </span>
   );
 }
@@ -66,15 +84,15 @@ function buildRows(plan) {
           position_count: stop.quantity_positions ?? stop.position_count,
           gross_weight_kg: stop.quantity_kg,
           priority: stop.priority || 'normal',
-          comments: constraints.notes || constraints.comment_constraint || raw.notes || '',
+          comments: stop.planning_comment || constraints.notes || constraints.comment_constraint || raw.notes || '',
+          is_split: !!stop.is_split,
+          planning_comment: stop.planning_comment || '',
+          split_warning: stop.split_warning || null,
+          split_part: stop.split_part,
+          split_total_parts: stop.split_total_parts,
           travel_min: stop.travel_min,
           service_min: stop.service_min,
           distance_km: stop.distance_km,
-          trip_total_distance_km: trip.total_distance_km,
-          trip_total_travel_min: trip.total_travel_min,
-          trip_total_service_min: trip.total_service_min,
-          trip_total_duration_min: trip.total_duration_min,
-          route_status: trip.route_status || (trip.total_distance_km == null ? 'manual_pending' : 'osrm'),
           _unassigned: false,
         });
       });
@@ -104,15 +122,15 @@ function buildRows(plan) {
       position_count: stop.quantity_positions ?? stop.position_count,
       gross_weight_kg: stop.quantity_kg,
       priority: stop.priority || 'normal',
-      comments: stop.unassigned_reason || constraints.comment_constraint || '',
+      comments: stop.unassigned_reason || stop.planning_comment || constraints.comment_constraint || '',
+      is_split: !!stop.is_split,
+      planning_comment: stop.planning_comment || '',
+      split_warning: stop.split_warning || null,
+      split_part: stop.split_part,
+      split_total_parts: stop.split_total_parts,
       travel_min: null,
       service_min: null,
       distance_km: stop.distance_km,
-      trip_total_distance_km: null,
-      trip_total_travel_min: null,
-      trip_total_service_min: null,
-      trip_total_duration_min: null,
-      route_status: null,
       _unassigned: true,
     });
   });
@@ -121,13 +139,13 @@ function buildRows(plan) {
 }
 
 const TH = ({ children, className = '' }) => (
-  <th className={`whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6b6b7b] ${className}`}>
+  <th className={`whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-muted ${className}`}>
     {children}
   </th>
 );
 
 const TD = ({ children, className = '' }) => (
-  <td className={`px-3 py-2.5 text-sm text-[#1a1a2e] ${className}`}>
+  <td className={`px-3 py-2.5 text-sm text-ink ${className}`}>
     {children}
   </td>
 );
@@ -141,18 +159,23 @@ export default function PlanTable({ plan, onExport, exporting }) {
 
   const totalPos = assigned.reduce((s, r) => s + Number(r.position_count || 0), 0);
   const totalKg  = assigned.reduce((s, r) => s + Number(r.gross_weight_kg || 0), 0);
+  // Positions-only model: weight is 0 across the board, so the kg column/summary
+  // are noise. Only show them if the workbook actually carries weight data.
+  const anyWeight = rows.some((r) => Number(r.gross_weight_kg || 0) > 0);
+  const colCount = anyWeight ? 16 : 15;
 
   return (
     <div className="mt-8 space-y-4">
       {/* header */}
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#7c3aed]">Delivery schedule</p>
-          <h2 className="mt-1 text-xl font-semibold text-[#1a1a2e]">
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-600">Delivery schedule</p>
+          <h2 className="mt-1 text-xl font-semibold text-ink">
             Export-ready plan table
           </h2>
-          <p className="mt-0.5 text-xs text-[#6b6b7b]">
-            {assigned.length} deliveries · {fmt(totalPos)} positions · {fmt(Math.round(totalKg))} kg loaded
+          <p className="mt-0.5 text-xs text-muted">
+            {assigned.length} deliveries · {fmt(totalPos)} positions
+            {anyWeight && ` · ${fmt(Math.round(totalKg))} kg loaded`}
             {unassigned.length > 0 && ` · ${unassigned.length} unassigned`}
           </p>
         </div>
@@ -161,7 +184,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
             type="button"
             onClick={onExport}
             disabled={exporting || !plan?.source_file}
-            className="inline-flex items-center gap-2 rounded-full bg-[#7c3aed] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#6d28d9] disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-50"
           >
             <Download size={15} />
             {exporting ? 'Exporting…' : 'Export to Excel'}
@@ -170,25 +193,23 @@ export default function PlanTable({ plan, onExport, exporting }) {
       </div>
 
       {/* main table */}
-      <div className="overflow-x-auto rounded-[2rem] border border-[#e8e5df] bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-[2rem] border border-border bg-white shadow-sm">
         <table className="min-w-full border-separate border-spacing-0">
-          <thead className="sticky top-0 z-10 bg-[#f8f7f3]">
-            <tr className="border-b border-[#e8e5df]">
+          <thead className="sticky top-0 z-10 bg-canvas">
+            <tr className="border-b border-border">
               <TH className="rounded-tl-[2rem] pl-6">Day</TH>
               <TH>N°</TH>
               <TH>Truck</TH>
               <TH>Trip</TH>
-              <TH>Route total</TH>
               <TH>Driver</TH>
               <TH>Client</TH>
               <TH>Destination</TH>
               <TH>ETD</TH>
               <TH>ETA</TH>
               <TH>Travel</TH>
-              <TH>Service</TH>
-              <TH>Leg km</TH>
+              <TH>Dist km</TH>
               <TH>Positions</TH>
-              <TH>Gross kg</TH>
+              {anyWeight && <TH>Gross kg</TH>}
               <TH>Priority</TH>
               <TH>Status</TH>
               <TH className="rounded-tr-[2rem] pr-6">Comments / Reason</TH>
@@ -201,18 +222,18 @@ export default function PlanTable({ plan, onExport, exporting }) {
               return (
                 <tr
                   key={row._key}
-                  className={`transition-colors hover:bg-[#faf8f5] ${
-                    row._firstInTrip && i > 0 ? 'border-t border-dashed border-[#e8e5df]' : ''
+                  className={`transition-colors hover:bg-canvas ${
+                    row._firstInTrip && i > 0 ? 'border-t border-dashed border-border' : ''
                   }`}
                 >
-                  <TD className={`pl-6 text-[#6b6b7b] ${isLastRow ? 'rounded-bl-[2rem]' : ''}`}>
+                  <TD className={`pl-6 text-muted ${isLastRow ? 'rounded-bl-[2rem]' : ''}`}>
                     {row.delivery_day || '—'}
                   </TD>
                   <TD className="tabular-nums text-[#9b9bab]">{row.row_number ?? '—'}</TD>
                   <TD>
                     {row._firstInTruck ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#e8e5df] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#1a1a2e] shadow-sm">
-                        <span className="h-2 w-2 rounded-full bg-[#7c3aed]" />
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-2.5 py-0.5 text-xs font-semibold text-ink shadow-sm">
+                        <span className="h-2 w-2 rounded-full bg-brand-600" />
                         {row.vehicle}
                       </span>
                     ) : (
@@ -226,44 +247,33 @@ export default function PlanTable({ plan, onExport, exporting }) {
                       </span>
                     ) : '—'}
                   </TD>
-                  <TD className="text-xs text-[#6b6b7b]">
-                    {row._firstInTrip ? (
-                      row.route_status === 'osrm' ? (
-                        <span title={`${row.trip_total_travel_min || 0} min travel + ${row.trip_total_service_min || 0} min service`}>
-                          {Number(row.trip_total_distance_km || 0).toFixed(1)} km · {fmt(row.trip_total_duration_min)} min
-                        </span>
-                      ) : (
-                        <span className="font-semibold text-amber-600">Pending</span>
-                      )
-                    ) : ''}
-                  </TD>
-                  <TD className="text-[#6b6b7b]">{row.driver}</TD>
+                  <TD className="text-muted">{row.driver}</TD>
                   <TD className="max-w-[14rem] font-medium">
-                    <span className="block truncate" title={row.client}>{row.client}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate" title={row.client}>{row.client}</span>
+                      {row.is_split && <SplitBadge row={row} />}
+                    </span>
                   </TD>
-                  <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
+                  <TD className="max-w-[12rem] text-xs text-muted">
                     <span className="block truncate" title={row.end_location}>{row.end_location}</span>
                   </TD>
-                  <TD className="tabular-nums font-medium text-[#7c3aed]">{row.etd}</TD>
-                  <TD className="tabular-nums font-medium text-[#6b6b7b]">{row.eta}</TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">
+                  <TD className="tabular-nums font-medium text-brand-600">{row.etd}</TD>
+                  <TD className="tabular-nums font-medium text-muted">{row.eta}</TD>
+                  <TD className="tabular-nums text-muted">
                     {row.travel_min != null ? `${row.travel_min} min` : '—'}
                   </TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">
-                    {row.service_min != null ? `${row.service_min} min` : '—'}
-                  </TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">
+                  <TD className="tabular-nums text-muted">
                     {row.distance_km != null ? row.distance_km : '—'}
                   </TD>
                   <TD className="tabular-nums font-semibold">{fmt(row.position_count)}</TD>
-                  <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>
+                  {anyWeight && <TD className="tabular-nums text-muted">{fmt(row.gross_weight_kg)}</TD>}
                   <TD>
                     <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                       {row.priority}
                     </span>
                   </TD>
                   <TD><Badge value={row.status} styles={STATUS_STYLE} /></TD>
-                  <TD className={`max-w-[16rem] text-xs text-[#6b6b7b] pr-6 ${isLastRow ? 'rounded-br-[2rem]' : ''}`}>
+                  <TD className={`max-w-[16rem] text-xs text-muted pr-6 ${isLastRow ? 'rounded-br-[2rem]' : ''}`}>
                     <span className="block truncate" title={row.comments}>{row.comments || ''}</span>
                   </TD>
                 </tr>
@@ -272,13 +282,13 @@ export default function PlanTable({ plan, onExport, exporting }) {
 
             {/* totals row */}
             {assigned.length > 0 && (
-              <tr className="border-t-2 border-[#e8e5df] bg-[#f8f7f3] font-semibold">
-                <TD className="pl-6 text-[#6b6b7b]" />
+              <tr className="border-t-2 border-border bg-canvas font-semibold">
+                <TD className="pl-6 text-muted" />
                 <TD />
                 <TD />
                 <TD />
                 <TD />
-                <TD className="text-xs uppercase tracking-wider text-[#6b6b7b]">
+                <TD className="text-xs uppercase tracking-wider text-muted">
                   {assigned.length} deliveries
                 </TD>
                 <TD />
@@ -286,10 +296,8 @@ export default function PlanTable({ plan, onExport, exporting }) {
                 <TD />
                 <TD />
                 <TD />
-                <TD />
-                <TD />
-                <TD className="tabular-nums text-[#1a1a2e]">{fmt(totalPos)}</TD>
-                <TD className="tabular-nums text-[#1a1a2e]">{fmt(Math.round(totalKg))}</TD>
+                <TD className="tabular-nums text-ink">{fmt(totalPos)}</TD>
+                {anyWeight && <TD className="tabular-nums text-ink">{fmt(Math.round(totalKg))}</TD>}
                 <TD />
                 <TD />
                 <TD className="pr-6" />
@@ -300,7 +308,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
             {unassigned.length > 0 && (
               <>
                 <tr>
-                  <td colSpan={18} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
+                  <td colSpan={colCount} className="border-t-2 border-dashed border-red-200 bg-red-50 px-6 py-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.18em] text-red-600">
                       Needs dispatcher review — {unassigned.length} unassigned
                     </span>
@@ -310,7 +318,7 @@ export default function PlanTable({ plan, onExport, exporting }) {
                   const isLast = i === unassigned.length - 1;
                   return (
                     <tr key={row._key} className="bg-red-50/40 hover:bg-red-50 transition-colors">
-                      <TD className={`pl-6 text-[#6b6b7b] ${isLast ? 'rounded-bl-[2rem]' : ''}`}>
+                      <TD className={`pl-6 text-muted ${isLast ? 'rounded-bl-[2rem]' : ''}`}>
                         {row.delivery_day || '—'}
                       </TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.row_number ?? '—'}</TD>
@@ -321,23 +329,24 @@ export default function PlanTable({ plan, onExport, exporting }) {
                         </span>
                       </TD>
                       <TD className="text-xs text-[#9b9bab]">—</TD>
-                      <TD className="text-xs text-[#9b9bab]">—</TD>
-                      <TD className="text-[#6b6b7b]">—</TD>
+                      <TD className="text-muted">—</TD>
                       <TD className="max-w-[14rem] font-medium text-red-700">
-                        <span className="block truncate" title={row.client}>{row.client}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate" title={row.client}>{row.client}</span>
+                          {row.is_split && <SplitBadge row={row} />}
+                        </span>
                       </TD>
-                      <TD className="max-w-[12rem] text-xs text-[#6b6b7b]">
+                      <TD className="max-w-[12rem] text-xs text-muted">
                         <span className="block truncate" title={row.end_location}>{row.end_location}</span>
                       </TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.etd}</TD>
                       <TD className="tabular-nums text-[#9b9bab]">{row.eta}</TD>
                       <TD>—</TD>
-                      <TD>—</TD>
-                      <TD className="tabular-nums text-[#6b6b7b]">
+                      <TD className="tabular-nums text-muted">
                         {row.distance_km != null ? row.distance_km : '—'}
                       </TD>
                       <TD className="tabular-nums font-semibold text-red-700">{fmt(row.position_count)}</TD>
-                      <TD className="tabular-nums text-[#6b6b7b]">{fmt(row.gross_weight_kg)}</TD>
+                      {anyWeight && <TD className="tabular-nums text-muted">{fmt(row.gross_weight_kg)}</TD>}
                       <TD>
                         <span className={`text-sm ${PRIORITY_STYLE[row.priority] || PRIORITY_STYLE.normal}`}>
                           {row.priority}
