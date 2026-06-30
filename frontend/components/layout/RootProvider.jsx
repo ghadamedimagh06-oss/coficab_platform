@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import AppShell from './AppShell';
 
@@ -60,10 +61,26 @@ export default function RootProvider({ children }) {
     );
   }
 
-  // Mounted but not signed in: render a blank canvas while the redirect above
-  // fires, so protected page content never flashes.
+  // Mounted but not signed in: keep protected content hidden, but show a real
+  // fallback in case the client-side redirect is delayed or blocked.
   if (!isAuthenticated()) {
-    return <div className="min-h-screen bg-canvas" />;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-canvas px-6 text-ink">
+        <div className="w-full max-w-md rounded-[2rem] border border-border bg-white p-8 text-center shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-600">Authentication</p>
+          <h1 className="mt-3 text-2xl font-bold">Redirecting to sign in</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Your session is not active. Use the sign-in screen to enter the platform.
+          </p>
+          <Link
+            href="/login"
+            className="mt-6 inline-flex items-center justify-center rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+          >
+            Open sign in
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return <AppShell>{children}</AppShell>;
