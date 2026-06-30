@@ -147,6 +147,10 @@ export async function getDailyPlanningFileResponse() {
   return get('/api/data/transports?limit=1000');
 }
 
+export async function getDeliveryHistory() {
+  return get('/api/data/delivery-history?limit=10000');
+}
+
 export async function getFleetTrucks() {
   return get('/api/fleet/trucks');
 }

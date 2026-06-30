@@ -1,27 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CalendarDays, Box, Truck, Clock3, ClipboardList } from 'lucide-react';
-import { getDailyPlanningFromFile } from '../services/api';
-import StatCard from '../../components/cards/StatCard';
+import {
+  AlertTriangle,
+  BarChart3,
+  CalendarDays,
+  CalendarRange,
+  Clock3,
+  RefreshCcw,
+  Truck,
+} from 'lucide-react';
+import { getDeliveryHistory } from '../services/api';
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const WEEKDAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const REFRESH_INTERVAL = 30;
-
-const STATUS_CONFIG = {
-  completed:  { label: 'Completed',  cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
-  in_transit: { label: 'In transit', cls: 'bg-blue-50   text-blue-700   border border-blue-200'   },
-  pending:    { label: 'Pending',    cls: 'bg-amber-50  text-amber-700  border border-amber-200'  },
-};
-
-const PRIORITY_CONFIG = {
-  urgent: { label: 'Urgent', cls: 'bg-rose-50   text-rose-700   border border-rose-200'   },
-  high:   { label: 'High',   cls: 'bg-orange-50 text-orange-700 border border-orange-200' },
-  normal: { label: 'Normal', cls: 'bg-[#f0ede8] text-muted'                          },
-  low:    { label: 'Low',    cls: 'bg-slate-50  text-slate-500  border border-slate-200'  },
-};
+const VIEWS = [
+  { id: 'daily', label: 'Daily', icon: CalendarDays },
+  { id: 'weekly', label: 'Weekly', icon: CalendarRange },
+  { id: 'monthly', label: 'Monthly', icon: BarChart3 },
+];
 
 const container = {
   hidden: { opacity: 0 },
@@ -29,312 +25,355 @@ const container = {
 };
 
 const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
 };
 
-function formatDate(date) {
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
+function dateFromIso(value) {
+  return value ? new Date(`${value}T00:00:00`) : null;
 }
 
-function formatTime(date) {
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
+function formatDate(value) {
+  const date = dateFromIso(value);
+  if (!date || Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function startOfWeek(date) {
+  const next = new Date(date);
+  const day = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - day);
+  return next;
+}
+
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function periodFor(row, view) {
+  const date = dateFromIso(row.delivery_date);
+  if (!date || Number.isNaN(date.getTime())) {
+    return { key: 'unknown', label: 'Unknown date' };
+  }
+  if (view === 'weekly') {
+    const start = startOfWeek(date);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return {
+      key: isoDate(start),
+      label: `${formatDate(isoDate(start))} - ${formatDate(isoDate(end))}`,
+    };
+  }
+  if (view === 'monthly') {
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return {
+      key,
+      label: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+    };
+  }
+  return { key: row.delivery_date, label: formatDate(row.delivery_date) };
+}
+
+function pct(value) {
+  if (value == null || Number.isNaN(Number(value))) return '-';
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+function number(value, digits = 0) {
+  if (value == null || Number.isNaN(Number(value))) return '-';
+  return Number(value).toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+function StatTile({ icon: Icon, label, value, hint, tone = 'brand' }) {
+  const tones = {
+    brand: 'bg-brand-50 text-brand-700',
+    green: 'bg-emerald-50 text-emerald-700',
+    amber: 'bg-amber-50 text-amber-700',
+    red: 'bg-rose-50 text-rose-700',
+  };
+  return (
+    <div className="rounded-[1.5rem] border border-border bg-white p-5 shadow-sm">
+      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${tones[tone] || tones.brand}`}>
+        <Icon size={20} />
+      </div>
+      <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-muted">{label}</p>
+      <p className="mt-2 text-3xl font-semibold text-ink">{value}</p>
+      <p className="mt-2 text-xs text-[#8f8a94]">{hint}</p>
+    </div>
+  );
 }
 
 export default function DailyPlanningPage() {
-  const [allDeliveries, setAllDeliveries] = useState([]);
-  const [selectedDay, setSelectedDay] = useState('');
-  const [availableDays, setAvailableDays] = useState([]);
-  const [dayCounts, setDayCounts] = useState({});
+  const [rows, setRows] = useState([]);
+  const [meta, setMeta] = useState(null);
+  const [view, setView] = useState('daily');
+  const [period, setPeriod] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [currentTime, setCurrentTime] = useState('');
-  const [currentDate, setCurrentDate] = useState('');
-  const [todayName, setTodayName] = useState('');
-  const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      setCurrentTime(formatTime(now));
-      setCurrentDate(formatDate(now));
-      setTodayName(DAYS[now.getDay()]);
-    };
-
-    updateClock();
-    const id = setInterval(updateClock, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const fetchData = useCallback(async () => {
+  async function loadHistory() {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const data = await getDailyPlanningFromFile();
-      const rows = Array.isArray(data) ? data : [];
-      setAllDeliveries(rows);
-
-      const counts = rows.reduce((acc, row) => {
-        const day = row.delivery_day || 'Unknown';
-        acc[day] = (acc[day] || 0) + 1;
-        return acc;
-      }, {});
-      setDayCounts(counts);
-      setAvailableDays(Object.keys(counts).sort((a, b) => {
-        return WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b);
-      }));
-
-      const defaultDay = counts[todayName] ? todayName : Object.keys(counts).sort((a, b) => {
-        return WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b);
-      })[0] || todayName;
-      setSelectedDay((current) => (current && counts[current] ? current : defaultDay));
-    } catch {
-      setError('Unable to load planning data from the application. Showing last known state.');
-      setAllDeliveries([]);
-      setDayCounts({});
-      setSelectedDay(todayName);
+      const data = await getDeliveryHistory();
+      const nextRows = Array.isArray(data?.rows) ? data.rows : [];
+      setRows(nextRows);
+      setMeta(data);
+    } catch (err) {
+      setRows([]);
+      setError(err?.response?.data?.detail || err.message || 'Unable to load delivery history.');
     } finally {
       setLoading(false);
-      setCountdown(REFRESH_INTERVAL);
     }
-  }, [todayName]);
+  }
 
-  // Initial load
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  // Auto-refresh countdown — reuses the live clock tick
   useEffect(() => {
-    const id = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { fetchData(); return REFRESH_INTERVAL; }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [fetchData]);
+    loadHistory();
+  }, []);
 
-  const deliveries = useMemo(
-    () => allDeliveries
-      .filter((delivery) => delivery.delivery_day === selectedDay)
-      .map((delivery) => ({
-        ...delivery,
-        comments:
-          delivery.Comments ||
-          delivery.comments ||
-          delivery.note ||
-          (delivery.special_instructions ? delivery.special_instructions : null) ||
-          (delivery.status === 'pending' ? 'Waiting for dispatch' :
-            delivery.status === 'in_transit' ? 'On the road' :
-            delivery.status === 'completed' ? 'Delivered' :
-            delivery.end_location ? `Destination: ${delivery.end_location}` : 'No comment'),
-      })),
+  const periods = useMemo(() => {
+    const map = new Map();
+    rows.forEach((row) => {
+      const next = periodFor(row, view);
+      if (!map.has(next.key)) {
+        map.set(next.key, { ...next, count: 0 });
+      }
+      map.get(next.key).count += 1;
+    });
+    return [...map.values()].sort((a, b) => String(b.key).localeCompare(String(a.key)));
+  }, [rows, view]);
 
-    [allDeliveries, selectedDay]
-  );
+  useEffect(() => {
+    setPeriod((current) => (periods.some((p) => p.key === current) ? current : periods[0]?.key || ''));
+  }, [periods]);
 
-  const stats = {
-    total:      deliveries.length,
-    completed:  deliveries.filter((d) => d.status === 'completed').length,
-    in_transit: deliveries.filter((d) => d.status === 'in_transit').length,
-    pending:    deliveries.filter((d) => d.status === 'pending').length,
-  };
+  const visibleRows = useMemo(() => (
+    rows.filter((row) => periodFor(row, view).key === period)
+  ), [rows, view, period]);
+
+  const stats = useMemo(() => {
+    const total = visibleRows.length;
+    const late = visibleRows.filter((row) => row.is_late).length;
+    const positions = visibleRows.reduce((sum, row) => sum + Number(row.positions || 0), 0);
+    const weight = visibleRows.reduce((sum, row) => sum + Number(row.weight || 0), 0);
+    const trucks = new Set(visibleRows.map((row) => row.truck).filter(Boolean)).size;
+    return {
+      total,
+      late,
+      onTime: Math.max(0, total - late),
+      otd: total ? Math.round(((total - late) / total) * 100) : 0,
+      positions,
+      weight,
+      trucks,
+    };
+  }, [visibleRows]);
+
+  const causeStats = useMemo(() => {
+    const counts = new Map();
+    rows.filter((row) => row.is_late).forEach((row) => {
+      const cause = row.delay_cause || 'Cause non renseignée';
+      counts.set(cause, (counts.get(cause) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .map(([cause, count]) => ({ cause, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [rows]);
+
+  const selectedPeriod = periods.find((p) => p.key === period);
+  const maxCause = Math.max(1, ...causeStats.map((cause) => cause.count));
 
   return (
-    <div className="p-8 min-h-screen bg-[#f5f5f7]">
+    <div className="min-h-screen bg-canvas p-8">
       <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
-        <motion.div variants={item} className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
+        <motion.header variants={item} className="rounded-[2rem] border border-border bg-white p-8 shadow-sm">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Daily Planning</p>
-              <h1 className="mt-3 text-4xl font-bold text-ink">Good morning, Ghada</h1>
-              <p className="mt-2 text-sm leading-6 text-muted">Your delivery plan for the day, refreshed automatically from application data.</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Delivery History</p>
+              <h1 className="mt-3 text-4xl font-bold text-ink">Historique des livraisons</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+                Execution history from the 2026 delivery workbook, with daily, weekly, and monthly views.
+              </p>
             </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <div suppressHydrationWarning={true} className="rounded-[1.75rem] border border-border bg-white px-6 py-5 text-center shadow-sm">
-                <p className="text-[11px] uppercase tracking-[0.32em] text-muted">Current time</p>
-                <p className="mt-3 text-2xl font-semibold text-ink">{currentTime || 'Loading…'}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl border border-border bg-canvas px-4 py-3 text-sm text-muted">
+                <span className="font-semibold text-ink">{meta?.file_name || 'Planning de Livraison 2026 v0.xlsx'}</span>
               </div>
-              <div suppressHydrationWarning={true} className="rounded-[1.75rem] border border-border bg-white px-6 py-5 text-center shadow-sm">
-                <p className="text-[11px] uppercase tracking-[0.32em] text-muted">Date</p>
-                <p className="mt-3 text-lg font-semibold text-ink">{currentDate || 'Loading…'}</p>
-              </div>
-              <div className="rounded-[1.75rem] border border-border bg-white px-6 py-5 text-center shadow-sm">
-                <p className="text-[11px] uppercase tracking-[0.32em] text-muted">Status</p>
-                <p className={`mt-3 inline-flex rounded-full px-4 py-2 text-sm font-semibold ${loading ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                  {loading ? 'Refreshing…' : `Auto-refresh in ${countdown}s`}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={loadHistory}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-50"
+              >
+                <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
             </div>
           </div>
-
-          {error && (
-            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {error ? (
+            <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {error}
             </div>
-          )}
-        </motion.div>
+          ) : null}
+        </motion.header>
 
-        <motion.div variants={container} className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
-          <div className="space-y-6">
-            <motion.div variants={item} className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-[1.75rem] bg-white p-6 border border-border shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div className="rounded-2xl bg-[#eef2ff] p-3 text-[#4338ca]">
-                    <Box size={20} />
-                  </div>
-                </div>
-                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-muted">Deliveries</p>
-                <p className="mt-2 text-3xl font-semibold text-ink">{stats.total}</p>
-                <p className="mt-3 text-xs text-[#9e9aa4]">Selected day total</p>
-              </div>
-              <div className="rounded-[1.75rem] bg-white p-6 border border-border shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div className="rounded-2xl bg-[#ecfdf5] p-3 text-[#15803d]">
-                    <Clock3 size={20} />
-                  </div>
-                </div>
-                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-muted">Pending</p>
-                <p className="mt-2 text-3xl font-semibold text-ink">{stats.pending}</p>
-                <p className="mt-3 text-xs text-[#9e9aa4]">Waiting to depart</p>
-              </div>
-              <div className="rounded-[1.75rem] bg-white p-6 border border-border shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div className="rounded-2xl bg-[#eff6ff] p-3 text-[#1d4ed8]">
-                    <Truck size={20} />
-                  </div>
-                </div>
-                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-muted">In transit</p>
-                <p className="mt-2 text-3xl font-semibold text-ink">{stats.in_transit}</p>
-                <p className="mt-3 text-xs text-[#9e9aa4]">On the road now</p>
-              </div>
-              <div className="rounded-[1.75rem] bg-white p-6 border border-border shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div className="rounded-2xl bg-[#fef3c7] p-3 text-[#b45309]">
-                    <ClipboardList size={20} />
-                  </div>
-                </div>
-                <p className="mt-5 text-sm uppercase tracking-[0.18em] text-muted">Completed</p>
-                <p className="mt-2 text-3xl font-semibold text-ink">{stats.completed}</p>
-                <p className="mt-3 text-xs text-[#9e9aa4]">Delivered successfully</p>
-              </div>
-            </motion.div>
+        <motion.section variants={item} className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+          <StatTile icon={Truck} label="Shipments" value={stats.total} hint="selected period" />
+          <StatTile icon={Clock3} label="OTD" value={`${stats.otd}%`} hint={`${stats.onTime} on time`} tone="green" />
+          <StatTile icon={AlertTriangle} label="Retards" value={stats.late} hint="late deliveries" tone={stats.late ? 'red' : 'green'} />
+          <StatTile icon={CalendarRange} label="Positions" value={number(stats.positions)} hint="loaded positions" tone="amber" />
+          <StatTile icon={BarChart3} label="Weight" value={`${number(stats.weight / 1000, 1)} t`} hint={`${stats.trucks} trucks used`} />
+        </motion.section>
 
-            <motion.div variants={item} className="rounded-[2rem] border border-border bg-white shadow-sm overflow-hidden">
-              <div className="flex flex-col gap-4 border-b border-border bg-canvas px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.18em] text-muted">Daily planning — selected day</p>
-                  <h2 className="text-2xl font-semibold text-ink">
-                    {selectedDay || todayName} deliveries
-                  </h2>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="rounded-full bg-[#eef2ff] px-3 py-2 text-sm font-semibold text-[#4338ca]">{deliveries.length} active deliveries</span>
-                  <button
-                    onClick={fetchData}
-                    disabled={loading}
-                    className="rounded-full border border-border bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:bg-[#fafaff] disabled:opacity-50"
-                  >
-                    Refresh
-                  </button>
-                </div>
-              </div>
-
-              <div className="px-6 py-5">
-                <div className="flex flex-wrap gap-3">
-                  {availableDays.map((day) => (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => setSelectedDay(day)}
-                      className={`rounded-2xl px-4 py-2 text-sm font-semibold transition ${
-                        selectedDay === day
-                          ? 'bg-brand-600 text-white shadow-sm'
-                          : 'bg-canvas text-ink border border-border hover:bg-white'
-                      }`}
-                    >
-                      {day} ({dayCounts[day] || 0})
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {loading && (
-                <div className="h-1 w-full bg-[#f0ede8]">
-                  <div className="h-1 w-1/3 animate-pulse rounded-full bg-brand-600" />
-                </div>
-              )}
-
-              {deliveries.length === 0 && !loading ? (
-                <div className="py-16 text-center">
-                  <p className="text-4xl">📭</p>
-                  <p className="mt-4 text-lg font-medium text-ink">No deliveries scheduled for {selectedDay || todayName}</p>
-                  <p className="mt-2 text-sm text-muted">Sync the planning file or refresh to update the latest schedule.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-[1.5rem] border border-border bg-white shadow-sm">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border bg-canvas">
-                        {['#', 'Client', 'Position', 'Comments', 'ETD', 'ETA', 'Dist (km)', 'Status', 'Priority'].map(
-                          (col) => (
-                            <th
-                              key={col}
-                              className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-muted whitespace-nowrap"
-                            >
-                              {col}
-                            </th>
-                          )
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border bg-white">
-                      {deliveries.map((d, i) => {
-                        const s = STATUS_CONFIG[d.status] ?? STATUS_CONFIG.pending;
-                        const p = PRIORITY_CONFIG[d.priority] ?? PRIORITY_CONFIG.normal;
-                        return (
-                          <tr key={d.id ?? i} className="transition hover:bg-canvas">
-                            <td className="px-5 py-4 text-muted">{d.row_number ?? i + 1}</td>
-                            <td className="px-5 py-4 max-w-[220px]">
-                              <span className="block truncate font-semibold text-ink" title={d.client || d.end_location}>
-                                {d.client || d.end_location || '—'}
-                              </span>
-                            </td>
-                            <td className="px-5 py-4 whitespace-nowrap text-right text-ink font-semibold">{d.quantity ?? '—'}</td>
-                            <td className="px-5 py-4 max-w-[260px] overflow-hidden text-ink">
-                              <span className="block truncate" title={d.comments || d.note || d.end_location || '—'}>
-                                {d.comments || d.note || d.end_location || '—'}
-                              </span>
-                            </td>
-                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-ink">{d.etd ?? '—'}</td>
-                            <td className="px-5 py-4 whitespace-nowrap font-mono text-xs text-ink">{d.eta ?? '—'}</td>
-                            <td className="px-5 py-4 whitespace-nowrap text-right text-ink">{d.distance_km != null ? d.distance_km.toFixed(1) : '—'}</td>
-                            <td className="px-5 py-4 whitespace-nowrap">
-                              <span className={`rounded-full px-3 py-1 text-xs font-medium ${s.cls}`}>{s.label}</span>
-                            </td>
-                            <td className="px-5 py-4 whitespace-nowrap">
-                              <span className={`rounded-full px-3 py-1 text-xs font-medium ${p.cls}`}>{p.label}</span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {deliveries.length > 0 && !loading && (
-                <div className="border-t border-border px-6 py-4 text-xs text-[#9e9eaa]">
-                  {deliveries.length} deliveries shown · Data from <span className="font-medium text-muted">application database</span> with workbook fallback · auto-refreshes every {REFRESH_INTERVAL}s
-                </div>
-              )}
-            </motion.div>
+        <motion.section variants={item} className="rounded-[2rem] border border-border bg-white shadow-sm">
+          <div className="flex flex-col gap-5 border-b border-border p-6 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">View</p>
+              <h2 className="mt-2 text-2xl font-semibold text-ink">{selectedPeriod?.label || 'No period selected'}</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {VIEWS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setView(id)}
+                  className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition ${
+                    view === id
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'border border-border bg-white text-ink hover:bg-canvas'
+                  }`}
+                >
+                  <Icon size={16} />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        </motion.div>
+
+          <div className="border-b border-border px-6 py-5">
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {periods.map((next) => (
+                <button
+                  key={next.key}
+                  type="button"
+                  onClick={() => setPeriod(next.key)}
+                  className={`shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                    period === next.key
+                      ? 'bg-ink text-white'
+                      : 'border border-border bg-canvas text-ink hover:bg-white'
+                  }`}
+                >
+                  {next.label}
+                  <span className="ml-2 text-xs opacity-70">{next.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-10 text-center text-sm text-muted">Loading delivery history...</div>
+          ) : visibleRows.length === 0 ? (
+            <div className="p-10 text-center text-sm text-muted">No delivery history found for this period.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-[1280px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-canvas">
+                    {[
+                      'Date',
+                      'N Voyage',
+                      'Client',
+                      'Matricule',
+                      'Chauffeur',
+                      'Position',
+                      'Weight',
+                      'ETD planned',
+                      'ETD real',
+                      'ETA target',
+                      'ETA real',
+                      'OTD',
+                      'Cause retard',
+                    ].map((heading) => (
+                      <th key={heading} className="px-4 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {visibleRows.slice(0, 350).map((row) => (
+                    <tr key={row.id} className="transition hover:bg-canvas">
+                      <td className="whitespace-nowrap px-4 py-3 font-medium text-ink">{formatDate(row.delivery_date)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink">{row.voyage || '-'}</td>
+                      <td className="max-w-[280px] px-4 py-3">
+                        <span className="block truncate font-semibold text-ink" title={row.client || '-'}>
+                          {row.client || '-'}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-ink">{row.truck || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-ink">{row.driver || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-ink">{number(row.positions)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-ink">{number(row.weight, 1)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink">{row.planned_etd || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink">{row.real_etd || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink">{row.target_eta_customer || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink">{row.real_eta_customer || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          row.is_late ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
+                        }`}>
+                          {row.new_otd != null ? pct(row.new_otd) : pct(row.otd)}
+                        </span>
+                      </td>
+                      <td className="max-w-[240px] px-4 py-3">
+                        <span className="block truncate text-ink" title={row.delay_cause || ''}>
+                          {row.delay_cause || '-'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {visibleRows.length > 350 ? (
+                <div className="border-t border-border px-6 py-4 text-xs text-muted">
+                  Showing first 350 rows from {visibleRows.length} deliveries in this period.
+                </div>
+              ) : null}
+            </div>
+          )}
+        </motion.section>
+
+        <motion.section variants={item} className="rounded-[2rem] border border-border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">Retard de livraison</p>
+              <h2 className="mt-2 text-2xl font-semibold text-ink">Cause statistics</h2>
+            </div>
+            <p className="text-sm text-muted">{causeStats.length} causes across the workbook</p>
+          </div>
+
+          {causeStats.length === 0 ? (
+            <div className="mt-6 rounded-2xl bg-canvas px-5 py-6 text-sm text-muted">
+              No delivery delay causes recorded for this period.
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-3 lg:grid-cols-2">
+              {causeStats.map((cause) => (
+                <div key={cause.cause} className="rounded-2xl border border-border bg-canvas px-4 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="truncate text-sm font-semibold text-ink" title={cause.cause}>{cause.cause}</span>
+                    <span className="text-sm font-semibold text-rose-700">{cause.count}</span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-white">
+                    <div
+                      className="h-2 rounded-full bg-rose-500"
+                      style={{ width: `${Math.max(6, (cause.count / maxCause) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.section>
       </motion.div>
     </div>
   );

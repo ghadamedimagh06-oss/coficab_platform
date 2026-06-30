@@ -5,7 +5,7 @@ API endpoints for retrieving livraison and ingestion data
 
 from fastapi import APIRouter, Query, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Any, Optional, List
 import os
 import datetime
 from pathlib import Path
@@ -54,6 +54,21 @@ def _resolve_weekly_planning_file() -> Path:
 
 
 WEEKLY_PLANNING_FILE = _resolve_weekly_planning_file()
+
+
+def _resolve_delivery_history_file() -> Path:
+    env_history_file = os.getenv("DELIVERY_HISTORY_FILE_PATH")
+    if env_history_file:
+        return Path(env_history_file).expanduser().resolve()
+
+    attached = Path(r"C:\Users\akrem\Downloads\Planning de Livraison 2026 v0.xlsx")
+    if attached.exists():
+        return attached
+
+    return WEEKLY_PLANNING_FILE
+
+
+DELIVERY_HISTORY_FILE = _resolve_delivery_history_file()
 
 
 def _transport_from_row(row):
@@ -125,6 +140,185 @@ def _load_weekly_planning_transports(status: Optional[str] = None, day: Optional
         mock = [t for t in mock if t.get("delivery_day") == day]
     total = len(mock)
     return mock[offset: offset + limit], total, meta
+
+
+def _history_text(value: Any) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat"}:
+        return None
+    return text
+
+
+def _history_float(value: Any) -> Optional[float]:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _history_date(value: Any) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return pd.to_datetime(value).date().isoformat()
+    except Exception:
+        return None
+
+
+def _history_clock(value: Any) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    if hasattr(value, "hour") and hasattr(value, "minute"):
+        return f"{int(value.hour):02d}:{int(value.minute):02d}"
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat"}:
+        return None
+    try:
+        parsed = pd.to_datetime(value)
+        if not pd.isna(parsed):
+            return parsed.strftime("%H:%M")
+    except Exception:
+        pass
+    if ":" in text:
+        parts = text.split(":")
+        return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}"
+    return text
+
+
+def _clock_minutes(clock: Optional[str]) -> Optional[int]:
+    if not clock or ":" not in clock:
+        return None
+    try:
+        hour, minute = clock.split(":")[:2]
+        return int(hour) * 60 + int(minute)
+    except Exception:
+        return None
+
+
+def _valid_delay_cause(value: Any) -> Optional[str]:
+    text = _history_text(value)
+    if not text:
+        return None
+    compact = text.replace(" ", "")
+    if compact.isdigit():
+        return None
+    return text
+
+
+def _load_delivery_history_rows(limit: int = 5000, offset: int = 0) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
+    meta = {
+        "source": "excel",
+        "source_file": str(DELIVERY_HISTORY_FILE),
+        "file_name": DELIVERY_HISTORY_FILE.name,
+        "sheet_name": "Details local delivery",
+        "used_mock": False,
+        "error": None,
+    }
+    if not DELIVERY_HISTORY_FILE.exists():
+        meta["source"] = "empty"
+        meta["error"] = f"Excel file not found: {DELIVERY_HISTORY_FILE}"
+        return [], 0, meta
+
+    try:
+        df = pd.read_excel(DELIVERY_HISTORY_FILE, sheet_name="Details local delivery")
+    except Exception as exc:
+        meta["source"] = "empty"
+        meta["error"] = f"Delivery history parsing failed: {exc}"
+        return [], 0, meta
+
+    cols = list(df.columns)
+
+    def cell(row, index: int) -> Any:
+        return row.iloc[index] if index < len(row) else None
+
+    rows: list[dict[str, Any]] = []
+    for index, row in df.iterrows():
+        delivery_date = _history_date(cell(row, 2))
+        voyage = _history_text(cell(row, 1)) or _history_text(cell(row, 6))
+        client = _history_text(cell(row, 7))
+        if not any([delivery_date, voyage, client]):
+            continue
+
+        target_eta = _history_clock(cell(row, 17))
+        real_eta = _history_clock(cell(row, 18))
+        target_minutes = _clock_minutes(target_eta)
+        real_minutes = _clock_minutes(real_eta)
+        delay_minutes = None
+        if target_minutes is not None and real_minutes is not None:
+            if real_minutes < target_minutes - 720:
+                real_minutes += 24 * 60
+            delay_minutes = max(0, real_minutes - target_minutes)
+
+        otd = _history_float(cell(row, 22))
+        new_otd = _history_float(cell(row, 28))
+        cause = _valid_delay_cause(cell(row, 27))
+        is_late = bool(cause) or (otd is not None and otd < 0.999) or (new_otd is not None and new_otd < 0.999)
+
+        rows.append({
+            "id": int(index) + 2,
+            "voyage": voyage,
+            "delivery_date": delivery_date,
+            "month": _history_text(cell(row, 3)),
+            "truck": _history_text(cell(row, 4)) or _history_text(cell(row, 8)) or _history_text(cell(row, 13)),
+            "driver": _history_text(cell(row, 5)) or _history_text(cell(row, 14)),
+            "client": client,
+            "max_truck_weight": _history_float(cell(row, 9)),
+            "weight": _history_float(cell(row, 10)),
+            "max_positions": _history_float(cell(row, 11)),
+            "positions": _history_float(cell(row, 12)),
+            "planned_etd": _history_clock(cell(row, 15)),
+            "real_etd": _history_clock(cell(row, 16)),
+            "target_eta_customer": target_eta,
+            "real_eta_customer": real_eta,
+            "real_etd_customer": _history_clock(cell(row, 19)),
+            "eta_coficab": _history_clock(cell(row, 20)),
+            "real_eta_coficab": _history_clock(cell(row, 21)),
+            "otd": otd,
+            "new_otd": new_otd,
+            "km": _history_float(cell(row, 23)),
+            "stationnement": _history_clock(cell(row, 24)),
+            "trajet_aller": _history_clock(cell(row, 25)),
+            "trajet_retour": _history_clock(cell(row, 26)),
+            "delay_cause": cause,
+            "is_late": is_late,
+            "delay_minutes": delay_minutes,
+        })
+
+    rows.sort(key=lambda item: (item.get("delivery_date") or "", item.get("voyage") or ""), reverse=True)
+    total = len(rows)
+    return rows[offset: offset + limit], total, meta
+
+
+def _delivery_history_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    late = sum(1 for row in rows if row.get("is_late"))
+    positions = sum(float(row.get("positions") or 0) for row in rows)
+    weight = sum(float(row.get("weight") or 0) for row in rows)
+    return {
+        "shipments": total,
+        "late": late,
+        "on_time": max(0, total - late),
+        "otd_rate": round((total - late) / total * 100, 1) if total else 0,
+        "positions": round(positions, 1),
+        "weight_kg": round(weight, 1),
+    }
+
+
+def _delivery_cause_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not row.get("is_late"):
+            continue
+        cause = row.get("delay_cause") or "Cause non renseignée"
+        counts[cause] = counts.get(cause, 0) + 1
+    return [
+        {"cause": cause, "count": count}
+        for cause, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    ]
 
 @router.get("/transports")
 async def get_transports(
@@ -206,6 +400,25 @@ async def get_transports(
             **meta,
             "error": meta.get("error") or f"Database error: {str(e)}"
         }
+
+
+@router.get("/delivery-history")
+async def get_delivery_history(
+    limit: int = Query(5000, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    authorization: Optional[str] = Header(None),
+):
+    """Return delivery execution history parsed from the 2026 workbook."""
+    _validate_optional_bearer(authorization)
+    rows, total, meta = _load_delivery_history_rows(limit=limit, offset=offset)
+    return {
+        "rows": rows,
+        "total": total,
+        "summary": _delivery_history_summary(rows),
+        "cause_stats": _delivery_cause_stats(rows),
+        **meta,
+    }
+
 
 @router.get("/source-status")
 async def get_source_status(db: Optional[Session] = Depends(get_db_optional)):
