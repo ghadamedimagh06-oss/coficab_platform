@@ -51,11 +51,11 @@ def auth_enforced() -> bool:
 def dev_bypass_allowed() -> bool:
     """Whether the 'anonymous == dev admin' fallback may be used.
 
-    Never in production. In dev it stays on unless auth is explicitly enforced.
+    Never in production. In development it must be explicitly enabled.
     """
     if is_production():
         return False
-    return not _truthy(os.getenv("REQUIRE_AUTH"))
+    return _truthy(os.getenv("DEV_AUTH_BYPASS")) and not _truthy(os.getenv("REQUIRE_AUTH"))
 
 
 def jwt_secret() -> str:

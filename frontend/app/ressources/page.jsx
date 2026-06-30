@@ -2,13 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Truck, CheckCircle, AlertCircle, Wrench, Navigation, Link2, Link2Off } from 'lucide-react';
+import { Truck, CheckCircle, AlertCircle, Wrench, Navigation, Link2, Link2Off, Plus, Trash2 } from 'lucide-react';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
 import { drivers as initialDrivers, trucks as initialTrucks } from '../../data/coficabData';
 import { useDrivers, useFleet } from '../../hooks/useFleet';
-import { updateTruckStatus } from '../services/api';
+import {
+  createFleetDriver,
+  createFleetTruck,
+  deleteFleetDriver,
+  deleteFleetTruck,
+  updateTruckStatus,
+} from '../services/api';
 import {
   applyTruckStatusOverrides,
   applyDriverStatusOverrides,
@@ -26,6 +32,13 @@ import {
 
 const statusOptions = ['Active', 'En pause', 'En route'];
 const shiftOptions = ['Jour', 'Nuit'];
+const truckTypeOptions = [
+  { value: 'PORTEUR', label: 'Porteur' },
+  { value: 'SEMI', label: 'Semi' },
+  { value: 'FOURGON', label: 'Fourgon' },
+  { value: 'TAUTLINER', label: 'Tautliner' },
+];
+const RESOURCE_EDITS_KEY = 'coficab.resourceEdits.v1';
 
 // A driver is only assignable when not paused; a truck only when not out of service.
 const PAUSED_DRIVER_STATUS = 'En pause';
@@ -39,6 +52,91 @@ const DRIVER_STATUS_STYLES = {
 
 const isTruckAvailable = (truck) => !UNAVAILABLE_TRUCK_DISPLAY.has(truck?.status);
 const isDriverAssignable = (driver) => driver?.status !== PAUSED_DRIVER_STATUS;
+
+function readResourceEdits() {
+  if (typeof window === 'undefined') {
+    return { trucks: [], drivers: [], deletedTruckIds: [], deletedDriverIds: [] };
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(RESOURCE_EDITS_KEY) || '{}');
+    return {
+      trucks: Array.isArray(parsed.trucks) ? parsed.trucks : [],
+      drivers: Array.isArray(parsed.drivers) ? parsed.drivers : [],
+      deletedTruckIds: Array.isArray(parsed.deletedTruckIds) ? parsed.deletedTruckIds : [],
+      deletedDriverIds: Array.isArray(parsed.deletedDriverIds) ? parsed.deletedDriverIds : [],
+    };
+  } catch {
+    return { trucks: [], drivers: [], deletedTruckIds: [], deletedDriverIds: [] };
+  }
+}
+
+function writeResourceEdits(edits) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(RESOURCE_EDITS_KEY, JSON.stringify(edits));
+}
+
+function updateResourceEdits(updater) {
+  const next = updater(readResourceEdits());
+  writeResourceEdits(next);
+  return next;
+}
+
+function rememberLocalResource(type, resource) {
+  updateResourceEdits((edits) => {
+    const key = type === 'truck' ? 'trucks' : 'drivers';
+    return {
+      ...edits,
+      [key]: [...edits[key].filter((item) => String(item.id) !== String(resource.id)), resource],
+    };
+  });
+}
+
+function forgetLocalResource(type, id) {
+  updateResourceEdits((edits) => {
+    const key = type === 'truck' ? 'trucks' : 'drivers';
+    const deletedKey = type === 'truck' ? 'deletedTruckIds' : 'deletedDriverIds';
+    const isLocal = edits[key].some((item) => String(item.id) === String(id));
+    return {
+      ...edits,
+      [key]: edits[key].filter((item) => String(item.id) !== String(id)),
+      [deletedKey]: isLocal || edits[deletedKey].some((itemId) => String(itemId) === String(id))
+        ? edits[deletedKey]
+        : [...edits[deletedKey], id],
+    };
+  });
+}
+
+function applyResourceEdits(baseTrucks, baseDrivers) {
+  const edits = readResourceEdits();
+  const deletedTruckIds = new Set(edits.deletedTruckIds.map(String));
+  const deletedDriverIds = new Set(edits.deletedDriverIds.map(String));
+  const drivers = [
+    ...baseDrivers.filter((driver) => !deletedDriverIds.has(String(driver.id))),
+    ...edits.drivers.map(normalizeDriver).filter((driver) => !deletedDriverIds.has(String(driver.id))),
+  ];
+  const driverIds = new Set(drivers.map((driver) => String(driver.id)));
+  const trucks = [
+    ...baseTrucks.filter((truck) => !deletedTruckIds.has(String(truck.id))),
+    ...edits.trucks.map(normalizeTruck).filter((truck) => !deletedTruckIds.has(String(truck.id))),
+  ].map((truck) => (
+    truck.assigned_driver != null && !driverIds.has(String(truck.assigned_driver))
+      ? { ...truck, assigned_driver: null }
+      : truck
+  ));
+  return { trucks, drivers };
+}
+
+function nextLocalId(prefix, rows) {
+  const max = rows.reduce((current, row) => {
+    const match = String(row.id || '').match(/(\d+)$/);
+    return match ? Math.max(current, Number(match[1])) : current;
+  }, 0);
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+}
+
+function driverStatusToApi(status) {
+  return status === PAUSED_DRIVER_STATUS ? 'INACTIF' : 'ACTIF';
+}
 
 function normalizeTruck(truck) {
   return {
@@ -92,12 +190,30 @@ export default function RessourcesPage() {
   const [chatMessages, setChatMessages] = useState([
     'La page Ressources est prête. Gérez l’affectation chauffeurs / camions et les statuts en un seul endroit.',
   ]);
-  const [drivers, setDrivers] = useState(() => applyDriverStatusOverrides(initialDrivers.map(normalizeDriver)));
-  const [trucks, setTrucks] = useState(() =>
-    applyTruckAssignmentOverrides(
-      applyTruckStatusOverrides(reconcilePairing(initialTrucks.map(normalizeTruck), applyDriverStatusOverrides(initialDrivers.map(normalizeDriver))))
-    )
-  );
+  const initialResources = () => {
+    const edited = applyResourceEdits(initialTrucks.map(normalizeTruck), applyDriverStatusOverrides(initialDrivers.map(normalizeDriver)));
+    return {
+      drivers: applyDriverStatusOverrides(edited.drivers),
+      trucks: applyTruckAssignmentOverrides(applyTruckStatusOverrides(reconcilePairing(edited.trucks, edited.drivers))),
+    };
+  };
+  const [drivers, setDrivers] = useState(() => initialResources().drivers);
+  const [trucks, setTrucks] = useState(() => initialResources().trucks);
+  const [driverForm, setDriverForm] = useState({
+    full_name: '',
+    phone: '',
+    permis_type: 'C',
+    permis_numero: '',
+    status: 'Active',
+    shift: 'Jour',
+  });
+  const [truckForm, setTruckForm] = useState({
+    plate_number: '',
+    type: 'PORTEUR',
+    capacity: '10000',
+    max_pallets: '14',
+    status: 'Available',
+  });
   const seededRef = useRef(false);
 
   // Seed ONCE, only after BOTH lists have loaded, so we never lock in a
@@ -105,9 +221,10 @@ export default function RessourcesPage() {
   useEffect(() => {
     if (seededRef.current) return;
     if (!apiTrucks.length || !apiDrivers.length) return;
-    const baseDrivers = applyDriverStatusOverrides(apiDrivers.map(normalizeDriver));
+    const edited = applyResourceEdits(apiTrucks.map(normalizeTruck), applyDriverStatusOverrides(apiDrivers.map(normalizeDriver)));
+    const baseDrivers = applyDriverStatusOverrides(edited.drivers);
     setDrivers(baseDrivers);
-    setTrucks(applyTruckAssignmentOverrides(applyTruckStatusOverrides(reconcilePairing(apiTrucks.map(normalizeTruck), baseDrivers))));
+    setTrucks(applyTruckAssignmentOverrides(applyTruckStatusOverrides(reconcilePairing(edited.trucks, baseDrivers))));
     seededRef.current = true;
   }, [apiTrucks, apiDrivers]);
 
@@ -221,6 +338,123 @@ export default function RessourcesPage() {
     ]);
   };
 
+  const handleAddDriver = async (event) => {
+    event.preventDefault();
+    const fullName = driverForm.full_name.trim();
+    if (!fullName) return;
+    const localDriver = {
+      id: nextLocalId('Chauf', drivers),
+      full_name: fullName,
+      phone: driverForm.phone.trim() || null,
+      status: normalizeDriverStatus(driverForm.status),
+      shift: driverForm.shift,
+      assigned_truck: null,
+      permis_type: driverForm.permis_type,
+      permis_numero: driverForm.permis_numero.trim() || null,
+    };
+
+    let nextDriver = localDriver;
+    try {
+      const created = await createFleetDriver({
+        full_name: fullName,
+        phone: localDriver.phone,
+        permis_type: driverForm.permis_type,
+        permis_numero: localDriver.permis_numero,
+        status: driverStatusToApi(driverForm.status),
+        shift_start: driverForm.shift === 'Nuit' ? '20:00' : '08:00',
+        shift_end: driverForm.shift === 'Nuit' ? '04:00' : '17:00',
+      });
+      nextDriver = { ...normalizeDriver(created), shift: driverForm.shift };
+    } catch {
+      rememberLocalResource('driver', localDriver);
+    }
+
+    setDrivers((prev) => [...prev, nextDriver]);
+    setDriverForm({ full_name: '', phone: '', permis_type: 'C', permis_numero: '', status: 'Active', shift: 'Jour' });
+    setChatMessages((prev) => [`${nextDriver.full_name} added to drivers.`, ...prev.slice(0, 4)]);
+  };
+
+  const handleRemoveDriver = async (driverId) => {
+    const driver = driverById[String(driverId)];
+    if (!driver) return;
+    const assignedTruck = driverTruck[String(driverId)];
+    try {
+      if (Number.isInteger(Number(driverId))) await deleteFleetDriver(driverId);
+    } catch {
+      forgetLocalResource('driver', driverId);
+    }
+    if (!Number.isInteger(Number(driverId))) forgetLocalResource('driver', driverId);
+    setDrivers((prev) => prev.filter((item) => String(item.id) !== String(driverId)));
+    setTrucks((prev) => prev.map((truck) => {
+      if (String(truck.assigned_driver) !== String(driverId)) return truck;
+      writeTruckAssignmentOverride(truck.id, null);
+      return { ...truck, assigned_driver: null };
+    }));
+    setChatMessages((prev) => [
+      assignedTruck
+        ? `${driver.full_name} removed. Camion ${assignedTruck.id} released.`
+        : `${driver.full_name} removed.`,
+      ...prev.slice(0, 4),
+    ]);
+  };
+
+  const handleAddTruck = async (event) => {
+    event.preventDefault();
+    const plateNumber = truckForm.plate_number.trim().toUpperCase();
+    const capacity = Math.max(1, Number(truckForm.capacity) || 0);
+    const maxPallets = Math.max(1, Number(truckForm.max_pallets) || 0);
+    if (!plateNumber || !capacity || !maxPallets) return;
+
+    const localTruck = {
+      id: nextLocalId('Camion', trucks),
+      plate_number: plateNumber,
+      type: truckTypeOptions.find((type) => type.value === truckForm.type)?.label || truckForm.type,
+      capacity,
+      max_pallets: maxPallets,
+      assigned_driver: null,
+      status: normalizeTruckStatus(truckForm.status),
+    };
+
+    let nextTruck = localTruck;
+    try {
+      const created = await createFleetTruck({
+        plate_number: plateNumber,
+        type: truckForm.type,
+        capacite_kg: capacity,
+        max_palettes: maxPallets,
+        status: TRUCK_STATUS_TO_API[truckForm.status] || truckForm.status,
+      });
+      nextTruck = normalizeTruck(created);
+      mutateFleet?.();
+    } catch {
+      rememberLocalResource('truck', localTruck);
+    }
+
+    setTrucks((prev) => applyTruckStatusOverrides([...prev, nextTruck]));
+    setTruckForm({ plate_number: '', type: 'PORTEUR', capacity: '10000', max_pallets: '14', status: 'Available' });
+    setChatMessages((prev) => [`${nextTruck.plate_number} added to trucks.`, ...prev.slice(0, 4)]);
+  };
+
+  const handleRemoveTruck = async (truckId) => {
+    const truck = trucks.find((item) => String(item.id) === String(truckId));
+    if (!truck) return;
+    const assignedDriver = driverById[String(truck.assigned_driver)];
+    try {
+      if (Number.isInteger(Number(truckId))) await deleteFleetTruck(truckId);
+      mutateFleet?.();
+    } catch {
+      forgetLocalResource('truck', truckId);
+    }
+    if (!Number.isInteger(Number(truckId))) forgetLocalResource('truck', truckId);
+    setTrucks((prev) => prev.filter((item) => String(item.id) !== String(truckId)));
+    setChatMessages((prev) => [
+      assignedDriver
+        ? `${truck.plate_number} removed. ${assignedDriver.full_name} released.`
+        : `${truck.plate_number} removed.`,
+      ...prev.slice(0, 4),
+    ]);
+  };
+
   const availableDrivers = drivers.filter((driver) => isDriverAssignable(driver) && !driverTruck[String(driver.id)]);
   const availableTrucks = trucks.filter((truck) => truck.status === 'Available' && truck.assigned_driver == null);
 
@@ -328,13 +562,64 @@ export default function RessourcesPage() {
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1 text-sm font-semibold text-[#0f172a]">{driverSummary.assigned} assignés</span>
               </div>
             </div>
+            <form onSubmit={handleAddDriver} className="mb-5 grid gap-3 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4 md:grid-cols-[1.2fr_1fr_0.7fr_0.8fr_0.8fr_0.8fr_auto]">
+              <input
+                required
+                minLength={2}
+                placeholder="Nom du chauffeur"
+                value={driverForm.full_name}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, full_name: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <input
+                placeholder="Téléphone"
+                value={driverForm.phone}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, phone: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <select
+                value={driverForm.permis_type}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, permis_type: event.target.value }))}
+                className="rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              >
+                {['B', 'C', 'CE', 'D'].map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+              <input
+                placeholder="Permis"
+                value={driverForm.permis_numero}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, permis_numero: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <select
+                value={driverForm.status}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, status: event.target.value }))}
+                className="rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              >
+                {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <select
+                value={driverForm.shift}
+                onChange={(event) => setDriverForm((prev) => ({ ...prev, shift: event.target.value }))}
+                className="rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              >
+                {shiftOptions.map((shift) => <option key={shift} value={shift}>{shift}</option>)}
+              </select>
+              <button
+                type="submit"
+                title="Ajouter chauffeur"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white transition hover:bg-brand-700"
+              >
+                <Plus size={18} />
+              </button>
+            </form>
             <div className="overflow-hidden rounded-[1.5rem] border border-[#e5e7eb]">
-              <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr] gap-4 bg-[#eef4ff] px-6 py-4 text-sm font-semibold uppercase tracking-[0.15em] text-[#4b5563]">
+              <div className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 bg-[#eef4ff] px-6 py-4 text-sm font-semibold uppercase tracking-[0.15em] text-[#4b5563]">
                 <span>Nom</span>
                 <span>Statut</span>
                 <span>Shift</span>
                 <span>Camion</span>
                 <span>Affectation</span>
+                <span></span>
               </div>
               <div className="divide-y divide-border bg-white max-h-96 overflow-y-auto">
                 {drivers.map((driver) => (
@@ -342,7 +627,7 @@ export default function RessourcesPage() {
                     key={driver.id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
+                    className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1fr_auto] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
                   >
                     <div>
                       <p className="font-semibold">{driver.full_name}</p>
@@ -403,6 +688,14 @@ export default function RessourcesPage() {
                         })}
                       </select>
                     </div>
+                    <button
+                      type="button"
+                      title="Supprimer chauffeur"
+                      onClick={() => handleRemoveDriver(driver.id)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#fecaca] bg-[#fff1f2] text-[#dc2626] transition hover:bg-[#fee2e2]"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </motion.div>
                 ))}
               </div>
@@ -430,13 +723,63 @@ export default function RessourcesPage() {
                 <span className="rounded-full bg-[#f0fdf4] px-3 py-1 text-sm font-semibold text-[#15803d]">{truckSummary.available} available</span>
               </div>
             </div>
+            <form onSubmit={handleAddTruck} className="mb-5 grid gap-3 rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4 md:grid-cols-[1fr_0.9fr_0.8fr_0.8fr_0.9fr_auto]">
+              <input
+                required
+                minLength={2}
+                placeholder="Immatriculation"
+                value={truckForm.plate_number}
+                onChange={(event) => setTruckForm((prev) => ({ ...prev, plate_number: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <select
+                value={truckForm.type}
+                onChange={(event) => setTruckForm((prev) => ({ ...prev, type: event.target.value }))}
+                className="rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              >
+                {truckTypeOptions.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+              </select>
+              <input
+                required
+                min="1"
+                type="number"
+                placeholder="Kg"
+                value={truckForm.capacity}
+                onChange={(event) => setTruckForm((prev) => ({ ...prev, capacity: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <input
+                required
+                min="1"
+                type="number"
+                placeholder="Palettes"
+                value={truckForm.max_pallets}
+                onChange={(event) => setTruckForm((prev) => ({ ...prev, max_pallets: event.target.value }))}
+                className="min-w-0 rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              />
+              <select
+                value={truckForm.status}
+                onChange={(event) => setTruckForm((prev) => ({ ...prev, status: event.target.value }))}
+                className="rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-600"
+              >
+                {TRUCK_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <button
+                type="submit"
+                title="Ajouter camion"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white transition hover:bg-brand-700"
+              >
+                <Plus size={18} />
+              </button>
+            </form>
             <div className="overflow-hidden rounded-[1.5rem] border border-[#e5e7eb]">
-              <div className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr] gap-4 bg-[#eef4ff] px-6 py-4 text-sm font-semibold uppercase tracking-[0.15em] text-[#4b5563]">
+              <div className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr_auto] gap-4 bg-[#eef4ff] px-6 py-4 text-sm font-semibold uppercase tracking-[0.15em] text-[#4b5563]">
                 <span>Camion</span>
                 <span>Type</span>
                 <span>Capacité</span>
                 <span>Statut</span>
                 <span>Chauffeur</span>
+                <span></span>
               </div>
               <div className="divide-y divide-border bg-white max-h-96 overflow-y-auto">
                 {trucks.map((truck) => (
@@ -444,7 +787,7 @@ export default function RessourcesPage() {
                     key={truck.id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
+                    className="grid grid-cols-[1.2fr_1fr_0.9fr_1fr_1fr_auto] gap-4 px-6 py-4 items-center text-sm text-ink hover:bg-canvas transition"
                   >
                     <div>
                       <p className="font-semibold">{truck.id}</p>
@@ -489,6 +832,14 @@ export default function RessourcesPage() {
                         })}
                       </select>
                     </div>
+                    <button
+                      type="button"
+                      title="Supprimer camion"
+                      onClick={() => handleRemoveTruck(truck.id)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#fecaca] bg-[#fff1f2] text-[#dc2626] transition hover:bg-[#fee2e2]"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </motion.div>
                 ))}
               </div>

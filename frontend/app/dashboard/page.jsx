@@ -109,6 +109,18 @@ function greeting() {
   return 'Good evening';
 }
 
+function isoWeekLabel(day) {
+  if (!day) return null;
+  const date = new Date(`${day}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const weekday = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - weekday);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((utc - yearStart) / 86400000) + 1) / 7);
+  return `W${String(week).padStart(2, '0')}`;
+}
+
 // Map a fleet row → the backend's daily-plan truck payload, dropping trucks that
 // are unavailable (broken down / maintenance). Mirrors the generated-planning
 // screen so the dashboard plans with the SAME active fleet.
@@ -195,6 +207,8 @@ export default function DashboardPage() {
   const planDate = dashboard?.day
     ? new Date(`${dashboard.day}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
     : '…';
+
+  const weekLabel = isoWeekLabel(dashboard?.day);
 
   return (
     <div className="p-8 min-h-screen bg-canvas">
@@ -297,7 +311,11 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-muted">{kpi.label || '…'}</p>
-                {kpi.code && <span className="text-[10px] font-semibold text-[#c4c2bd]">{kpi.code}</span>}
+                {kpi.code && (
+                  <span className="text-[10px] font-semibold text-[#c4c2bd]">
+                    {kpi.code === 'R4-06' && weekLabel ? weekLabel : kpi.code}
+                  </span>
+                )}
               </div>
               <p className="mt-1 text-4xl font-bold text-ink">
                 {display}

@@ -1,123 +1,111 @@
-from fastapi import APIRouter
-from datetime import datetime, timedelta
+"""Database-backed agent status; no randomly generated operational events."""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.database import get_db_optional
+from app.services.auth_service import get_current_user
+from app.models.evenement import EvenementAlea
+from app.models.ingestion_log import IngestionLog
+from app.models.plan import PlanVersion
+from app.models.transport_tracking import TransportTracking
 
 router = APIRouter()
 
-START_TIME = datetime.now()
 
-BASE_EVENTS = [
-    {
-        "event_name": "data_ready",
-        "source_agent": "agent1_collector",
-        "payload_summary": "file: planning_J1.xlsx",
-    },
-    {
-        "event_name": "trigger_15h00",
-        "source_agent": "orchestrator",
-        "payload_summary": "scheduled trigger",
-    },
-    {
-        "event_name": "optimization_complete",
-        "source_agent": "agent2_optimizer",
-        "payload_summary": "12 routes generated",
-    },
-    {
-        "event_name": "alert_sent",
-        "source_agent": "agent3_notifier",
-        "payload_summary": "modification detected",
-    },
-]
+def _time(value) -> str | None:
+    return value.isoformat() if value else None
 
 
-def _format_time(value: datetime) -> str:
-    return value.strftime("%H:%M:%S")
-
-
-def _build_recent_events() -> list[dict]:
-    now = datetime.now()
-    events = []
-    offset = 0
-    for event_template in BASE_EVENTS:
-        event_time = now - timedelta(seconds=offset)
-        events.append({
-            "timestamp": _format_time(event_time),
-            "event_name": event_template["event_name"],
-            "source_agent": event_template["source_agent"],
-            "payload_summary": event_template["payload_summary"],
-        })
-        offset += 7
-
-    cycle = now.second % 30
-    if cycle < 8:
-        events.insert(0, {
-            "timestamp": _format_time(now),
-            "event_name": "post_deadline_modification",
-            "source_agent": "agent3_notifier",
-            "payload_summary": "client: ACME Industries — modification after 15h00",
-        })
-    elif cycle < 16:
-        events.insert(0, {
-            "timestamp": _format_time(now),
-            "event_name": "delay_detected",
-            "source_agent": "agent4_monitor",
-            "payload_summary": "delivery late by 12 min",
-        })
-    else:
-        events.insert(0, {
-            "timestamp": _format_time(now),
-            "event_name": "watchdog_scan",
-            "source_agent": "agent1_collector",
-            "payload_summary": "new file found in shared folder",
-        })
-
-    return events[:20]
+def _sort_time(value) -> float:
+    return value.timestamp() if value else 0.0
 
 
 @router.get("/status")
-async def get_agents_status():
-    """Return a simulated agent status dashboard feed."""
-    now = datetime.now()
-    cycle = now.second % 36
-    collector_status = "watching" if cycle < 10 else "processing" if cycle < 22 else "idle"
-    optimizer_status = "optimizing" if cycle < 12 else "done" if cycle < 26 else "idle"
-    notifier_status = "alert sent" if cycle % 20 < 6 else "listening"
-    monitor_status = "delay detected" if cycle % 18 < 5 else "polling"
+async def get_agents_status(
+    _user: dict = Depends(get_current_user),
+    db: Session | None = Depends(get_db_optional),
+):
+    if db is None:
+        return {
+            "source": "offline",
+            "agents": {
+                key: {"status": "unavailable"}
+                for key in ("collector", "optimizer", "notifier", "monitor")
+            },
+            "recent_events": [],
+            "pipeline_status": {},
+        }
 
-    pending_alerts = 1 if cycle % 25 < 8 else 0
-    last_opt_time = now - timedelta(minutes=(cycle % 10) + 1)
-    last_poll_time = now - timedelta(seconds=5 + (cycle % 10))
+    latest_ingestion = db.query(IngestionLog).order_by(IngestionLog.id.desc()).first()
+    latest_plan = db.query(PlanVersion).order_by(PlanVersion.id.desc()).first()
+    latest_tracking = db.query(TransportTracking).order_by(TransportTracking.id.desc()).first()
+    pending_incidents = db.query(EvenementAlea).filter(EvenementAlea.resolu.is_(False)).count()
 
-    recent_events = _build_recent_events()
-    pipeline_status = {
-        "trigger_15h00": cycle >= 5,
-        "data_ready": cycle >= 12,
-        "optimization_complete": cycle >= 20,
-        "alerts_pending": pending_alerts,
-    }
+    events = []
+    for incident in (
+        db.query(EvenementAlea)
+        .order_by(EvenementAlea.date_evenement.desc())
+        .limit(10)
+        .all()
+    ):
+        incident_type = incident.type.value if hasattr(incident.type, "value") else str(incident.type)
+        events.append(
+            {
+                "sort_time": _sort_time(incident.date_evenement),
+                "timestamp": _time(incident.date_evenement),
+                "event_name": "delay_detected" if incident_type == "RETARD_TRAFIC" else "incident_detected",
+                "source_agent": "agent4_monitor",
+                "payload_summary": incident.description or incident_type,
+                "source": incident.cause,
+                "incident_id": incident.id,
+            }
+        )
+    for tracking in (
+        db.query(TransportTracking)
+        .order_by(TransportTracking.id.desc())
+        .limit(10)
+        .all()
+    ):
+        events.append(
+            {
+                "sort_time": _sort_time(tracking.timestamp),
+                "timestamp": _time(tracking.timestamp),
+                "event_name": "tracking_sample",
+                "source_agent": "agent4_monitor",
+                "payload_summary": f"{tracking.transport_id}: {tracking.status or 'status unknown'}",
+                "source": tracking.source,
+            }
+        )
+    events.sort(key=lambda item: item["sort_time"], reverse=True)
+    recent_events = [{k: v for k, v in event.items() if k != "sort_time"} for event in events[:20]]
 
     return {
+        "source": "database",
         "agents": {
             "collector": {
-                "status": collector_status,
-                "last_event": recent_events[0]["event_name"],
-                "uptime": int((now - START_TIME).total_seconds()),
+                "status": latest_ingestion.status if latest_ingestion else "idle",
+                "last_event": _time(latest_ingestion.import_date) if latest_ingestion else None,
             },
             "optimizer": {
-                "status": optimizer_status,
-                "last_optimization_time": _format_time(last_opt_time),
-                "uptime": int((now - START_TIME).total_seconds()),
+                "status": "ready" if latest_plan else "idle",
+                "last_optimization_time": _time(latest_plan.date_creation) if latest_plan else None,
             },
             "notifier": {
-                "status": notifier_status,
-                "pending_alerts": pending_alerts,
-                "uptime": int((now - START_TIME).total_seconds()),
+                "status": "attention required" if pending_incidents else "listening",
+                "pending_alerts": pending_incidents,
             },
             "monitor": {
-                "status": monitor_status,
-                "last_poll": _format_time(last_poll_time),
-                "uptime": int((now - START_TIME).total_seconds()),
+                "status": latest_tracking.status if latest_tracking else "waiting for tracking",
+                "last_poll": _time(latest_tracking.timestamp) if latest_tracking else None,
+                "tracking_source": latest_tracking.source if latest_tracking else None,
             },
         },
         "recent_events": recent_events,
-        "pipeline_status": pipeline_status,
+        "pipeline_status": {
+            "trigger_15h00": latest_ingestion is not None,
+            "data_ready": bool(latest_ingestion and latest_ingestion.status == "success"),
+            "optimization_complete": latest_plan is not None,
+            "alerts_pending": pending_incidents,
+        },
     }

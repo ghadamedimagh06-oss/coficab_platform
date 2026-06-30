@@ -14,7 +14,7 @@ The Coficab monthly performance report tracks 8 official indicators. The platfor
 | R4-02      | OTD — On-Time Delivery                    | %       | 96%         | ≥ 94%      | 92% to 94%      | < 92%    |
 | R4-02-PF ¹ | Premium Freight cost (Extra Transport)    | EUR     | 1 500       | ≤ 2 500    | 2 500 to 3 500  | > 3 500  |
 | R4-03      | Number of Premium Freight occurrences     | Nb      | 1           | ≤ 3        | 3 to 5          | > 5      |
-| R4-13      | Fuel Consumption Efficiency               | mL/T.km | 0.14        | ≤ 0.16     | 0.16 to 0.18    | > 0.18   |
+| R4-13      | Fuel Consumption Efficiency               | mL/T.km | 140         | ≤ 160      | 160 to 180      | > 180    |
 | R5-10      | Logistics cost                            | €/T     | 16          | ≤ 18       | 18 to 20        | > 20     |
 | R4-12      | Customer logistics incidents per MKm sold | Nb      | 13          | ≤ 14       | 14 to 15        | > 15     |
 | R4         | Load Efficiency Rate                      | %       | (target tbd)| ≥ target   | between bands   | < min    |
@@ -53,7 +53,7 @@ The platform stores three raw aggregates per period:
 - (34) `km_parcourus` — kilometres travelled
 
 ```
-Fuel per tonnage transported  = (32 × 1000) / (33 × 34)        [mL / T.km]   ← R4-13
+Fuel per tonnage transported  = Σ(mission fuel L × 1000) / Σ((mission kg / 1000) × mission km) [mL / T.km] ← R4-13
 Fuel per 100 km                = (32) / ((34) / 100)            [L / 100km]
 Return-empty-km rate           = (35) / (34)                    [%]
 ```
@@ -292,7 +292,7 @@ VALUES
   ('R4-02','OTD','On-Time Delivery (quantity-weighted)','%','daily','UP',96, 94, 92, NULL, NULL),
   ('R4-02-PF','Premium Freight Cost','Extra transport cost','EUR','monthly','DOWN',1500, NULL, NULL, 2500, 3500),
   ('R4-03','Premium Freight Occurrences','Number of premium transports','Nb','monthly','DOWN',1, NULL, NULL, 3, 5),
-  ('R4-13','Fuel Consumption Efficiency','Fuel per tonnage transported','mL/T.km','daily','DOWN',0.14, NULL, NULL, 0.16, 0.18),
+  ('R4-13','Fuel Consumption Efficiency','Fuel per tonnage transported','mL/T.km','daily','DOWN',140, NULL, NULL, 160, 180),
   ('R5-10','Logistics Cost','Logistics cost per tonne sold','€/T','monthly','DOWN',16, NULL, NULL, 18, 20),
   ('R4-12','Customer Logistics Incidents','Per MKm sold','Nb','monthly','DOWN',13, NULL, NULL, 14, 15),
   ('R4','Load Efficiency Rate','max(load kg, load pallets)','%','daily','UP',85, 80, 75, NULL, NULL);

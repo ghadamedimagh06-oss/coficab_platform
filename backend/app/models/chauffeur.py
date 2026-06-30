@@ -26,13 +26,13 @@ class Chauffeur(Base):
     full_name = Column(String, nullable=False)
     phone = Column(String(30))
     permis_type = Column(Enum(PermisType, name="permis_type_enum"), nullable=False)
-    permis_numero = Column(String(50))
+    permis_numero = Column(String(50), unique=True)
     status = Column(
         Enum(ChauffeurStatus, name="chauffeur_status_enum"),
         nullable=False,
         default=ChauffeurStatus.ACTIF,
     )
-    camion_defaut_id = Column(Integer, ForeignKey("camions.id"))
+    camion_defaut_id = Column(Integer, ForeignKey("camions.id"), unique=True)
     shift_start = Column(Time)
     shift_end = Column(Time)
     date_creation = Column(DateTime(timezone=True), server_default=func.now())

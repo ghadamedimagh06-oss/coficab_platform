@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Dict, Any
 import json
+import math
+import os
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db, get_db_optional
@@ -11,7 +14,7 @@ from app.models.demande import StatutDemande
 from app.models.plan import MissionDemande, PlanMission, StatutMission
 from app.models.transport_tracking import TransportTracking
 from app.models.client import Client
-from app.services.auth_service import require_role
+from app.services.auth_service import get_current_user, require_role
 
 router = APIRouter()
 
@@ -20,8 +23,17 @@ class DeliveredIn(BaseModel):
     quantite_livree_kg: float = Field(..., ge=0)
 
 
+class SimulationIn(BaseModel):
+    mission_id: int
+    progress_pct: float = Field(default=50, ge=0, le=100)
+    delay_minutes: int = Field(default=0, ge=0, le=1440)
+
+
 @router.get("/live")
-async def get_live_tracking(db: Session = Depends(get_db_optional)):
+async def get_live_tracking(
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_optional),
+):
     """Return recent tracking records (last 100)."""
     if not db:
         return {"tracking_data": [], "count": 0, "source": "offline", "clients": []}
@@ -38,13 +50,19 @@ async def get_live_tracking(db: Session = Depends(get_db_optional)):
             "location": location,
             "eta_hours": r.eta_hours,
             "distance_remaining": r.distance_remaining,
+            "source": r.source,
             "timestamp": r.timestamp.isoformat() if r.timestamp else None,
         })
     active_missions = _active_missions(db)
+    simulatable_missions = [
+        mission for mission in active_missions
+        if mission["status"] == StatutMission.EN_COURS.value
+    ]
     return {
         "tracking_data": result,
         "count": len(result),
         "active_missions": active_missions,
+        "simulatable_missions": simulatable_missions,
         "mission_count": len(active_missions),
         "clients": _client_markers(db),
         "source": "database",
@@ -52,15 +70,21 @@ async def get_live_tracking(db: Session = Depends(get_db_optional)):
 
 
 @router.get("/status")
-async def get_tracking_status(db: Session = Depends(get_db_optional)):
+async def get_tracking_status(
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_optional),
+):
     """Compatibility endpoint for Agent 4 tracking polling."""
-    return await get_live_tracking(db)
+    return await get_live_tracking(_user, db)
 
 
 @router.get("/map-data")
-async def get_map_data(db: Session = Depends(get_db_optional)):
+async def get_map_data(
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_optional),
+):
     """Return the map-ready tracking/client payload from application data."""
-    payload = await get_live_tracking(db)
+    payload = await get_live_tracking(_user, db)
     return {
         **payload,
         "source": payload.get("source", "database"),
@@ -127,13 +151,30 @@ async def mark_stop_delivered(
 
 
 @router.post("/sync")
-async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db_optional)):
+async def sync_tracking(
+    payload: Dict[str, Any],
+    _user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db_optional),
+    x_tfm_key: str | None = Header(None, alias="X-TFM-Key"),
+):
     """Persist tracking sync payload into transport_tracking table.
 
     Expected payload: {"items": [{transport object}, ...], "source": "agent"}
     Returns: count of items stored.
     """
     items = payload.get("items") or []
+    requested_source = str(payload.get("source") or "MANUAL").upper()
+    if requested_source == "MAP_SIMULATION":
+        raise HTTPException(status_code=422, detail="use /simulation/run for map simulation samples")
+    if requested_source == "TFM":
+        expected_key = os.getenv("TFM_INGEST_API_KEY")
+        if not expected_key:
+            raise HTTPException(status_code=503, detail="TFM ingestion is not configured")
+        if x_tfm_key != expected_key:
+            raise HTTPException(status_code=401, detail="invalid TFM ingestion key")
+        source = "TFM"
+    else:
+        source = "MANUAL"
     if not isinstance(items, list):
         raise HTTPException(status_code=400, detail="Invalid payload: 'items' must be a list")
     if not db:
@@ -145,29 +186,124 @@ async def sync_tracking(payload: Dict[str, Any], db: Session = Depends(get_db_op
         }
 
     stored = 0
-    for item in items:
+    alerts_created = 0
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail=f"items[{index}] must be an object")
+        transport_id = str(item.get("id") or item.get("transport_id") or "").strip()
+        if not transport_id:
+            raise HTTPException(status_code=422, detail=f"items[{index}] requires transport_id")
+        if len(transport_id) > 100:
+            raise HTTPException(status_code=422, detail=f"items[{index}].transport_id exceeds 100 characters")
+        status_value = item.get("status")
+        if status_value is not None and len(str(status_value)) > 50:
+            raise HTTPException(status_code=422, detail=f"items[{index}].status exceeds 50 characters")
+        location = item.get("location")
+        if location is not None and not isinstance(location, dict):
+            raise HTTPException(status_code=422, detail=f"items[{index}].location must be an object")
+        if location is not None:
+            try:
+                latitude = float(location["lat"])
+                longitude = float(location["lng"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f"items[{index}].location requires numeric lat/lng") from exc
+            if (
+                not math.isfinite(latitude)
+                or not math.isfinite(longitude)
+                or not -90 <= latitude <= 90
+                or not -180 <= longitude <= 180
+            ):
+                raise HTTPException(status_code=422, detail=f"items[{index}].location is outside valid ranges")
+            location = {**location, "lat": latitude, "lng": longitude}
         try:
-            transport_id = str(item.get("id") or item.get("transport_id") or "")
-            status = item.get("status")
-            location = item.get("location")
-            eta = item.get("eta_hours") or item.get("eta")
-            distance_remaining = item.get("distance_remaining") or item.get("distance") or item.get("distance_km")
-
-            record = TransportTracking(
-                transport_id=transport_id,
-                status=status,
-                location=json.dumps(location) if location is not None else None,
-                eta_hours=float(eta) if eta is not None else None,
-                distance_remaining=float(distance_remaining) if distance_remaining is not None else None,
-                source=payload.get("source")
+            eta_raw = item.get("eta_hours", item.get("eta"))
+            distance_raw = item.get(
+                "distance_remaining",
+                item.get("distance", item.get("distance_km")),
             )
-            db.add(record)
-            stored += 1
-        except Exception:
-            continue
+            eta = float(eta_raw) if eta_raw is not None else None
+            distance_remaining = float(distance_raw) if distance_raw is not None else None
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"items[{index}] has invalid numeric data") from exc
+        if eta is not None and (not math.isfinite(eta) or eta < 0):
+            raise HTTPException(status_code=422, detail=f"items[{index}].eta must be a finite non-negative number")
+        if distance_remaining is not None and (
+            not math.isfinite(distance_remaining) or distance_remaining < 0
+        ):
+            raise HTTPException(status_code=422, detail=f"items[{index}].distance must be a finite non-negative number")
+
+        record = TransportTracking(
+            transport_id=transport_id,
+            status=status_value,
+            location=json.dumps(location) if location is not None else None,
+            eta_hours=eta,
+            distance_remaining=distance_remaining,
+            source=source,
+        )
+        db.add(record)
+        db.flush()
+        stored += 1
+        mission_id = item.get("mission_id")
+        if mission_id is None and transport_id.startswith("mission-"):
+            mission_id = transport_id.removeprefix("mission-")
+        delay_minutes = item.get("delay_minutes", item.get("slip_minutes"))
+        if mission_id is not None and delay_minutes is not None:
+            try:
+                mission_id = int(mission_id)
+                delay_minutes = int(delay_minutes)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f"items[{index}] has invalid delay data") from exc
+            if delay_minutes < 0 or delay_minutes > 1440:
+                raise HTTPException(status_code=422, detail=f"items[{index}].delay_minutes is outside 0..1440")
+            alerts_created += _create_tracking_delay_incident(
+                db,
+                mission_id,
+                delay_minutes,
+                source,
+            )
 
     db.commit()
-    return {"status": "synced", "count": stored, "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {
+        "status": "synced",
+        "count": stored,
+        "alerts_created": alerts_created,
+        "source": source,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/simulation/run")
+async def run_map_simulation(
+    payload: SimulationIn,
+    _user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    from app.services.tracking_simulation_service import TrackingSimulationService
+
+    try:
+        return TrackingSimulationService(db).run(
+            payload.mission_id,
+            progress_pct=payload.progress_pct,
+            delay_minutes=payload.delay_minutes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/tfm/sync")
+async def sync_tfm_tracking(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db_optional),
+    x_tfm_key: str | None = Header(None, alias="X-TFM-Key"),
+):
+    """Machine-authenticated TFM ingestion; no user JWT is required."""
+    tfm_payload = {**payload, "source": "TFM"}
+    return await sync_tracking(
+        tfm_payload,
+        {"username": "tfm-service", "role": "service"},
+        db,
+        x_tfm_key,
+    )
 
 
 def _active_missions(db: Session) -> list[dict[str, Any]]:
@@ -181,8 +317,66 @@ def _active_missions(db: Session) -> list[dict[str, Any]]:
     return [_mission_summary(mission) for mission in missions]
 
 
+def _create_tracking_delay_incident(
+    db: Session,
+    mission_id: int,
+    delay_minutes: int,
+    source: str,
+) -> int:
+    """Turn a numeric TFM/map slip into one deduplicated incident."""
+    from app.agents.monitor import SLA_TOLERANCE_MIN, already_flagged
+    from app.models.evenement import EvenementType
+    from app.services.incident_service import IncidentService
+
+    if delay_minutes <= SLA_TOLERANCE_MIN:
+        return 0
+    mission = db.get(PlanMission, mission_id)
+    if mission is None or mission.statut not in {StatutMission.PLANIFIEE, StatutMission.EN_COURS}:
+        return 0
+    closed = {StatutDemande.LIVREE.value, StatutDemande.ANNULEE.value}
+    stop = next(
+        (
+            candidate
+            for candidate in sorted(
+                mission.mission_demandes,
+                key=lambda item: (item.ordre_livraison, item.id),
+            )
+            if _status_value(candidate.statut) not in closed
+        ),
+        None,
+    )
+    if stop is None or already_flagged(db, mission_id, stop.demande_id):
+        return 0
+    IncidentService(db).log(
+        type=EvenementType.RETARD_TRAFIC,
+        description=(
+            f"{source} tracking: mission {mission_id} is delayed by "
+            f"{delay_minutes} minutes"
+        ),
+        mission_id=mission_id,
+        demande_id=stop.demande_id,
+        impact_delai_min=delay_minutes,
+        cause=source,
+        commit=False,
+    )
+    return 1
+
+
 def _tracking_records(db: Session) -> list[TransportTracking]:
-    return db.query(TransportTracking).order_by(TransportTracking.id.desc()).limit(100).all()
+    # The live map needs current state, not raw history. Keep only the newest
+    # sample for each transport; historical samples remain stored in the table.
+    latest_ids = (
+        db.query(func.max(TransportTracking.id).label("id"))
+        .group_by(TransportTracking.transport_id)
+        .subquery()
+    )
+    return (
+        db.query(TransportTracking)
+        .join(latest_ids, TransportTracking.id == latest_ids.c.id)
+        .order_by(TransportTracking.id.desc())
+        .limit(100)
+        .all()
+    )
 
 
 def _client_markers(db: Session) -> list[dict[str, Any]]:

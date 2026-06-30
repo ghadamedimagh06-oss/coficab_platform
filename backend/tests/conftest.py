@@ -11,6 +11,8 @@ os.environ.setdefault("SCHEDULER_ENABLED", "0")
 # TestClient calls / repeated bad-login assertions).
 os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
 os.environ.setdefault("LOGIN_LOCKOUT_ENABLED", "0")
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("DEV_AUTH_BYPASS", "1")
 
 # Configuration de la base de données de test
 SQLALCHEMY_DATABASE_URL = "sqlite://"

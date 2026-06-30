@@ -15,7 +15,7 @@ KPI_DEFS = [
     ("R4-02", "OTD", "%", KpiFrequence.monthly, KpiDirection.UP, 96, 94, 92, None, None),
     ("R4-02-PF", "Premium Freight Cost", "EUR", KpiFrequence.monthly, KpiDirection.DOWN, 1500, None, None, 2500, 3500),
     ("R4-03", "Premium Freight Occurrences", "Nb", KpiFrequence.monthly, KpiDirection.DOWN, 1, None, None, 3, 5),
-    ("R4-13", "Fuel Consumption Efficiency", "mL/T.km", KpiFrequence.monthly, KpiDirection.DOWN, 0.14, None, None, 0.16, 0.18),
+    ("R4-13", "Fuel Consumption Efficiency", "mL/T.km", KpiFrequence.monthly, KpiDirection.DOWN, 140, None, None, 160, 180),
     ("R5-10", "Logistics Cost", "EUR/T", KpiFrequence.monthly, KpiDirection.DOWN, 16, None, None, 18, 20),
     ("R4-12", "Customer Incidents / MKm", "Nb", KpiFrequence.monthly, KpiDirection.DOWN, 13, None, None, 14, 15),
     ("R4", "Load Efficiency Rate", "%", KpiFrequence.daily, KpiDirection.UP, None, 80, 70, None, None),
@@ -177,7 +177,7 @@ def test_kpi_invariants_for_premium_fuel_cost_and_load(db):
 
     fuel = service._compute_live("R4-13", start, end)
     assert fuel == 15.0
-    assert compute_color(_kpi_def(db, "R4-13"), fuel) == "red"
+    assert compute_color(_kpi_def(db, "R4-13"), fuel) == "green"
 
     logistics = service._compute_live("R5-10", start, end)
     assert logistics == 28.0
@@ -186,6 +186,103 @@ def test_kpi_invariants_for_premium_fuel_cost_and_load(db):
     load = service._compute_live("R4", target, target)
     assert load == 80.0
     assert compute_color(_kpi_def(db, "R4"), load) == "green"
+
+
+def test_fuel_efficiency_sums_mission_tonne_km_without_cross_products(db):
+    target = date(2026, 5, 20)
+    plan, camion, chauffeur = _seed_mission_assets(db, target)
+    db.add_all(
+        [
+            PlanMission(
+                plan_version_id=plan.id,
+                camion_id=camion.id,
+                chauffeur_id=chauffeur.id,
+                date_mission=target,
+                statut=StatutMission.TERMINEE,
+                fuel_consomme_l=10,
+                charge_kg=1000,
+                km_parcourus=100,
+            ),
+            PlanMission(
+                plan_version_id=plan.id,
+                camion_id=camion.id,
+                chauffeur_id=chauffeur.id,
+                date_mission=target,
+                statut=StatutMission.TERMINEE,
+                fuel_consomme_l=10,
+                charge_kg=10000,
+                km_parcourus=10,
+            ),
+            PlanMission(
+                plan_version_id=plan.id,
+                camion_id=camion.id,
+                chauffeur_id=chauffeur.id,
+                date_mission=target,
+                statut=StatutMission.PLANIFIEE,
+                fuel_consomme_l=999,
+                charge_kg=12000,
+                km_parcourus=999,
+            ),
+        ]
+    )
+    db.commit()
+
+    service = KpiService(db)
+    fuel = service._compute_live("R4-13", target, target)
+    summary = service.get_operational_summary(target, target)
+
+    assert fuel == 100.0
+    assert summary == {
+        "distance_travelled_km": 110.0,
+        "fuel_consumed_l": 20.0,
+        "tonne_km": 200.0,
+        "fuel_l_per_100km": 18.1818,
+    }
+
+
+def test_weekly_trend_uses_iso_week_year_at_new_year_boundary(db):
+    row = KpiService(db).get_weekly_delivery_trend(
+        weeks=1,
+        ref_date=date(2021, 1, 3),
+    )[0]
+
+    assert row["date"] == "2020-12-28"
+    assert row["week"] == "W53"
+    assert row["period"] == "2020-W53"
+    assert row["iso_year"] == 2020
+    assert row["iso_week"] == 53
+
+
+def test_carbon_history_uses_explicit_factor_and_transport_work(db):
+    target = date(2026, 5, 20)
+    plan, camion, chauffeur = _seed_mission_assets(db, target)
+    db.add(
+        PlanMission(
+            plan_version_id=plan.id,
+            camion_id=camion.id,
+            chauffeur_id=chauffeur.id,
+            date_mission=target,
+            statut=StatutMission.TERMINEE,
+            fuel_consomme_l=20,
+            charge_kg=5000,
+            km_parcourus=100,
+        )
+    )
+    db.commit()
+
+    payload = KpiService(db).get_carbon_history(
+        target,
+        target,
+        group_by="week",
+        emission_factor=2.5,
+    )
+
+    assert payload["factor"]["kg_co2e_per_l"] == 2.5
+    assert payload["summary"]["emissions_kg_co2e"] == 50.0
+    assert payload["summary"]["distance_km"] == 100.0
+    assert payload["summary"]["tonne_km"] == 500.0
+    assert payload["summary"]["kg_co2e_per_km"] == 0.5
+    assert payload["history"][0]["period"] == "2026-W21"
 
 
 def test_kpi_invariant_customer_incidents_per_mkm(db):

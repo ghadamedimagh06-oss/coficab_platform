@@ -3,6 +3,10 @@ import { fetcher } from "@/lib/api";
 
 export type WeekRow = {
   week: string;
+  label: string;
+  period: string;
+  iso_year: number;
+  iso_week: number;
   date: string;
   total: number;
   delivered: number;

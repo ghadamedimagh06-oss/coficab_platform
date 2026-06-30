@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { CalendarDays, RefreshCcw, Route } from 'lucide-react';
-import { generateDailyPlan } from '../services/api';
+import { generateDailyPlan, getLiveTracking, runTrackingSimulation } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
@@ -41,6 +41,8 @@ export default function MapPage() {
   const [status, setStatus] = useState('loading');
   const [selectedTruckId, setSelectedTruckId] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [activeMissions, setActiveMissions] = useState([]);
+  const [simulationStatus, setSimulationStatus] = useState('');
 
   async function load(nextDay) {
     setStatus('loading');
@@ -60,7 +62,26 @@ export default function MapPage() {
     const initial = todayIso();
     setDay(initial);
     load(initial);
+    getLiveTracking()
+      .then((live) => setActiveMissions(Array.isArray(live?.simulatable_missions) ? live.simulatable_missions : []))
+      .catch(() => setActiveMissions([]));
   }, []);
+
+  async function runDelayDemo() {
+    const mission = activeMissions[0];
+    if (!mission) return;
+    setSimulationStatus('running');
+    try {
+      const result = await runTrackingSimulation(mission.id, 25);
+      setSimulationStatus(result.incident ? 'alert-created' : 'sample-created');
+      setMessages((prev) => [
+        `MAP_SIMULATION created for mission ${mission.id}; delay alert ${result.incident ? 'created' : 'already active'}.`,
+        ...prev,
+      ]);
+    } catch {
+      setSimulationStatus('error');
+    }
+  }
 
   const stats = useMemo(() => {
     const trucksUsed = (plan?.trucks || []).filter((t) => (t.trips || []).length > 0).length;
@@ -136,6 +157,20 @@ export default function MapPage() {
                 <li className="flex items-center gap-3"><span className="h-3 w-3 rounded-full" style={{ background: '#9ca3af' }} /> Unassigned client</li>
               </ul>
               <p className="mt-4 text-xs leading-5 text-[#9e9aa4]">Click a truck chip or its route to trace that vehicle’s ordered stops. Routes follow the real road network via OSRM.</p>
+            </div>
+
+            <div className="rounded-[2rem] border border-amber-300 bg-amber-50 p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Demo source: MAP_SIMULATION</p>
+              <p className="mt-2 text-sm text-amber-950">Create a deterministic 25-minute delay on the first active mission, clearly separated from TFM telemetry.</p>
+              <button
+                type="button"
+                disabled={!activeMissions.length || simulationStatus === 'running'}
+                onClick={runDelayDemo}
+                className="mt-4 w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-40"
+              >
+                {simulationStatus === 'running' ? 'Running simulation…' : 'Simulate 25-minute delay'}
+              </button>
+              {simulationStatus && simulationStatus !== 'running' && <p className="mt-2 text-xs text-amber-800">Status: {simulationStatus}</p>}
             </div>
 
             <ChatPanel

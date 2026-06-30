@@ -137,7 +137,11 @@ export default function TruckMap({ trucks = [], clients = [], height = 460, hide
                   <div className="space-y-0.5 text-slate-900">
                     <p className="font-semibold">{truck.transport_id || truck.id || `Truck ${index + 1}`}</p>
                     <p className="text-xs">{truck.status || 'On time'}</p>
+                    <p className="text-xs font-semibold">Source: {truck.source || 'UNKNOWN'}</p>
                     {truck.eta_hours != null && <p className="text-xs">ETA: {Number(truck.eta_hours).toFixed(1)}h</p>}
+                    {(truck.distance_remaining ?? truck.km) != null && (
+                      <p className="text-xs">Distance: {truck.distance_remaining ?? truck.km} km</p>
+                    )}
                   </div>
                 </Popup>
               </CircleMarker>

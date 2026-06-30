@@ -13,6 +13,7 @@ logger = logging.getLogger("agent4_monitor")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8000")
 TFM_API_URL = os.environ.get("TFM_API_URL", "").strip()
+TFM_INGEST_API_KEY = os.environ.get("TFM_INGEST_API_KEY", "").strip()
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
@@ -45,18 +46,13 @@ def publish_event(channel: str, payload: Optional[Dict] = None) -> None:
 
 
 def get_tracking_status() -> List[Dict]:
-    endpoints = []
-    if TFM_API_URL:
-        endpoints.extend([
-            TFM_API_URL.rstrip("/"),
-            f"{TFM_API_URL.rstrip('/')}/tracking",
-            f"{TFM_API_URL.rstrip('/')}/api/tracking",
-        ])
-    endpoints.extend([
-        f"{BACKEND_URL}/api/tracking/map-data",
-        f"{BACKEND_URL}/api/tracking/status",
-        f"{BACKEND_URL}/api/data/transports",
-    ])
+    if not TFM_API_URL:
+        return []
+    endpoints = [
+        TFM_API_URL.rstrip("/"),
+        f"{TFM_API_URL.rstrip('/')}/tracking",
+        f"{TFM_API_URL.rstrip('/')}/api/tracking",
+    ]
 
     for endpoint in endpoints:
         try:
@@ -103,9 +99,17 @@ def extract_tracking_items(payload) -> List[Dict]:
 
 
 def sync_tracking_payload(payload: dict) -> None:
-    endpoint = f"{BACKEND_URL}/api/tracking/sync"
+    endpoint = f"{BACKEND_URL}/api/tracking/tfm/sync"
     try:
-        response = requests.post(endpoint, json=payload, timeout=20)
+        if not TFM_INGEST_API_KEY:
+            raise RuntimeError("TFM_INGEST_API_KEY is required for TFM ingestion")
+        payload = {**payload, "source": "TFM"}
+        response = requests.post(
+            endpoint,
+            json=payload,
+            headers={"X-TFM-Key": TFM_INGEST_API_KEY},
+            timeout=20,
+        )
         response.raise_for_status()
         logger.info(json.dumps({"agent": "agent4_monitor", "event": "sync_submitted", "count": len(payload.get("items", [])), "timestamp": datetime.now().isoformat()}))
     except Exception as exc:
@@ -156,9 +160,9 @@ def main() -> None:
     while True:
         try:
             transports = get_tracking_status()
-            if transports:
+            if transports and TFM_API_URL:
                 detect_issues(transports)
-                sync_tracking_payload({"items": transports, "source": "agent4_monitor"})
+                sync_tracking_payload({"items": transports})
         except Exception as exc:
             logger.exception("Monitor loop exception: %s", exc)
 

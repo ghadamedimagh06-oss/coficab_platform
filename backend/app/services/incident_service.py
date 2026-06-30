@@ -24,6 +24,7 @@ class IncidentService:
         demande_id: int | None = None,
         impact_delai_min: int = 0,
         cause: str | None = None,
+        commit: bool = True,
     ) -> EvenementAlea:
         plan_version_id = None
         if mission_id is not None:
@@ -47,8 +48,11 @@ class IncidentService:
         )
         self.db.add(incident)
         self._apply_side_effects(type, mission_id, demande_id)
-        self.db.commit()
-        self.db.refresh(incident)
+        if commit:
+            self.db.commit()
+            self.db.refresh(incident)
+        else:
+            self.db.flush()
         return incident
 
     def resolve(self, incident_id: int, note: str | None = None) -> EvenementAlea:

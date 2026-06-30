@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, CalendarDays, Package, Plus, RefreshCcw, ShieldCheck, ShieldOff, Wand2 } from 'lucide-react';
-import { exportDailyPlan, generateDailyPlan } from '../services/api';
+import { approveDailyRental, exportDailyPlan, generateDailyPlan, recalculateDailyPlan } from '../services/api';
 import AddDeliveryModal from '../../components/planning/AddDeliveryModal';
 import ExportButton from '../../components/planning/ExportButton';
 import GanttBoard from '../../components/planning/GanttBoard';
@@ -16,7 +16,6 @@ import DisruptionPanel from '../../components/planning/DisruptionPanel';
 import ExplainPanel from '../../components/planning/ExplainPanel';
 import ControlTowerPanel from '../../components/planning/ControlTowerPanel';
 import { WORK_START, WORK_END, toMinutes, toClock, clampMinute } from '../../components/planning/timeline';
-import { drivers as fallbackDrivers, trucks as fallbackTrucks } from '../../data/coficabData';
 import { useDrivers, useFleet } from '../../hooks/useFleet';
 import {
   applyDriverStatusOverrides,
@@ -283,8 +282,8 @@ function resourceSignature(resourceFleet) {
 }
 
 export default function GeneratedDailyPlanningPage() {
-  const { trucks: apiTrucks, isLoading: trucksLoading } = useFleet();
-  const { drivers: apiDrivers, isLoading: driversLoading } = useDrivers();
+  const { trucks: apiTrucks, isLoading: trucksLoading, error: fleetError } = useFleet();
+  const { drivers: apiDrivers, isLoading: driversLoading, error: driversError } = useDrivers();
   // Start empty so server and client first-render match; the real date is set
   // after mount (avoids a Date-driven hydration mismatch).
   const [day, setDay] = useState('');
@@ -311,9 +310,9 @@ export default function GeneratedDailyPlanningPage() {
   const resourceReady = !trucksLoading && !driversLoading;
 
   const resourceFleet = useMemo(() => {
-    const drivers = applyDriverStatusOverrides((apiDrivers.length ? apiDrivers : fallbackDrivers).map(normalizeResourceDriver));
+    const drivers = applyDriverStatusOverrides(apiDrivers.map(normalizeResourceDriver));
     const driverById = Object.fromEntries(drivers.map((driver) => [String(driver.id), driver]));
-    return applyTruckAssignmentOverrides(applyTruckStatusOverrides(apiTrucks.length ? apiTrucks : fallbackTrucks))
+    return applyTruckAssignmentOverrides(applyTruckStatusOverrides(apiTrucks))
       .map((truck) => toDailyTruckPayload(truck, driverById, drivers))
       .filter(Boolean)
       .sort((a, b) => Number(a.truck_id) - Number(b.truck_id));
@@ -323,19 +322,56 @@ export default function GeneratedDailyPlanningPage() {
     () => resourceFleet.filter((truck) => truck.resource_status !== 'out_of_service'),
     [resourceFleet],
   );
+  const planningTrucks = activeTrucks.length > 0 ? activeTrucks : undefined;
   const currentResourceSignature = useMemo(() => resourceSignature(resourceFleet), [resourceFleet]);
 
   async function regenerate(nextDay = day) {
     setStatus('generating');
     setError(null);
     try {
-      const generated = await generateDailyPlan(nextDay, undefined, activeTrucks);
+      const generated = await generateDailyPlan(nextDay, undefined, planningTrucks);
       const nextPlan = withManualMarkers(withResourceLanes(generated, resourceFleet));
       setPlan(nextPlan);
       writeCachedPlan(nextDay, currentResourceSignature, nextPlan);
       setStatus('ready');
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Unable to generate the daily plan.');
+      setStatus('ready');
+    }
+  }
+
+  async function approveRental(recommendation) {
+    if (!recommendation?.truck || !plan) return;
+    setStatus('generating');
+    setError(null);
+    try {
+      const basePlanId = String(plan.rental_base_plan_id || plan.plan_id);
+      const approval = await approveDailyRental({
+        plan_id: basePlanId,
+        day,
+        recommendation_id: recommendation.id,
+        rental_profile: recommendation.profile,
+        estimated_cost_eur: recommendation.estimated_cost_eur,
+      });
+      const approvalIds = [...new Set([...(plan.rental_approval_ids || []), approval.approval_id])];
+      const generated = await generateDailyPlan(day, plan.source_file, planningTrucks, approvalIds, basePlanId);
+      setPlan(withManualMarkers(withResourceLanes(generated, resourceFleet)));
+      setStatus('ready');
+    } catch (err) {
+      setError(err?.response?.data?.detail || err.message || 'Unable to approve the rental option.');
+      setStatus('ready');
+    }
+  }
+
+  async function applyRecalculatedPlan(nextPlan) {
+    setPlan(withManualMarkers(nextPlan));
+    setStatus('recalculating');
+    try {
+      const recalculated = await recalculateDailyPlan(withManualMarkers(nextPlan));
+      setPlan(withManualMarkers(withResourceLanes(recalculated, resourceFleet)));
+    } catch (err) {
+      setError(err?.response?.data?.detail || err.message || 'Unable to recalculate the route with OSRM.');
+    } finally {
       setStatus('ready');
     }
   }
@@ -362,8 +398,13 @@ export default function GeneratedDailyPlanningPage() {
 
   useEffect(() => {
     if (!day || !resourceReady) return;
+    if (fleetError || driversError) {
+      setError('Unable to load the persisted fleet and drivers. Planning was not generated with fallback vehicles.');
+      setStatus('ready');
+      return;
+    }
     showCachedOrRegenerate(day);
-  }, [day, resourceReady, currentResourceSignature]);
+  }, [day, resourceReady, currentResourceSignature, fleetError, driversError]);
 
   // Keep the cache in step with local edits (moves, adds, deletes) so a reload
   // restores the latest state rather than the pristine generated plan.
@@ -449,7 +490,7 @@ export default function GeneratedDailyPlanningPage() {
     }
 
     setError(null);
-    setPlan({
+    applyRecalculatedPlan({
       ...sourceCleared,
       trucks: sourceCleared.trucks.map((truck) => {
         const stops = flattenStops(truck).sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd));
@@ -510,7 +551,7 @@ export default function GeneratedDailyPlanningPage() {
     }
 
     setError(null);
-    setPlan({
+    applyRecalculatedPlan({
       ...plan,
       trucks: plan.trucks.map((truck) => {
         const stops = flattenStops(truck).map((stop) => (
@@ -601,9 +642,10 @@ export default function GeneratedDailyPlanningPage() {
       constraints: { required_date: day },
       raw: {},
     };
-    setPlan((current) => ({
-      ...current,
-      trucks: current.trucks.map((truck) => {
+    if (!plan) return;
+    applyRecalculatedPlan({
+      ...plan,
+      trucks: plan.trucks.map((truck) => {
         if (String(truck.truck_id) !== String(form.truck_id)) return truck;
         const stops = flattenStops(truck);
         const reflowed = reflowStops([...stops, delivery].sort((a, b) => toMinutes(a.etd) - toMinutes(b.etd)), toMinutes(stops[0]?.etd || delivery.etd));
@@ -612,7 +654,7 @@ export default function GeneratedDailyPlanningPage() {
           trips: buildLaneTrip(truck.truck_id, reflowed),
         };
       }),
-    }));
+    });
   }
 
   function addMarker(targetTruckId, targetMinute) {
@@ -704,6 +746,7 @@ export default function GeneratedDailyPlanningPage() {
             <p className="mt-2 text-sm text-muted">
               Auto-generated from {plan?.source_file || 'weekly planning'} {plan?.generated_at ? `at ${new Date(plan.generated_at).toLocaleTimeString()}` : ''}
             </p>
+            {status === 'recalculating' && <p className="mt-1 text-xs font-semibold text-teal-700">Recalculating OSRM route legs…</p>}
             {plan?.selection && (
               <p className="mt-1 text-xs text-muted">
                 Using {plan.selection.matched_day || plan.selection.requested_day} rows from the workbook for {plan.selection.requested_date}.
@@ -775,6 +818,35 @@ export default function GeneratedDailyPlanningPage() {
             </div>
           ))}
         </motion.div>
+
+        {(plan?.rental_recommendations || []).length > 0 && (
+          <div className="rounded-[1.75rem] border border-amber-300 bg-amber-50 p-5">
+            <div className="mb-4 flex items-center gap-2 text-amber-800">
+              <AlertTriangle size={17} />
+              <h2 className="text-sm font-semibold uppercase tracking-[0.18em]">AI rental options · approval required</h2>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              {plan.rental_recommendations.map((recommendation) => (
+                <div key={recommendation.id} className="rounded-2xl border border-amber-200 bg-white p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">{recommendation.profile}</p>
+                  <h3 className="mt-2 text-lg font-semibold text-ink">{recommendation.vehicle_type}</h3>
+                  <p className="mt-2 text-sm text-muted">
+                    Up to {recommendation.capacity_positions} pallets · {formatNumber(recommendation.capacity_kg)} kg · licence {recommendation.required_permit}
+                  </p>
+                  <p className="mt-3 text-xl font-bold text-ink">≈ €{formatNumber(recommendation.estimated_cost_eur)}</p>
+                  <button
+                    type="button"
+                    disabled={status !== 'ready' || isVerified}
+                    onClick={() => approveRental(recommendation)}
+                    className="mt-4 w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Approve and regenerate
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Unassigned deliveries are now shown as a draggable tray inside the
             Truck timeline (GanttBoard) so they can be dropped straight onto a

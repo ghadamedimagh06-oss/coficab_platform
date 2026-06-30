@@ -210,7 +210,7 @@ The **dashboard payload** is shaped to match the existing `frontend/data/dashboa
   "kpis": [
     { "code": "R4-06", "label": "OTIF",         "value": 92.54, "unit": "%",       "color": "yellow", "target": 96,   "trend": -1.2 },
     { "code": "R4-02", "label": "OTD",          "value": 93.57, "unit": "%",       "color": "yellow", "target": 96,   "trend": 0.8 },
-    { "code": "R4-13", "label": "Fuel Eff.",    "value": 0.15,  "unit": "mL/T.km", "color": "green",  "target": 0.14, "trend": -0.01 },
+    { "code": "R4-13", "label": "Fuel Eff.",    "value": 150,   "unit": "mL/T.km", "color": "green",  "target": 140, "trend": -10 },
     { "code": "R5-10", "label": "Logistics €/T","value": 17.1,  "unit": "€/T",     "color": "green",  "target": 16,   "trend": -0.4 },
     { "code": "R4",    "label": "Load Eff.",    "value": 74,    "unit": "%",       "color": "yellow", "target": 80,   "trend": 1.5 }
   ]

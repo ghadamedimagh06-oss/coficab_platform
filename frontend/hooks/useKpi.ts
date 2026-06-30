@@ -11,11 +11,27 @@ export type Kpi = {
   trend: number | null;
 };
 
-export function useKpi() {
-  const { data, error, isLoading, mutate } = useSWR<{ kpis: Kpi[] }>(
-    "/api/metrics/kpi",
+export type OperationalSummary = {
+  distance_travelled_km?: number;
+  fuel_consumed_l?: number;
+  tonne_km?: number;
+  fuel_l_per_100km?: number | null;
+};
+
+export function useKpi(period: "day" | "week" | "month" | "year" = "month") {
+  const { data, error, isLoading, mutate } = useSWR<{
+    kpis: Kpi[];
+    operational: OperationalSummary;
+  }>(
+    `/api/metrics/kpi?period=${period}`,
     fetcher,
     { refreshInterval: 60_000 }
   );
-  return { kpis: data?.kpis ?? [], error, isLoading, mutate };
+  return {
+    kpis: data?.kpis ?? [],
+    operational: data?.operational ?? {},
+    error,
+    isLoading,
+    mutate,
+  };
 }

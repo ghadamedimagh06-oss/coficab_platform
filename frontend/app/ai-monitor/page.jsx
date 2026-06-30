@@ -87,7 +87,7 @@ export default function AiMonitorPage() {
 
   const alertEvent = useMemo(() => {
     if (!statusData || alertDismissed) return null;
-    return statusData.recent_events?.find((event) => event.event_name === 'post_deadline_modification');
+    return statusData.recent_events?.find((event) => ['delay_detected', 'post_deadline_modification'].includes(event.event_name));
   }, [statusData, alertDismissed]);
 
   const handleReplan = async () => {
@@ -133,8 +133,8 @@ export default function AiMonitorPage() {
             <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 shadow-2xl shadow-slate-950/20">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.32em] text-violet-200/70">Agent Status Panel</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-white">4 AI agents in action</h2>
+                  <p className="text-sm uppercase tracking-[0.32em] text-violet-200/70">Latest agent activity</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">Database-backed operational activity</h2>
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-3xl bg-violet-500/15 px-4 py-2 text-sm text-violet-100">
                   <Layers size={18} /> Live status
@@ -253,7 +253,9 @@ export default function AiMonitorPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm uppercase tracking-[0.32em] text-amber-200/80">Alert Action Panel</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-white">Modification détectée après 15h00</h2>
+                    <h2 className="mt-2 text-2xl font-semibold text-white">
+                      {alertEvent.event_name === 'delay_detected' ? 'Transport delay detected' : 'Post-deadline modification detected'}
+                    </h2>
                     <p className="mt-3 max-w-xl text-sm text-amber-100/80">
                       {alertEvent.payload_summary}
                     </p>
@@ -267,11 +269,11 @@ export default function AiMonitorPage() {
                   <div className="grid gap-2 rounded-3xl bg-slate-950/70 p-4 text-sm text-slate-200">
                     <div className="flex items-center justify-between gap-4 text-slate-400">
                       <span>Client</span>
-                      <span>ACME Industries</span>
+                      <span>{alertEvent.source || 'Operational feed'}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4 text-slate-400">
                       <span>Detail</span>
-                      <span>Post-deadline route modification</span>
+                      <span>{alertEvent.payload_summary}</span>
                     </div>
                   </div>
 

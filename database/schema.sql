@@ -101,9 +101,9 @@ CREATE TABLE IF NOT EXISTS chauffeurs (
     full_name        TEXT NOT NULL,
     phone            VARCHAR(30),
     permis_type      permis_type_enum NOT NULL,
-    permis_numero    VARCHAR(50),
+    permis_numero    VARCHAR(50) UNIQUE,
     status           chauffeur_status_enum NOT NULL DEFAULT 'ACTIF',
-    camion_defaut_id INTEGER REFERENCES camions(id),
+    camion_defaut_id INTEGER UNIQUE REFERENCES camions(id),
     shift_start      TIME,
     shift_end        TIME,
     date_creation    TIMESTAMPTZ DEFAULT now()
@@ -233,6 +233,22 @@ CREATE TABLE IF NOT EXISTS evenement_alea (
 );
 CREATE INDEX IF NOT EXISTS idx_event_type ON evenement_alea(type);
 CREATE INDEX IF NOT EXISTS idx_event_date ON evenement_alea(date_evenement);
+
+CREATE TABLE IF NOT EXISTS rental_approval (
+    id                 SERIAL PRIMARY KEY,
+    plan_id            VARCHAR(100) NOT NULL,
+    day                DATE NOT NULL,
+    recommendation_id  VARCHAR(100) NOT NULL,
+    rental_profile     VARCHAR(50) NOT NULL,
+    estimated_cost_eur NUMERIC(10,2) NOT NULL,
+    approved_by        VARCHAR(100) NOT NULL,
+    created_at         TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (plan_id, recommendation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rental_approval_plan ON rental_approval(plan_id);
+CREATE INDEX IF NOT EXISTS idx_rental_approval_day ON rental_approval(day);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_rental_approval_plan_recommendation
+ON rental_approval(plan_id, recommendation_id);
 
 -- ---------------------------------------------------------------------------
 -- KPI tables

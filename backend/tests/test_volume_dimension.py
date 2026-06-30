@@ -62,11 +62,11 @@ def test_clean_truck_exposes_capacity_m3(builder):
 
 # --------------------------------------------------------------- feasibility
 def test_feasible_trucks_excludes_too_small_by_volume(builder):
-    # 60 m³ cubes out every 40 m³ truck; only the 90 m³ (id 5) and 85 m³
-    # rented (id 999) trucks remain feasible.
+    # 60 m³ cubes out every 40 m³ truck; only the owned 90 m³ truck remains.
+    # Rental capacity is added only after a persisted approval.
     drop = {"quantity_positions": 1, "quantity_kg": 100, "volume_m3": 60.0}
     feasible_ids = {t["truck_id"] for t in builder._feasible_trucks(drop, DEFAULT_TRUCKS)}
-    assert feasible_ids == {5, 999}
+    assert feasible_ids == {5}
 
 
 def test_fits_volume_is_noop_for_truck_without_capacity(builder):

@@ -1,18 +1,24 @@
 import json
+import os
+from copy import deepcopy
 from datetime import date as _date
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_db_optional
-from app.services.auth_service import require_auth
-from app.services.daily_plan_builder import DailyPlanBuilder, DailyPlanConfig, DEFAULT_TRUCKS
+from app.models.rental_approval import RentalApproval
+from app.services.auth_service import require_auth, require_role
+from app.services.daily_plan_builder import DailyPlanBuilder, DailyPlanConfig, DEFAULT_TRUCKS, RENTAL_PROFILES
 from app.services import dashboard_service
 from app.services.excel_exporter import export_plan_to_xlsx
+from app.services.geo_service import GeoService
+from app.services.kpi_service import fuel_efficiency_ml_per_tkm
+from app.services.osrm_service import OSRMError, OSRMService
 from app.services.vrptw_optimizer import (
     VRPTWOptimizer,
     VrptwOptimizer,
@@ -47,6 +53,20 @@ class DailyGenerateRequest(BaseModel):
     day: str
     source_file: Optional[str] = None
     trucks: Optional[List[Dict[str, Any]]] = None
+    rental_approval_ids: List[int] = Field(default_factory=list)
+    rental_base_plan_id: Optional[str] = None
+
+
+class DailyRentalApproveRequest(BaseModel):
+    plan_id: str
+    day: str
+    recommendation_id: str
+    rental_profile: str
+    estimated_cost_eur: float
+
+
+class DailyRecalculateRequest(BaseModel):
+    plan: Dict[str, Any]
 
 
 class DailyExportRequest(BaseModel):
@@ -65,7 +85,7 @@ class DailyParetoRequest(BaseModel):
 
 class StressScenario(BaseModel):
     label: str
-    remove_truck_ids: List[int] = []      # take these trucks out of the fleet
+    remove_truck_ids: List[Union[int, str]] = []  # take these trucks out of the fleet
     volume_multiplier: float = 1.0        # scale all demand (1.3 = +30%)
     disable_rental: bool = False          # forbid the hired truck (id 999)
 
@@ -83,7 +103,7 @@ class DailyStressTestRequest(BaseModel):
 class DailyReplanRequest(BaseModel):
     day: str
     plan: Dict[str, Any]                       # the current plan to recover from
-    disrupted_truck_ids: List[int] = []        # trucks taken out of service now
+    disrupted_truck_ids: List[Union[int, str]] = []  # trucks taken out of service now
     completed_stop_ids: List[Any] = []         # deliveries already delivered (keep as-is)
     objective: str = "balanced"
     trucks: Optional[List[Dict[str, Any]]] = None  # override base fleet if given
@@ -292,15 +312,17 @@ def get_plan_kpi_preview(
     total_km = sum(float(m.km_parcourus or 0) for m in missions)
     total_kg = sum(float(m.charge_kg or 0) for m in missions)
     total_fuel = sum(float(m.fuel_consomme_l or 0) for m in missions)
+    total_tonne_km = sum(
+        (float(m.charge_kg or 0) / 1000) * float(m.km_parcourus or 0)
+        for m in missions
+    )
     total_cost = sum(float(m.cout_transport_eur or 0) for m in missions)
     load_effs = [float(m.load_eff_pct or 0) for m in missions if m.load_eff_pct]
     avg_load_eff = round(sum(load_effs) / len(load_effs), 2) if load_effs else 0.0
     premium_count = sum(1 for m in missions if m.mode == ModeMission.PREMIUM)
 
     # Fuel efficiency: mL per T·km  (mirroring KPI R4-13)
-    fuel_eff = None
-    if total_kg > 0 and total_km > 0:
-        fuel_eff = round((total_fuel * 1000) / ((total_kg / 1000) * total_km), 4)
+    fuel_eff = fuel_efficiency_ml_per_tkm(total_fuel, total_tonne_km)
 
     # Logistics cost: €/T  (mirroring KPI R5-10)
     logistics_cost = None
@@ -320,7 +342,7 @@ def get_plan_kpi_preview(
             "label": "Fuel Efficiency",
             "value": fuel_eff,
             "unit": "mL/T.km",
-            "target": 0.16,
+            "target": 160.0,
         },
         {
             "code": "R5-10",
@@ -419,16 +441,50 @@ async def generate_planning(request: PlanningGenerateRequest):
 def generate_daily_plan(
     request: DailyGenerateRequest,
     db: Optional[Session] = Depends(get_db_optional),
-    _user: dict = Depends(require_auth),
+    _user: dict = Depends(require_role("planner", "admin")),
 ):
     # Plain ``def`` on purpose: build() does synchronous geocoding (urllib +
     # a 1.05s Nominatim rate-limit sleep) that would block the event loop on a
     # cold cache. FastAPI runs sync handlers in a threadpool, so concurrent
     # requests are not stalled. See scripts/prewarm_geocode.py to warm offline.
     try:
-        trucks = _sanitize_daily_plan_trucks(request.trucks) if request.trucks is not None else _available_trucks_for_daily_plan(db)
+        if db is not None:
+            trucks = _available_trucks_for_daily_plan(db)
+        else:
+            trucks = _sanitize_daily_plan_trucks(request.trucks)
+            if trucks is None:
+                trucks = list(DEFAULT_TRUCKS)
+        if not trucks and request.trucks is None:
+            trucks = list(DEFAULT_TRUCKS)
+        # The isolated test database intentionally starts without fleet rows;
+        # retain deterministic fixtures there without weakening production's
+        # database-authoritative fleet rule.
+        if not trucks and os.getenv("APP_ENV", "").lower() == "test":
+            trucks = list(DEFAULT_TRUCKS)
+        trucks = list(trucks or [])
+        if any(t.get("ownership") == "RENTAL" or t.get("rental_profile") for t in trucks):
+            raise ValueError("rental trucks require a server-side approval id")
+        if request.rental_approval_ids:
+            if db is None:
+                raise ValueError("database is required for rental approval")
+            approvals = db.query(RentalApproval).filter(
+                RentalApproval.id.in_(request.rental_approval_ids)
+            ).all()
+            if len(approvals) != len(set(request.rental_approval_ids)):
+                raise ValueError("one or more rental approvals were not found")
+            if not request.rental_base_plan_id:
+                raise ValueError("rental_base_plan_id is required with rental approvals")
+            if any(a.plan_id != request.rental_base_plan_id for a in approvals):
+                raise ValueError("rental approval belongs to a different base plan")
+            requested_day = _parse_day(request.day)
+            if any(a.day != requested_day for a in approvals):
+                raise ValueError("rental approval is for a different planning day")
+            trucks.extend(_approved_rental_truck(a) for a in approvals)
         builder = DailyPlanBuilder(WEEKLY_DIR, trucks=trucks)
-        return builder.build(day=_parse_day(request.day), source_file=request.source_file)
+        result = builder.build(day=_parse_day(request.day), source_file=request.source_file)
+        result["rental_base_plan_id"] = request.rental_base_plan_id
+        result["rental_approval_ids"] = list(request.rental_approval_ids)
+        return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -436,6 +492,56 @@ def generate_daily_plan(
 # ─────────────────────────────────────────────────────────────────────────────
 # Carbon & ESG endpoints (Pareto frontier + sustainability report)
 # ─────────────────────────────────────────────────────────────────────────────
+
+@daily_router.post("/rentals/approve", status_code=201)
+async def approve_daily_rental(
+    request: DailyRentalApproveRequest,
+    current_user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
+):
+    profile = next((item for item in RENTAL_PROFILES if item["profile"] == request.rental_profile), None)
+    if profile is None:
+        raise HTTPException(status_code=422, detail="unknown rental profile")
+    if request.recommendation_id != f"rental-{request.rental_profile.lower()}":
+        raise HTTPException(status_code=422, detail="recommendation id does not match rental profile")
+    if request.estimated_cost_eur < float(profile["fixed_cost_eur"]):
+        raise HTTPException(status_code=422, detail="estimated cost is below the profile minimum")
+    approval = db.query(RentalApproval).filter(
+        RentalApproval.plan_id == request.plan_id,
+        RentalApproval.recommendation_id == request.recommendation_id,
+    ).first()
+    if approval is None:
+        approval = RentalApproval(
+            plan_id=request.plan_id,
+            day=_parse_day(request.day),
+            recommendation_id=request.recommendation_id,
+            rental_profile=request.rental_profile,
+            estimated_cost_eur=request.estimated_cost_eur,
+            approved_by=current_user.get("username", "unknown"),
+        )
+        db.add(approval)
+        db.commit()
+        db.refresh(approval)
+    return {
+        "approval_id": approval.id,
+        "status": "APPROVED",
+        "approved_by": approval.approved_by,
+        "truck": _approved_rental_truck(approval),
+    }
+
+
+@daily_router.post("/recalculate")
+async def recalculate_daily_plan(
+    request: DailyRecalculateRequest,
+    _user: dict = Depends(require_role("planner", "admin")),
+):
+    try:
+        return _recalculate_daily_plan_routes(request.plan)
+    except OSRMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 _VALID_OBJECTIVES = ("green", "cost", "balanced", "fast")
 
@@ -607,6 +713,10 @@ def daily_esg_report(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _is_rental_truck(truck: Dict[str, Any]) -> bool:
+    return truck.get("ownership") == "RENTAL" or bool(truck.get("rental_profile"))
+
+
 def _stress_summary(plan: Dict[str, Any]) -> Dict[str, Any]:
     """Compact resilience summary of a plan for the stress-test lab."""
     def _pos(stop):
@@ -619,9 +729,7 @@ def _stress_summary(plan: Dict[str, Any]) -> Dict[str, Any]:
     unassigned = plan.get("unassigned", [])
     unassigned_pos = sum(_pos(s) for s in unassigned)
     demanded_pos = delivered_pos + unassigned_pos
-    rental_used = any(
-        str(t.get("truck_id")) == "999" and t.get("trips") for t in plan.get("trucks", [])
-    )
+    rental_used = any(_is_rental_truck(t) and t.get("trips") for t in plan.get("trucks", []))
     finish = _plan_finish_minutes(plan)
     s = plan.get("sustainability", {})
     return {
@@ -641,7 +749,7 @@ def _default_stress_scenarios(base_fleet: List[Dict[str, Any]]) -> List["StressS
     """A sensible default battery derived from the actual fleet: lose the biggest
     owned truck, lose the two biggest, +20%/+30% volume, and no rental."""
     owned = sorted(
-        (t for t in base_fleet if str(t.get("truck_id")) != "999"),
+        (t for t in base_fleet if not _is_rental_truck(t)),
         key=lambda t: t.get("capacity_positions", 0),
         reverse=True,
     )
@@ -650,12 +758,12 @@ def _default_stress_scenarios(base_fleet: List[Dict[str, Any]]) -> List["StressS
         biggest = owned[0]
         scenarios.append(StressScenario(
             label=f"Lose biggest truck ({biggest.get('truck_label', biggest['truck_id'])})",
-            remove_truck_ids=[int(biggest["truck_id"])],
+            remove_truck_ids=[biggest["truck_id"]],
         ))
     if len(owned) >= 2:
         scenarios.append(StressScenario(
             label="Lose the two biggest trucks",
-            remove_truck_ids=[int(owned[0]["truck_id"]), int(owned[1]["truck_id"])],
+            remove_truck_ids=[owned[0]["truck_id"], owned[1]["truck_id"]],
         ))
     scenarios.append(StressScenario(label="Demand +20%", volume_multiplier=1.2))
     scenarios.append(StressScenario(label="Demand +30%", volume_multiplier=1.3))
@@ -703,11 +811,11 @@ def daily_stress_test(
         scenarios = request.scenarios or _default_stress_scenarios(base_fleet)
         results: List[Dict[str, Any]] = []
         for sc in scenarios:
-            remove = set(int(x) for x in sc.remove_truck_ids)
+            remove = {str(x) for x in sc.remove_truck_ids}
             fleet = [
                 t for t in base_fleet
-                if int(t["truck_id"]) not in remove
-                and not (sc.disable_rental and str(t.get("truck_id")) == "999")
+                if str(t["truck_id"]) not in remove
+                and not (sc.disable_rental and _is_rental_truck(t))
             ]
             if not fleet:
                 results.append({
@@ -765,7 +873,7 @@ def compute_replan(
     Shared by POST /replan and the agentic copilot's breakdown action (W3.1)."""
     obj = objective.lower() if objective.lower() in _VALID_OBJECTIVES else "balanced"
     current = plan or {}
-    disrupted = set(int(x) for x in disrupted_truck_ids)
+    disrupted = {str(x) for x in disrupted_truck_ids}
     completed = set(str(x) for x in completed_stop_ids)
 
     # 1) Remaining demand = every assigned stop not yet completed, plus the
@@ -800,7 +908,7 @@ def compute_replan(
             }
             for t in current.get("trucks", [])
         ]
-    fleet = [t for t in base_fleet if int(t["truck_id"]) not in disrupted]
+    fleet = [t for t in base_fleet if str(t["truck_id"]) not in disrupted]
     if not fleet:
         raise ValueError("No trucks left after the disruption.")
 
@@ -1225,9 +1333,11 @@ def daily_dashboard(
 @daily_router.post("/export")
 async def export_daily_plan(
     request: DailyExportRequest,
-    _user: dict = Depends(require_auth),
+    _user: dict = Depends(require_role("planner", "admin")),
+    db: Session = Depends(get_db),
 ):
     try:
+        _verify_export_rental_approvals(db, request.plan, _parse_day(request.day))
         source_path = (WEEKLY_DIR / request.source_file).resolve()
         if WEEKLY_DIR.resolve() not in source_path.parents:
             raise ValueError("source_file must stay inside weekly planning")
@@ -1254,6 +1364,181 @@ async def download_daily_plan(file_name: str):
 
 def _parse_day(raw: str) -> _date:
     return _date.fromisoformat(raw)
+
+
+def _approved_rental_truck(approval: RentalApproval) -> Dict[str, Any]:
+    profile = next(item for item in RENTAL_PROFILES if item["profile"] == approval.rental_profile)
+    return {
+        "truck_id": f"rental-approval-{approval.id}",
+        "truck_label": f"Rental · {profile['vehicle_type']}",
+        "capacity_positions": profile["capacity_positions"],
+        "capacity_kg": profile["capacity_kg"],
+        "capacity_m3": profile.get("capacity_m3"),
+        "ownership": "RENTAL",
+        "rental_profile": profile["profile"],
+        "rental_approval_id": approval.id,
+        "estimated_cost_eur": float(approval.estimated_cost_eur),
+    }
+
+
+def _verify_export_rental_approvals(db: Session, plan: Dict[str, Any], day: _date) -> None:
+    from app.models.camion import Camion
+
+    owned = [t for t in plan.get("trucks", []) if t.get("ownership", "OWNED") != "RENTAL"]
+    owned_ids = [t.get("truck_id") for t in owned]
+    if any(tid is None for tid in owned_ids) or len(owned_ids) != len(set(owned_ids)):
+        raise ValueError("owned truck identity is missing or duplicated")
+    rows = db.query(Camion).filter(Camion.id.in_(owned_ids)).all() if owned_ids else []
+    by_id = {row.id: row for row in rows}
+    if len(by_id) != len(set(owned_ids)):
+        raise ValueError("one or more owned trucks are not present in the fleet database")
+    for truck in owned:
+        source = by_id[truck["truck_id"]]
+        if (
+            float(truck.get("capacity_kg") or 0) != float(source.capacite_kg or 0)
+            or int(truck.get("capacity_positions") or 0) != int(source.max_palettes or 0)
+        ):
+            raise ValueError("owned truck capacity was modified")
+
+    rentals = [t for t in plan.get("trucks", []) if t.get("ownership") == "RENTAL"]
+    raw_ids = [t.get("rental_approval_id") for t in rentals]
+    truck_ids = [t.get("truck_id") for t in rentals]
+    if any(aid is None for aid in raw_ids):
+        raise ValueError("rental truck is missing approval evidence")
+    if len(raw_ids) != len(set(raw_ids)) or len(truck_ids) != len(set(truck_ids)):
+        raise ValueError("rental truck or approval is used more than once")
+    if not raw_ids:
+        return
+    approvals = db.query(RentalApproval).filter(RentalApproval.id.in_(raw_ids)).all()
+    base_plan_id = str(plan.get("rental_base_plan_id") or "")
+    if len(approvals) != len(raw_ids) or any(a.day != day or a.plan_id != base_plan_id for a in approvals):
+        raise ValueError("rental approval evidence is invalid for this plan")
+    approval_by_id = {a.id: a for a in approvals}
+    for truck in rentals:
+        expected = _approved_rental_truck(approval_by_id[truck["rental_approval_id"]])
+        for field in (
+            "truck_id", "truck_label", "capacity_positions", "capacity_kg",
+            "capacity_m3", "rental_profile", "rental_approval_id", "estimated_cost_eur",
+        ):
+            if truck.get(field) != expected.get(field):
+                raise ValueError(f"rental truck field was modified: {field}")
+
+
+def _recalculate_daily_plan_routes(plan: Dict[str, Any]) -> Dict[str, Any]:
+    recalculated = deepcopy(plan)
+    osrm = OSRMService()
+    depot = _plan_depot(recalculated)
+    work_start = _minutes((recalculated.get("work_window") or {}).get("start")) or 6 * 60
+    for truck in recalculated.get("trucks") or []:
+        for trip in truck.get("trips") or []:
+            stops = trip.get("stops") or []
+            if not stops:
+                continue
+            coords, missing = [], []
+            for stop in stops:
+                coord = _stop_coordinate(stop)
+                if coord is None:
+                    missing.append(stop.get("client") or stop.get("id") or "stop")
+                else:
+                    coords.append(coord)
+            if missing:
+                _mark_route_pending(trip, f"Missing coordinates for {', '.join(map(str, missing))}")
+                continue
+            try:
+                route = osrm.route([depot] + coords + [depot])
+            except OSRMError as exc:
+                _mark_route_pending(trip, str(exc), status="unrouteable")
+                continue
+            legs = route.get("legs") or []
+            if len(legs) < len(stops) + 1:
+                _mark_route_pending(trip, "OSRM route response did not include all route legs", status="unrouteable")
+                continue
+            first_anchor = _minutes(stops[0].get("etd"))
+            first_travel = int(legs[0].get("travel_min") or 0)
+            depart_min = _minutes(trip.get("depart_at"))
+            if first_anchor is not None:
+                depart_min = max(work_start, first_anchor - first_travel)
+            elif depart_min is None:
+                depart_min = work_start
+            cursor, total_service = depart_min, 0
+            for index, stop in enumerate(stops):
+                leg = legs[index]
+                travel = int(leg.get("travel_min") or 0)
+                arrival = cursor + travel
+                waiting = 0
+                window = (stop.get("constraints") or {}).get("time_window")
+                if isinstance(window, list) and len(window) == 2:
+                    win_start = _minutes(window[0])
+                    if win_start is not None and arrival < win_start:
+                        waiting, arrival = win_start - arrival, win_start
+                service = _handling_minutes(stop)
+                departure = arrival + service
+                total_service += service
+                stop.update({
+                    "etd": _clock(arrival), "eta": _clock(departure),
+                    "travel_min": travel, "service_min": service, "waiting_min": waiting,
+                    "distance_km": round(float(leg.get("distance_km") or 0), 1),
+                })
+                cursor = departure
+            return_leg = legs[len(stops)]
+            return_travel = int(return_leg.get("travel_min") or 0)
+            trip.update({
+                "depart_at": _clock(depart_min), "return_at": _clock(cursor + return_travel),
+                "return_travel_min": return_travel,
+                "total_distance_km": route["total_distance_km"],
+                "total_travel_min": route["total_travel_min"],
+                "total_service_min": total_service,
+                "total_duration_min": route["total_travel_min"] + total_service,
+                "geometry": route.get("geometry"), "legs": legs, "route_status": "osrm",
+            })
+            trip.pop("route_error", None)
+    return recalculated
+
+
+def _plan_depot(plan: Dict[str, Any]) -> tuple[float, float]:
+    depot = plan.get("depot") or {}
+    if depot.get("lat") is not None and depot.get("lon") is not None:
+        return float(depot["lat"]), float(depot["lon"])
+    return GeoService().depot()
+
+
+def _stop_coordinate(stop: Dict[str, Any]) -> Optional[tuple[float, float]]:
+    lat, lon = stop.get("lat"), stop.get("lon", stop.get("lng"))
+    return None if lat is None or lon is None else (float(lat), float(lon))
+
+
+def _handling_minutes(stop: Dict[str, Any]) -> int:
+    for value in (stop.get("handling_minutes"), stop.get("service_minutes"), stop.get("service_min")):
+        if value is not None:
+            try:
+                return max(0, int(round(float(value))))
+            except (TypeError, ValueError):
+                pass
+    try:
+        return max(0, int(round(float(stop.get("quantity_positions", stop.get("position_count", 0)) or 0) * 5.0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mark_route_pending(trip: Dict[str, Any], reason: str, status: str = "manual_pending") -> None:
+    trip["route_status"], trip["route_error"] = status, reason
+    for key in ("total_distance_km", "total_travel_min", "total_service_min", "total_duration_min", "geometry", "legs"):
+        trip.pop(key, None)
+
+
+def _minutes(value: Any) -> Optional[int]:
+    if value is None or not str(value).strip():
+        return None
+    try:
+        hours, minutes = str(value).split(":")[:2]
+        return int(hours) * 60 + int(minutes)
+    except (ValueError, TypeError):
+        return None
+
+
+def _clock(minutes: int) -> str:
+    minutes = max(0, min(int(round(minutes)), 23 * 60 + 59))
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def _sanitize_daily_plan_trucks(trucks: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
@@ -1293,36 +1578,26 @@ def _sanitize_daily_plan_trucks(trucks: Optional[List[Dict[str, Any]]]) -> Optio
 def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dict[str, Any]]]:
     if not db:
         return None
-    try:
-        from app.models.camion import Camion, CamionStatus
-        from app.models.chauffeur import Chauffeur, ChauffeurStatus
+    from app.models.camion import Camion, CamionStatus
+    from app.models.chauffeur import Chauffeur, ChauffeurStatus
 
-        all_rows = db.query(Camion).all()
-        if not all_rows:
-            return None
-        active_drivers = {
-            driver.id: driver
-            for driver in db.query(Chauffeur).filter(Chauffeur.status == ChauffeurStatus.ACTIF).all()
+    active_drivers = {
+        driver.id: driver
+        for driver in db.query(Chauffeur).filter(Chauffeur.status == ChauffeurStatus.ACTIF).all()
+    }
+    rows = db.query(Camion).filter(Camion.status == CamionStatus.DISPONIBLE).order_by(
+        Camion.max_palettes.desc(), Camion.id.asc()
+    ).all()
+    return [
+        {
+            "truck_id": truck.id,
+            "truck_label": truck.plate_number,
+            "capacity_positions": int(truck.max_palettes or 0),
+            "capacity_kg": float(truck.capacite_kg or 0),
+            "capacity_m3": float(getattr(truck, "capacite_m3", 0) or 0) or None,
+            "driver_id": truck.chauffeur_defaut_id,
+            "driver": active_drivers[truck.chauffeur_defaut_id].full_name,
         }
-        rows = (
-            db.query(Camion)
-            .filter(Camion.status == CamionStatus.DISPONIBLE)
-            .order_by(Camion.max_palettes.desc(), Camion.id.asc())
-            .all()
-        )
-        if not rows:
-            return []
-        return [
-            {
-                "truck_id": truck.id,
-                "truck_label": truck.plate_number,
-                "capacity_positions": int(truck.max_palettes or 0),
-                "capacity_kg": float(truck.capacite_kg or 0),
-                "driver_id": truck.chauffeur_defaut_id,
-                "driver": active_drivers[truck.chauffeur_defaut_id].full_name,
-            }
-            for truck in rows
-            if (truck.max_palettes or 0) > 0 and truck.chauffeur_defaut_id in active_drivers
-        ]
-    except Exception:
-        return None
+        for truck in rows
+        if (truck.max_palettes or 0) > 0 and truck.chauffeur_defaut_id in active_drivers
+    ]

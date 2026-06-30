@@ -65,8 +65,8 @@ Aggregated per month.
 ## R4-13 — Fuel Consumption Efficiency
 - **Unit:** mL/T.km
 - **Direction:** lower is better
-- **Target 2025:** 0.14
-- **Bands:** green ≤ 0.16 • yellow 0.16–0.18 • red > 0.18
+- **Target 2025:** 140 mL/T.km (source value 0.14 L/T.km)
+- **Bands:** green ≤ 160 • yellow 160–180 • red > 180 mL/T.km
 
 Inputs:
 - (32) Fuel consumption — `SUM(plan_mission.fuel_consomme_l)`  in litres

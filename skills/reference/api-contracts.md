@@ -157,7 +157,7 @@ Catalog of every backend endpoint. Each row notes which KPI it feeds (consumes /
     },
     {
       "code": "R4-13", "label": "Fuel Consumption Efficiency", "unit": "mL/T.km",
-      "value": 0.15, "target": 0.14, "color": "green", "trend": -0.01,
+      "value": 150, "target": 140, "color": "green", "trend": -10,
       "horizon": "daily"
     },
     {

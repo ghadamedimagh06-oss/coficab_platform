@@ -10,15 +10,18 @@ All formulas match the spec in skill 01 verbatim.
 """
 from __future__ import annotations
 import logging
+import os
 from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 
 from app.models.kpi import KpiDefinition, KpiJournalier, KpiMensuel, KpiStatus
 
 log = logging.getLogger(__name__)
+
+DEFAULT_DIESEL_CO2E_KG_PER_L = 2.68
 
 # KPI catalog ordered as dashboard expects
 KPI_CODES_ORDERED = ["R4-06", "R4-02", "R4-02-PF", "R4-03", "R4-13", "R5-10", "R4-12", "R4"]
@@ -87,6 +90,13 @@ def dashboard_kpi_cards(db: Optional[Session], start: date, end: date) -> list[d
     return cards
 
 
+def fuel_efficiency_ml_per_tkm(fuel_l, tonne_km) -> float | None:
+    """Convert fuel and transport work into the official mL/tonne-km KPI."""
+    if fuel_l is None or tonne_km is None or float(tonne_km) <= 0:
+        return None
+    return round(float(fuel_l) * 1000 / float(tonne_km), 4)
+
+
 def compute_color(kpi_def: KpiDefinition, value: float) -> str:
     if value is None:
         return "grey"
@@ -151,34 +161,230 @@ class KpiService:
             })
         return results
 
-    def get_weekly_delivery_trend(self, weeks: int = 8) -> list[dict]:
-        """Weekly aggregates: total demandes, delivered, on-time."""
+    def get_weekly_delivery_trend(
+        self,
+        weeks: int = 8,
+        ref_date: date | None = None,
+    ) -> list[dict]:
+        """Weekly aggregates using ISO-8601 week years and numbers."""
         from app.models.demande import DemandeLocal, StatutDemande
-        today = date.today()
+        today = ref_date or date.today()
         rows = []
         for w in range(weeks - 1, -1, -1):
             start = today - timedelta(days=today.weekday() + 7 * w)
             end = start + timedelta(days=6)
+            iso_year, iso_week, _ = start.isocalendar()
             q = self.db.query(
                 func.count(DemandeLocal.id).label("total"),
                 func.sum(
-                    func.cast(DemandeLocal.statut == StatutDemande.LIVREE, int)
+                    case(
+                        (DemandeLocal.statut == StatutDemande.LIVREE, 1),
+                        else_=0,
+                    )
                 ).label("delivered"),
                 func.sum(
-                    func.cast(DemandeLocal.livree_a_temps == True, int)
+                    case(
+                        (
+                            and_(
+                                DemandeLocal.statut == StatutDemande.LIVREE,
+                                DemandeLocal.livree_a_temps.is_(True),
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
                 ).label("on_time"),
             ).filter(
                 DemandeLocal.date_livraison >= start,
                 DemandeLocal.date_livraison <= end,
             ).first()
             rows.append({
-                "week": start.strftime("W%W"),
+                "week": f"W{iso_week:02d}",
+                "label": f"W{iso_week:02d}",
+                "period": f"{iso_year}-W{iso_week:02d}",
+                "iso_year": iso_year,
+                "iso_week": iso_week,
                 "date": start.isoformat(),
                 "total": int(q.total or 0),
                 "delivered": int(q.delivered or 0),
                 "on_time": int(q.on_time or 0),
             })
         return rows
+
+    def get_operational_summary(
+        self,
+        start: date,
+        end: date,
+    ) -> dict[str, float | None]:
+        """Return auditable distance and fuel totals for a reporting period."""
+        from app.models.plan import PlanMission, StatutMission
+
+        row = (
+            self.db.query(
+                func.sum(PlanMission.km_parcourus).label("distance_km"),
+                func.sum(PlanMission.fuel_consomme_l).label("fuel_l"),
+                func.sum(
+                    (PlanMission.charge_kg / 1000.0) * PlanMission.km_parcourus
+                ).label("tonne_km"),
+            )
+            .filter(
+                PlanMission.date_mission >= start,
+                PlanMission.date_mission <= end,
+                PlanMission.statut == StatutMission.TERMINEE,
+            )
+            .first()
+        )
+        distance_km = float(row.distance_km or 0) if row else 0.0
+        fuel_l = float(row.fuel_l or 0) if row else 0.0
+        tonne_km = float(row.tonne_km or 0) if row else 0.0
+        return {
+            "distance_travelled_km": round(distance_km, 2),
+            "fuel_consumed_l": round(fuel_l, 2),
+            "tonne_km": round(tonne_km, 2),
+            "fuel_l_per_100km": (
+                round(fuel_l * 100 / distance_km, 4) if distance_km > 0 else None
+            ),
+        }
+
+    def get_carbon_history(
+        self,
+        start: date,
+        end: date,
+        group_by: str = "week",
+        emission_factor: float | None = None,
+    ) -> dict:
+        """Aggregate fuel-based CO2e history without changing OTIF semantics."""
+        from app.models.plan import PlanMission, StatutMission
+
+        if end < start:
+            raise ValueError("end date must be on or after start date")
+        if group_by not in {"day", "week", "month"}:
+            raise ValueError("group_by must be one of: day, week, month")
+        factor = emission_factor
+        if factor is None:
+            factor = float(
+                os.getenv(
+                    "DIESEL_CO2E_KG_PER_L",
+                    str(DEFAULT_DIESEL_CO2E_KG_PER_L),
+                )
+            )
+        if factor <= 0:
+            raise ValueError("emission factor must be greater than zero")
+
+        missions = (
+            self.db.query(
+                PlanMission.date_mission,
+                PlanMission.fuel_consomme_l,
+                PlanMission.km_parcourus,
+                PlanMission.charge_kg,
+            )
+            .filter(
+                PlanMission.date_mission >= start,
+                PlanMission.date_mission <= end,
+                PlanMission.statut == StatutMission.TERMINEE,
+            )
+            .order_by(PlanMission.date_mission)
+            .all()
+        )
+        buckets: dict[date, dict[str, float]] = {}
+        for mission in missions:
+            period_start = self._carbon_period_start(mission.date_mission, group_by)
+            bucket = buckets.setdefault(
+                period_start,
+                {"fuel_l": 0.0, "distance_km": 0.0, "tonne_km": 0.0},
+            )
+            fuel_l = float(mission.fuel_consomme_l or 0)
+            distance_km = float(mission.km_parcourus or 0)
+            charge_t = float(mission.charge_kg or 0) / 1000
+            bucket["fuel_l"] += fuel_l
+            bucket["distance_km"] += distance_km
+            bucket["tonne_km"] += charge_t * distance_km
+
+        history = [
+            self._carbon_bucket_payload(period_start, values, factor, group_by)
+            for period_start, values in sorted(buckets.items())
+        ]
+        totals = {
+            "fuel_l": sum(row["fuel_l"] for row in history),
+            "distance_km": sum(row["distance_km"] for row in history),
+            "tonne_km": sum(row["tonne_km"] for row in history),
+        }
+        summary = self._carbon_values(totals, factor)
+        return {
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "group_by": group_by,
+            "factor": {
+                "kg_co2e_per_l": factor,
+                "source": os.getenv(
+                    "CARBON_FACTOR_SOURCE",
+                    "project default - replace with an approved Coficab source",
+                ),
+                "boundary": os.getenv(
+                    "CARBON_FACTOR_BOUNDARY",
+                    "tank-to-wheel estimate",
+                ),
+                "effective_from": os.getenv(
+                    "CARBON_FACTOR_EFFECTIVE_FROM",
+                    "unversioned",
+                ),
+                "configuration_key": "DIESEL_CO2E_KG_PER_L",
+            },
+            "summary": summary,
+            "history": history,
+        }
+
+    @staticmethod
+    def _carbon_period_start(value: date, group_by: str) -> date:
+        if group_by == "day":
+            return value
+        if group_by == "week":
+            return value - timedelta(days=value.weekday())
+        return value.replace(day=1)
+
+    @classmethod
+    def _carbon_bucket_payload(
+        cls,
+        period_start: date,
+        values: dict[str, float],
+        factor: float,
+        group_by: str,
+    ) -> dict:
+        if group_by == "week":
+            iso_year, iso_week, _ = period_start.isocalendar()
+            period = f"{iso_year}-W{iso_week:02d}"
+            label = f"W{iso_week:02d}"
+        elif group_by == "month":
+            period = period_start.strftime("%Y-%m")
+            label = period
+        else:
+            period = period_start.isoformat()
+            label = period_start.strftime("%d %b")
+        return {
+            "period": period,
+            "label": label,
+            "date": period_start.isoformat(),
+            **cls._carbon_values(values, factor),
+        }
+
+    @staticmethod
+    def _carbon_values(values: dict[str, float], factor: float) -> dict:
+        fuel_l = float(values["fuel_l"])
+        distance_km = float(values["distance_km"])
+        tonne_km = float(values["tonne_km"])
+        emissions = fuel_l * factor
+        return {
+            "fuel_l": round(fuel_l, 2),
+            "distance_km": round(distance_km, 2),
+            "tonne_km": round(tonne_km, 2),
+            "emissions_kg_co2e": round(emissions, 3),
+            "kg_co2e_per_km": (
+                round(emissions / distance_km, 6) if distance_km > 0 else None
+            ),
+            "kg_co2e_per_tonne_km": (
+                round(emissions / tonne_km, 6) if tonne_km > 0 else None
+            ),
+        }
 
     def get_efficiency_distribution(self) -> list[dict]:
         """Distribution of load efficiency across missions in the last 30 days."""
@@ -344,20 +550,25 @@ def _compute_premium_count(db: Session, start: date, end: date) -> float | None:
 
 
 def _compute_fuel_efficiency(db: Session, start: date, end: date) -> float | None:
-    from app.models.plan import PlanMission
+    from app.models.plan import PlanMission, StatutMission
     row = (
         db.query(
             func.sum(PlanMission.fuel_consomme_l).label("fuel"),
-            func.sum(PlanMission.charge_kg).label("kg"),
-            func.sum(PlanMission.km_parcourus).label("km"),
+            func.sum(
+                (PlanMission.charge_kg / 1000.0) * PlanMission.km_parcourus
+            ).label("tonne_km"),
         )
-        .filter(PlanMission.date_mission >= start, PlanMission.date_mission <= end)
+        .filter(
+            PlanMission.date_mission >= start,
+            PlanMission.date_mission <= end,
+            PlanMission.statut == StatutMission.TERMINEE,
+        )
         .first()
     )
-    if not row or not row.fuel or not row.kg or not row.km:
+    if not row or not row.fuel or not row.tonne_km:
         return None
     # mL / T.km  →  (litres × 1000) / (tonnes × km)
-    return round(float(row.fuel) * 1000 / (float(row.kg) / 1000 * float(row.km)), 4)
+    return fuel_efficiency_ml_per_tkm(row.fuel, row.tonne_km)
 
 
 def _compute_logistics_cost(db: Session, start: date, end: date) -> float | None:

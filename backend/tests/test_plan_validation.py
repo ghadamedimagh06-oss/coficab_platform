@@ -13,7 +13,7 @@ def _seed_kpi_definitions(db):
     db.add_all(
         [
             KpiDefinition(code="R4-02", nom="OTD", unite="%", frequence=KpiFrequence.monthly, direction=KpiDirection.UP, green_min=94, yellow_min=92),
-            KpiDefinition(code="R4-13", nom="Fuel", unite="mL/T.km", frequence=KpiFrequence.monthly, direction=KpiDirection.DOWN, green_max=0.16, yellow_max=0.18),
+            KpiDefinition(code="R4-13", nom="Fuel", unite="mL/T.km", frequence=KpiFrequence.monthly, direction=KpiDirection.DOWN, green_max=160, yellow_max=180),
             KpiDefinition(code="R4", nom="Load", unite="%", frequence=KpiFrequence.daily, direction=KpiDirection.UP, green_min=80, yellow_min=70),
             KpiDefinition(code="R4-02-PF", nom="Premium", unite="EUR", frequence=KpiFrequence.monthly, direction=KpiDirection.DOWN, green_max=2500, yellow_max=3500),
         ]

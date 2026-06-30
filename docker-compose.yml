@@ -41,6 +41,14 @@ services:
       REDIS_PORT: 6379
       BACKEND_API_URL: http://backend:8000
       WEEKLY_PLANNING_FILE_PATH: "/weekly planning/Weekly Delivery planning W0526.xlsx"
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+      OSRM_PROFILE: driving
+      APP_ENV: ${APP_ENV:-development}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-0}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      TFM_INGEST_API_KEY: ${TFM_INGEST_API_KEY:-}
+      DIESEL_CO2E_KG_PER_L: ${DIESEL_CO2E_KG_PER_L:-2.68}
+      CARBON_FACTOR_SOURCE: ${CARBON_FACTOR_SOURCE:-project default - replace before official reporting}
     ports:
       - "8000:8000"
     depends_on:
@@ -78,6 +86,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BACKEND_URL: http://backend:8000
+      TFM_API_URL: ${TFM_API_URL:-}
+      TFM_INGEST_API_KEY: ${TFM_INGEST_API_KEY:-}
     depends_on:
       - redis
       - backend
@@ -152,6 +162,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BACKEND_URL: http://backend:8000
+      TFM_API_URL: ${TFM_API_URL:-}
+      TFM_INGEST_API_KEY: ${TFM_INGEST_API_KEY:-}
     depends_on:
       - redis
       - backend

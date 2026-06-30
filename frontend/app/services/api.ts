@@ -112,8 +112,20 @@ export async function getSourceStatus() {
   return get('/api/data/source-status');
 }
 
+export async function getCarbonHistory(groupBy: 'day' | 'week' | 'month' = 'week') {
+  return get(`/api/metrics/carbon/history?group_by=${encodeURIComponent(groupBy)}`);
+}
+
 export async function getLiveTracking() {
   return get('/api/tracking/live');
+}
+
+export async function runTrackingSimulation(missionId: number | string, delayMinutes = 25) {
+  return post('/api/tracking/simulation/run', {
+    mission_id: Number(missionId),
+    progress_pct: 55,
+    delay_minutes: delayMinutes,
+  });
 }
 
 export async function getTransports() {
@@ -143,6 +155,26 @@ export async function getFleetDrivers() {
   return get('/api/fleet/drivers');
 }
 
+export async function createFleetDriver(payload: any) {
+  return post('/api/fleet/drivers', payload);
+}
+
+export async function updateFleetDriver(driverId: number | string, payload: any) {
+  return patch(`/api/fleet/drivers/${driverId}`, payload);
+}
+
+export async function deleteFleetDriver(driverId: number | string) {
+  return request(`/api/fleet/drivers/${driverId}`, { method: 'DELETE' });
+}
+
+export async function createFleetTruck(payload: any) {
+  return post('/api/fleet/trucks', payload);
+}
+
+export async function deleteFleetTruck(truckId: number | string) {
+  return request(`/api/fleet/trucks/${truckId}`, { method: 'DELETE' });
+}
+
 export async function updateTruckStatus(truckId: number | string, status: string) {
   return patch(`/api/fleet/trucks/${truckId}/status`, { status });
 }
@@ -163,11 +195,19 @@ export async function generatePlanning(payload: any) {
   return post('/api/optimization/planning/generate', payload);
 }
 
-export async function generateDailyPlan(day: string, sourceFile?: string, trucks?: any[]) {
+export async function generateDailyPlan(
+  day: string,
+  sourceFile?: string,
+  trucks?: any[],
+  rentalApprovalIds: number[] = [],
+  rentalBasePlanId?: string,
+) {
   return post('/api/planning/daily/generate', {
     day,
     source_file: sourceFile,
     trucks,
+    rental_approval_ids: rentalApprovalIds,
+    rental_base_plan_id: rentalBasePlanId,
   });
 }
 
@@ -250,6 +290,14 @@ export async function getControlTower(
     delays: delays || [],
     objective: objective || 'balanced',
   });
+}
+
+export async function approveDailyRental(payload: any) {
+  return post('/api/planning/daily/rentals/approve', payload);
+}
+
+export async function recalculateDailyPlan(plan: any) {
+  return post('/api/planning/daily/recalculate', { plan });
 }
 
 export async function exportDailyPlan(payload: any) {

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.kpi import KpiDefinition
 from app.models.plan import MissionDemande, ModeMission, PlanMission, PlanVersion, PlanningChangeLog, StatutPlan
 from app.services.dispatch_service import DispatchService
-from app.services.kpi_service import compute_color
+from app.services.kpi_service import compute_color, fuel_efficiency_ml_per_tkm
 
 
 class PlanValidationService:
@@ -275,8 +275,8 @@ class PlanValidationService:
     @staticmethod
     def _expected_fuel(missions) -> float:
         fuel = sum(float(m.fuel_consomme_l or 0) for m in missions)
-        kg = sum(float(m.charge_kg or 0) for m in missions)
-        km = sum(float(m.km_parcourus or 0) for m in missions)
-        if not fuel or not kg or not km:
-            return 0.0
-        return round(fuel * 1000 / ((kg / 1000) * km), 4)
+        tonne_km = sum(
+            (float(m.charge_kg or 0) / 1000) * float(m.km_parcourus or 0)
+            for m in missions
+        )
+        return fuel_efficiency_ml_per_tkm(fuel, tonne_km) or 0.0

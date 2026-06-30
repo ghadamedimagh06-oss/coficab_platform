@@ -279,19 +279,28 @@ def test_no_trip_exceeds_truck_capacity_or_working_hours():
                     f"returns after midnight ({trip['return_at']})"
                 )
 
-        # The hired truck (id 999) is a last resort: it must never carry load
-        # while an owned truck of equal-or-greater capacity sits completely idle.
-        rented = by_id.get(999)
-        if rented and rented["trips"]:
-            idle_owned = [
-                t for t in plan["trucks"]
-                if t["truck_id"] != 999 and not t["trips"]
-                and t["capacity_positions"] >= rented["capacity_positions"]
-            ]
-            assert not idle_owned, (
-                f"{day}: rented truck used while owned truck(s) "
-                f"{[t['truck_id'] for t in idle_owned]} of equal capacity sat idle"
-            )
+        # Rentals are recommendations only and never enter an initial plan.
+        assert all(t.get("ownership") != "RENTAL" for t in by_id.values())
+
+
+def test_rental_recommendations_choose_smallest_viable_profile_and_require_approval():
+    recommendations = DailyPlanBuilder._rental_recommendations(
+        [
+            {"id": "small", "quantity_positions": 5, "quantity_kg": 1200, "unassigned_reason": "Exceeds working hours"},
+            {"id": "heavy", "quantity_positions": 10, "quantity_kg": 8000, "unassigned_reason": "No available trucks"},
+            {"id": "semi", "quantity_positions": 20, "quantity_kg": 18000, "unassigned_reason": "No available trucks"},
+            {"id": "unknown", "quantity_positions": 4, "quantity_kg": 500, "unassigned_reason": "Could not locate client"},
+        ]
+    )
+
+    by_profile = {item["profile"]: item for item in recommendations}
+    assert set(by_profile) == {"LIGHT_5_PALLET", "HEAVY_TRUCK", "SEMI_TRAILER"}
+    assert by_profile["LIGHT_5_PALLET"]["delivery_ids"] == ["small"]
+    assert by_profile["HEAVY_TRUCK"]["delivery_ids"] == ["heavy"]
+    assert by_profile["SEMI_TRAILER"]["delivery_ids"] == ["semi"]
+    assert all(item["approval_required"] is True for item in recommendations)
+    assert all(item["status"] == "PROPOSED" for item in recommendations)
+    assert all(item["truck"]["ownership"] == "RENTAL" for item in recommendations)
 
 
 def test_export_round_trip_preserves_source_and_writes_edited_rows(tmp_path):

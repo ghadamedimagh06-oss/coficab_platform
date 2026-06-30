@@ -1,6 +1,6 @@
 """Metrics/KPI endpoints — reads from Coficab ERD via KpiService."""
-from datetime import date
-from typing import Optional
+from datetime import date, timedelta
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -67,6 +67,7 @@ def _live_plan_kpis(ref_date: Optional[date]) -> dict:
 @router.get("/kpi")
 async def get_kpi(
     ref_date: Optional[date] = Query(None, description="Reference date (default: today)"),
+    period: Literal["day", "week", "month", "year"] = Query("month"),
     _user: dict = Depends(get_current_user),
     db: Optional[Session] = Depends(get_db_optional),
 ):
@@ -77,12 +78,37 @@ async def get_kpi(
     cards are always real and consistent across the app. The `source` field says
     which path produced the numbers.
     """
+    effective_date = ref_date or date.today()
+    if period == "day":
+        operational_start = effective_date
+    elif period == "week":
+        operational_start = effective_date - timedelta(days=effective_date.weekday())
+    elif period == "year":
+        operational_start = effective_date.replace(month=1, day=1)
+    else:
+        operational_start = effective_date.replace(day=1)
+    period_payload = {
+        "kind": period,
+        "from": operational_start.isoformat(),
+        "to": effective_date.isoformat(),
+    }
     if db:
         svc = KpiService(db)
         kpis = svc.get_dashboard_kpis(ref_date)
-        if kpis:
-            return {"kpis": kpis, "source": "snapshots"}
-    return _live_plan_kpis(ref_date)
+        if any(item.get("value") is not None for item in kpis):
+            return {
+                "kpis": kpis,
+                "operational": svc.get_operational_summary(operational_start, effective_date),
+                "period": period_payload,
+                "source": "snapshots",
+            }
+    fallback = _live_plan_kpis(ref_date)
+    fallback["operational"] = (
+        KpiService(db).get_operational_summary(operational_start, effective_date)
+        if db else {}
+    )
+    fallback["period"] = period_payload
+    return fallback
 
 
 @router.get("/kpi/snapshot/daily")
@@ -225,6 +251,27 @@ async def get_efficiency_distribution(
     """Load efficiency distribution across missions in the last 30 days."""
     svc = KpiService(db)
     return {"segments": svc.get_efficiency_distribution()}
+
+
+@router.get("/carbon/history")
+async def get_carbon_history(
+    from_date: Optional[date] = Query(None, alias="from"),
+    to_date: Optional[date] = Query(None, alias="to"),
+    group_by: Literal["day", "week", "month"] = Query("week"),
+    _user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fuel-derived carbon history with an explicit configurable factor."""
+    end = to_date or date.today()
+    start = from_date or (end - timedelta(days=365))
+    if end < start:
+        raise HTTPException(status_code=422, detail="to must be on or after from")
+    if (end - start).days > 3660:
+        raise HTTPException(status_code=422, detail="date range cannot exceed 10 years")
+    try:
+        return KpiService(db).get_carbon_history(start, end, group_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/timeline")

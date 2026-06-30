@@ -47,7 +47,39 @@ DEFAULT_TRUCKS = [
     {"truck_id": 4, "truck_label": "Truck 4", "capacity_positions": 14, "capacity_kg": 9_200, "capacity_m3": 40.0},
     {"truck_id": 5, "truck_label": "Truck 5", "capacity_positions": 24, "capacity_kg": 24_950, "capacity_m3": 90.0},
     {"truck_id": 6, "truck_label": "Truck 6", "capacity_positions": 14, "capacity_kg": 7_650, "capacity_m3": 40.0},
-    {"truck_id": 999, "truck_label": "Rented", "capacity_positions": 24, "capacity_kg": 24_000, "capacity_m3": 85.0},
+]
+
+RENTAL_PROFILES = [
+    {
+        "profile": "LIGHT_5_PALLET",
+        "vehicle_type": "Light / tourist vehicle",
+        "capacity_positions": 5,
+        "capacity_kg": 1_500,
+        "capacity_m3": 15.0,
+        "required_permit": "B",
+        "fixed_cost_eur": 90,
+        "cost_per_km_eur": 0.65,
+    },
+    {
+        "profile": "HEAVY_TRUCK",
+        "vehicle_type": "Heavy truck",
+        "capacity_positions": 14,
+        "capacity_kg": 10_000,
+        "capacity_m3": 40.0,
+        "required_permit": "C",
+        "fixed_cost_eur": 180,
+        "cost_per_km_eur": 1.15,
+    },
+    {
+        "profile": "SEMI_TRAILER",
+        "vehicle_type": "Semi-trailer",
+        "capacity_positions": 24,
+        "capacity_kg": 25_000,
+        "capacity_m3": 90.0,
+        "required_permit": "CE",
+        "fixed_cost_eur": 300,
+        "cost_per_km_eur": 1.55,
+    },
 ]
 
 PRIORITY_WEIGHT = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
@@ -185,12 +217,14 @@ class DailyPlanBuilder:
         geo: Optional[GeoService] = None,
         trucks: Optional[list[dict[str, Any]]] = None,
         cost_config: Optional[CostConfig] = None,
+        osrm: Optional[Any] = None,
     ):
         self.source_dir = source_dir
         self.cfg = cfg or DailyPlanConfig()
         self.geo = geo or GeoService()
         self.truck_templates = DEFAULT_TRUCKS if trucks is None else trucks
         self.cost_config = cost_config or CostConfig()
+        self.osrm = osrm
         # Set transiently by the green CO₂ portfolio to override the makespan
         # coefficient for a single solve (see _build_min_co2).
         self._makespan_override: Optional[int] = None
@@ -342,6 +376,7 @@ class DailyPlanBuilder:
         clean_trucks = [self._clean_truck(t) for t in trucks]
         estimated_cost_tnd = self._cost_breakdown(trucks, unassigned)
         sustainability = self._sustainability(trucks, unassigned, routable, depot)
+        rental_recommendations = self._rental_recommendations(unassigned)
 
         return {
             "plan_id": str(uuid.uuid4()),
@@ -371,6 +406,7 @@ class DailyPlanBuilder:
             "objective": str(self.cfg.objective or "balanced").lower(),
             "trucks": clean_trucks,
             "unassigned": [self._clean_stop(d) for d in unassigned],
+            "rental_recommendations": rental_recommendations,
             "estimated_cost_tnd": estimated_cost_tnd,
             "estimated_co2_kg": sustainability["co2_kg"],
             "sustainability": sustainability,
@@ -591,7 +627,7 @@ class DailyPlanBuilder:
             # heavy surcharge on top.
             for v in range(V):
                 fixed = self.cfg.trip_dispatch_cost + veh_trip[v] * self.cfg.extra_trip_cost
-                if templates[veh_truck[v]].get("truck_id") == self.RENTED_TRUCK_ID:
+                if self._is_rental(templates[veh_truck[v]]):
                     fixed += 20000
                 routing.SetFixedCostOfVehicle(fixed, v)
 
@@ -836,7 +872,7 @@ class DailyPlanBuilder:
         cost_trucks = 0.0
         for t in used:
             cap_p = float(t["capacity_positions"]) or 1.0
-            is_rented = str(t.get("truck_id")) == "999"
+            is_rented = self._is_rental(t)
             cost_trucks += cfg.rental_truck_per_day_tnd if is_rented else cfg.truck_dispatch_fixed_tnd
             for trip in t["trips"]:
                 stops = trip.get("stops", [])
@@ -1275,7 +1311,15 @@ class DailyPlanBuilder:
         # --- preferred: real road distances from OSRM ---------------------
         if self.cfg.use_osrm_road_matrix:
             coords = [depot] + [(d["lat"], d["lon"]) for d in routable]
-            road = self.geo.road_km_matrix(coords)
+            road = None
+            if self.osrm is not None:
+                try:
+                    table = self.osrm.table(coords)
+                    road = [[float(meters) / 1000.0 for meters in row] for row in table.distances_m]
+                except Exception:
+                    road = None
+            if road is None:
+                road = self.geo.road_km_matrix(coords)
             if road is not None:
                 for i, d in enumerate(routable):
                     d["distance_km"] = round(road[0][i + 1], 1)  # depot → client
@@ -1341,14 +1385,13 @@ class DailyPlanBuilder:
         raw = [zone for zone in cluster_zones(latlons, k=k) if zone]
 
         # Largest (heaviest) zone goes to the largest-capacity truck so a big
-        # region needs the fewest trips. The rented truck (id 999) is kept as a
-        # last resort even though it is large, so we never pay for a rental while
-        # an owned truck sits idle. Trucks already holding pins go last.
+        # region needs the fewest trips. Any dispatcher-approved rental is kept
+        # as a last resort, so owned capacity is exhausted first.
         trucks_sorted = sorted(
             trucks,
             key=lambda t: (
                 len(groups[t["truck_id"]]) > 0,
-                t["truck_id"] == self.RENTED_TRUCK_ID,
+                self._is_rental(t),
                 -t["capacity_positions"],
             ),
         )
@@ -1395,9 +1438,6 @@ class DailyPlanBuilder:
     # A forced wait longer than this means it is cheaper (and more realistic)
     # for the truck to drive back to the depot and run a second trip later.
     LONG_WAIT_SPLIT_MIN = 120
-
-    # The hired truck is only used once every owned vehicle is committed.
-    RENTED_TRUCK_ID = 999
 
     def _schedule_truck(
         self, truck: dict[str, Any], items: list[dict[str, Any]], dur_min: list[list[float]]
@@ -1596,7 +1636,7 @@ class DailyPlanBuilder:
             ]
             # Owned before hired, smallest adequate first, then earliest free.
             candidates.sort(key=lambda t: (
-                t["truck_id"] == self.RENTED_TRUCK_ID,
+                self._is_rental(t),
                 t["capacity_positions"],
                 free_at(t, floor),
             ))
@@ -1795,17 +1835,92 @@ class DailyPlanBuilder:
         return {**truck, "trips": []}
 
     @staticmethod
+    def _is_rental(truck: dict[str, Any]) -> bool:
+        return truck.get("ownership") == "RENTAL" or bool(truck.get("rental_profile"))
+
+    @staticmethod
     def _clean_truck(truck: dict[str, Any]) -> dict[str, Any]:
         clean = {
             "truck_id": truck["truck_id"],
             "truck_label": truck["truck_label"],
             "capacity_positions": truck["capacity_positions"],
             "capacity_kg": truck["capacity_kg"],
+            "ownership": truck.get("ownership", "OWNED"),
+            "rental_profile": truck.get("rental_profile"),
+            "rental_approval_id": truck.get("rental_approval_id"),
+            "estimated_cost_eur": truck.get("estimated_cost_eur"),
             "trips": truck["trips"],
         }
         if truck.get("capacity_m3") is not None:
             clean["capacity_m3"] = truck["capacity_m3"]
         return clean
+
+    @staticmethod
+    def _rental_recommendations(unassigned: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Propose, but never auto-approve, the smallest viable rental class."""
+        grouped: dict[str, dict[str, Any]] = {}
+        for delivery in unassigned:
+            reason = str(delivery.get("unassigned_reason") or "")
+            if "Could not locate" in reason or "Export / foreign" in reason:
+                continue
+            positions = float(
+                delivery.get("quantity_positions")
+                or delivery.get("position_count")
+                or 0
+            )
+            weight = float(delivery.get("quantity_kg") or 0)
+            profile = next(
+                (
+                    item for item in RENTAL_PROFILES
+                    if item["capacity_positions"] >= positions
+                    and item["capacity_kg"] >= weight
+                ),
+                None,
+            )
+            if profile is None:
+                continue
+            key = profile["profile"]
+            recommendation = grouped.setdefault(
+                key,
+                {
+                    "id": f"rental-{key.lower()}",
+                    **profile,
+                    "approval_required": True,
+                    "status": "PROPOSED",
+                    "feasibility_status": "REQUIRES_REOPTIMIZATION",
+                    "delivery_ids": [],
+                    "reasons": [],
+                    "estimated_cost_eur": float(profile["fixed_cost_eur"]),
+                    "truck": {
+                        "truck_id": 9001 + RENTAL_PROFILES.index(profile),
+                        "truck_label": f"Rental · {profile['vehicle_type']}",
+                        "capacity_positions": profile["capacity_positions"],
+                        "capacity_kg": profile["capacity_kg"],
+                        "ownership": "RENTAL",
+                        "rental_profile": key,
+                    },
+                },
+            )
+            recommendation["delivery_ids"].append(delivery.get("id"))
+            if reason and reason not in recommendation["reasons"]:
+                recommendation["reasons"].append(reason)
+            one_way_km = float(
+                delivery.get("depot_distance_km")
+                or delivery.get("distance_km")
+                or 0
+            )
+            recommendation["estimated_cost_eur"] += (
+                one_way_km * 2 * float(profile["cost_per_km_eur"])
+            )
+
+        for recommendation in grouped.values():
+            recommendation["estimated_cost_eur"] = round(
+                recommendation["estimated_cost_eur"], 2
+            )
+            recommendation["truck"]["estimated_cost_eur"] = recommendation[
+                "estimated_cost_eur"
+            ]
+        return list(grouped.values())
 
     @staticmethod
     def _clean_stop(delivery: dict[str, Any]) -> dict[str, Any]:
@@ -1962,6 +2077,14 @@ class DailyPlanBuilder:
                 return parsed.hour * 60 + parsed.minute
             except ValueError:
                 pass
+        # Late-return clocks may intentionally exceed 24:00 (for example
+        # 25:14), which datetime.strptime rejects.
+        try:
+            hours, minutes = text.split(":")[:2]
+            if int(hours) >= 0 and 0 <= int(minutes) < 60:
+                return int(hours) * 60 + int(minutes)
+        except (ValueError, TypeError):
+            pass
         try:
             numeric = int(float(text))
             if 0 <= numeric < 24:
