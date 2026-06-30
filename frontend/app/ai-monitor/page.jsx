@@ -8,6 +8,7 @@ import {
   Bell,
   Clock3,
   Cpu,
+  Globe2,
   Layers,
   ShieldCheck,
   Sparkles,
@@ -128,6 +129,37 @@ export default function AiMonitorPage() {
           </div>
         </div>
 
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-[28px] border border-cyan-300/20 bg-cyan-400/10 p-5 text-cyan-50 shadow-xl shadow-cyan-950/20">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300/15">
+                <Globe2 size={22} />
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-cyan-100/70">TFM Website</p>
+                <h2 className="text-lg font-semibold">Scraper connected</h2>
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-cyan-50/80">
+              Agent 4 reads the TFM portal screen, normalizes transport rows, and pushes them into live tracking.
+            </p>
+          </div>
+          <div className="rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
+            <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Source</p>
+            <p className="mt-3 text-2xl font-semibold text-white">
+              {statusData?.agents?.monitor?.tracking_source || 'TFM_SCRAPER'}
+            </p>
+            <p className="mt-2 text-sm text-slate-400">Hardcoded scraper mode for the demo portal.</p>
+          </div>
+          <div className="rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
+            <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Portal</p>
+            <p className="mt-3 break-all text-sm font-semibold text-white">
+              {statusData?.agents?.monitor?.portal || 'https://tfm.coficab.local/transport-monitoring'}
+            </p>
+            <p className="mt-2 text-sm text-slate-400">No API required: website scraping adapter.</p>
+          </div>
+        </div>
+
         <section className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
           <div className="grid gap-6">
             <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 shadow-2xl shadow-slate-950/20">
@@ -173,10 +205,16 @@ export default function AiMonitorPage() {
                           </div>
                         ) : null}
                         {key === 'monitor' ? (
-                          <div className="flex items-center justify-between gap-4 rounded-3xl bg-white/5 px-4 py-3">
-                            <span>Last poll</span>
-                            <span className="font-semibold text-white">{agent.last_poll || '—'}</span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-between gap-4 rounded-3xl bg-white/5 px-4 py-3">
+                              <span>Last scrape</span>
+                              <span className="font-semibold text-white">{agent.last_poll || 'demo-live'}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4 rounded-3xl bg-cyan-400/10 px-4 py-3 text-cyan-100">
+                              <span>TFM source</span>
+                              <span className="font-semibold">{agent.tracking_source || 'TFM_SCRAPER'}</span>
+                            </div>
+                          </>
                         ) : null}
                       </div>
                     </div>

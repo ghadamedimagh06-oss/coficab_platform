@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { CalendarDays, RefreshCcw, Route } from 'lucide-react';
-import { generateDailyPlan, getLiveTracking, runTrackingSimulation } from '../services/api';
+import { generateDailyPlan, getLiveTracking } from '../services/api';
 import ChatPanel from '../../components/chat/ChatPanel';
 import StatCard from '../../components/cards/StatCard';
 import IconBubble from '../../components/icons/IconBubble';
@@ -41,8 +41,8 @@ export default function MapPage() {
   const [status, setStatus] = useState('loading');
   const [selectedTruckId, setSelectedTruckId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [activeMissions, setActiveMissions] = useState([]);
-  const [simulationStatus, setSimulationStatus] = useState('');
+  const [liveTracking, setLiveTracking] = useState({ tracking_data: [], source: 'TFM_SCRAPER' });
+  const [tfmStatus, setTfmStatus] = useState('');
 
   async function load(nextDay) {
     setStatus('loading');
@@ -62,31 +62,31 @@ export default function MapPage() {
     const initial = todayIso();
     setDay(initial);
     load(initial);
-    getLiveTracking()
-      .then((live) => setActiveMissions(Array.isArray(live?.simulatable_missions) ? live.simulatable_missions : []))
-      .catch(() => setActiveMissions([]));
+    refreshTfmScrape();
   }, []);
 
-  async function runDelayDemo() {
-    const mission = activeMissions[0];
-    if (!mission) return;
-    setSimulationStatus('running');
+  async function refreshTfmScrape() {
+    setTfmStatus('refreshing');
     try {
-      const result = await runTrackingSimulation(mission.id, 25);
-      setSimulationStatus(result.incident ? 'alert-created' : 'sample-created');
+      const live = await getLiveTracking();
+      const rows = Array.isArray(live?.tracking_data) ? live.tracking_data : [];
+      setLiveTracking(live || { tracking_data: [], source: 'TFM_SCRAPER' });
+      setTfmStatus('ready');
       setMessages((prev) => [
-        `MAP_SIMULATION created for mission ${mission.id}; delay alert ${result.incident ? 'created' : 'already active'}.`,
+        `TFM scraper refreshed: ${rows.length} transport samples from ${live?.source || 'TFM_SCRAPER'}.`,
         ...prev,
       ]);
     } catch {
-      setSimulationStatus('error');
+      setTfmStatus('error');
     }
   }
 
   const stats = useMemo(() => {
     const trucksUsed = (plan?.trucks || []).filter((t) => (t.trips || []).length > 0).length;
-    return { trucksUsed, clients: countStops(plan), unassigned: plan?.unassigned?.length || 0 };
-  }, [plan]);
+    const tfmRows = Array.isArray(liveTracking?.tracking_data) ? liveTracking.tracking_data : [];
+    const delayed = tfmRows.filter((row) => Number(row.delay_minutes || 0) > 10 || row.status === 'delayed').length;
+    return { trucksUsed, clients: countStops(plan), unassigned: plan?.unassigned?.length || 0, tfmRows: tfmRows.length, delayed };
+  }, [plan, liveTracking]);
 
   return (
     <div className="p-8 min-h-screen bg-canvas">
@@ -130,10 +130,12 @@ export default function MapPage() {
 
         <motion.div variants={container} className="grid gap-6 xl:grid-cols-[1.5fr_0.9fr]">
           <section className="space-y-6">
-            <motion.div variants={item} className="grid gap-6 sm:grid-cols-3">
+            <motion.div variants={item} className="grid gap-6 sm:grid-cols-5">
               <StatCard title="Trucks routed" value={status === 'loading' ? '—' : stats.trucksUsed} hint="Vehicles on the road today" icon={<IconBubble kind="truck" />} />
               <StatCard title="Clients" value={status === 'loading' ? '—' : stats.clients} hint="Delivery stops planned" icon={<IconBubble kind="chart" />} />
               <StatCard title="Unassigned" value={status === 'loading' ? '—' : stats.unassigned} hint="Need dispatcher review" icon={<IconBubble kind="bolt" />} />
+              <StatCard title="TFM samples" value={stats.tfmRows} hint="Scraped from TFM website" icon={<IconBubble kind="spark" />} />
+              <StatCard title="TFM delays" value={stats.delayed} hint="Detected by scraper" icon={<IconBubble kind="bolt" />} />
             </motion.div>
 
             <motion.div variants={item}>
@@ -159,18 +161,41 @@ export default function MapPage() {
               <p className="mt-4 text-xs leading-5 text-[#9e9aa4]">Click a truck chip or its route to trace that vehicle’s ordered stops. Routes follow the real road network via OSRM.</p>
             </div>
 
-            <div className="rounded-[2rem] border border-amber-300 bg-amber-50 p-6 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Demo source: MAP_SIMULATION</p>
-              <p className="mt-2 text-sm text-amber-950">Create a deterministic 25-minute delay on the first active mission, clearly separated from TFM telemetry.</p>
+            <div className="rounded-[2rem] border border-cyan-300 bg-cyan-50 p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">TFM website scraper</p>
+              <p className="mt-2 text-sm text-cyan-950">
+                Hardcoded scraper mode: transport rows are treated as if Agent 4 extracted them from the TFM portal screen.
+              </p>
+              <div className="mt-4 rounded-2xl bg-white/80 p-4 text-sm text-cyan-950">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Source</span>
+                  <span className="font-semibold">{liveTracking?.source || 'TFM_SCRAPER'}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span>Portal</span>
+                  <span className="text-right text-xs font-semibold">tfm.coficab.local</span>
+                </div>
+              </div>
               <button
                 type="button"
-                disabled={!activeMissions.length || simulationStatus === 'running'}
-                onClick={runDelayDemo}
-                className="mt-4 w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-40"
+                disabled={tfmStatus === 'refreshing'}
+                onClick={refreshTfmScrape}
+                className="mt-4 w-full rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
               >
-                {simulationStatus === 'running' ? 'Running simulation…' : 'Simulate 25-minute delay'}
+                {tfmStatus === 'refreshing' ? 'Refreshing scraper...' : 'Refresh TFM scrape'}
               </button>
-              {simulationStatus && simulationStatus !== 'running' && <p className="mt-2 text-xs text-amber-800">Status: {simulationStatus}</p>}
+              {tfmStatus && tfmStatus !== 'refreshing' && <p className="mt-2 text-xs text-cyan-800">Status: {tfmStatus}</p>}
+              <div className="mt-4 space-y-2">
+                {(liveTracking?.tracking_data || []).slice(0, 3).map((row) => (
+                  <div key={row.transport_id} className="rounded-xl bg-white px-3 py-2 text-xs text-cyan-950">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold">{row.transport_id}</span>
+                      <span>{row.status}</span>
+                    </div>
+                    <div className="mt-1 text-cyan-800">{Number(row.delay_minutes || 0)} min delay</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <ChatPanel

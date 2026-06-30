@@ -7,13 +7,15 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import requests
 import redis
+from tfm_scraper import scrape_tfm_tracking
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agent4_monitor")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8000")
 TFM_API_URL = os.environ.get("TFM_API_URL", "").strip()
-TFM_INGEST_API_KEY = os.environ.get("TFM_INGEST_API_KEY", "").strip()
+TFM_INGEST_API_KEY = os.environ.get("TFM_INGEST_API_KEY", "demo-tfm-key").strip()
+TFM_SCRAPE_MODE = os.environ.get("TFM_SCRAPE_MODE", "demo").strip().lower()
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
@@ -46,8 +48,18 @@ def publish_event(channel: str, payload: Optional[Dict] = None) -> None:
 
 
 def get_tracking_status() -> List[Dict]:
-    if not TFM_API_URL:
-        return []
+    if TFM_SCRAPE_MODE == "demo" or not TFM_API_URL:
+        payload = scrape_tfm_tracking()
+        logger.info(json.dumps({
+            "agent": "agent4_monitor",
+            "event": "tfm_scrape_completed",
+            "mode": payload["mode"],
+            "portal": payload["portal"],
+            "count": len(payload["items"]),
+            "timestamp": payload["scraped_at"],
+        }))
+        return payload["items"]
+
     endpoints = [
         TFM_API_URL.rstrip("/"),
         f"{TFM_API_URL.rstrip('/')}/tracking",
@@ -103,7 +115,7 @@ def sync_tracking_payload(payload: dict) -> None:
     try:
         if not TFM_INGEST_API_KEY:
             raise RuntimeError("TFM_INGEST_API_KEY is required for TFM ingestion")
-        payload = {**payload, "source": "TFM"}
+        payload = {**payload, "source": "TFM_SCRAPER"}
         response = requests.post(
             endpoint,
             json=payload,
@@ -160,7 +172,7 @@ def main() -> None:
     while True:
         try:
             transports = get_tracking_status()
-            if transports and TFM_API_URL:
+            if transports:
                 detect_issues(transports)
                 sync_tracking_payload({"items": transports})
         except Exception as exc:

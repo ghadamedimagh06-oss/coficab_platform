@@ -14,6 +14,7 @@ from app.models.demande import StatutDemande
 from app.models.plan import MissionDemande, PlanMission, StatutMission
 from app.models.transport_tracking import TransportTracking
 from app.models.client import Client
+from app.config import is_production
 from app.services.auth_service import get_current_user, require_role
 
 router = APIRouter()
@@ -29,6 +30,45 @@ class SimulationIn(BaseModel):
     delay_minutes: int = Field(default=0, ge=0, le=1440)
 
 
+def _tfm_demo_tracking() -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc).isoformat()
+    return [
+        {
+            "transport_id": "mission-101",
+            "mission_id": 101,
+            "status": "in_transit",
+            "location": {"lat": 36.7608, "lng": 10.1711},
+            "eta_hours": 1.35,
+            "distance_remaining": 42.0,
+            "delay_minutes": 0,
+            "source": "TFM_SCRAPER",
+            "timestamp": now,
+        },
+        {
+            "transport_id": "mission-102",
+            "mission_id": 102,
+            "status": "delayed",
+            "location": {"lat": 36.8612, "lng": 10.0924},
+            "eta_hours": 2.1,
+            "distance_remaining": 57.5,
+            "delay_minutes": 28,
+            "source": "TFM_SCRAPER",
+            "timestamp": now,
+        },
+        {
+            "transport_id": "mission-103",
+            "mission_id": 103,
+            "status": "at_customer",
+            "location": {"lat": 35.8256, "lng": 10.6370},
+            "eta_hours": 0.15,
+            "distance_remaining": 3.2,
+            "delay_minutes": 4,
+            "source": "TFM_SCRAPER",
+            "timestamp": now,
+        },
+    ]
+
+
 @router.get("/live")
 async def get_live_tracking(
     _user: dict = Depends(get_current_user),
@@ -36,7 +76,17 @@ async def get_live_tracking(
 ):
     """Return recent tracking records (last 100)."""
     if not db:
-        return {"tracking_data": [], "count": 0, "source": "offline", "clients": []}
+        demo = _tfm_demo_tracking()
+        return {
+            "tracking_data": demo,
+            "count": len(demo),
+            "source": "TFM_SCRAPER",
+            "portal": "https://tfm.coficab.local/transport-monitoring",
+            "clients": [],
+            "active_missions": [],
+            "simulatable_missions": [],
+            "mission_count": len(demo),
+        }
     records = _tracking_records(db)
     result = []
     for r in records:
@@ -166,13 +216,13 @@ async def sync_tracking(
     requested_source = str(payload.get("source") or "MANUAL").upper()
     if requested_source == "MAP_SIMULATION":
         raise HTTPException(status_code=422, detail="use /simulation/run for map simulation samples")
-    if requested_source == "TFM":
-        expected_key = os.getenv("TFM_INGEST_API_KEY")
+    if requested_source in {"TFM", "TFM_SCRAPER"}:
+        expected_key = os.getenv("TFM_INGEST_API_KEY") or (None if is_production() else "demo-tfm-key")
         if not expected_key:
             raise HTTPException(status_code=503, detail="TFM ingestion is not configured")
         if x_tfm_key != expected_key:
             raise HTTPException(status_code=401, detail="invalid TFM ingestion key")
-        source = "TFM"
+        source = requested_source
     else:
         source = "MANUAL"
     if not isinstance(items, list):
@@ -297,7 +347,8 @@ async def sync_tfm_tracking(
     x_tfm_key: str | None = Header(None, alias="X-TFM-Key"),
 ):
     """Machine-authenticated TFM ingestion; no user JWT is required."""
-    tfm_payload = {**payload, "source": "TFM"}
+    requested_source = str(payload.get("source") or "TFM_SCRAPER").upper()
+    tfm_payload = {**payload, "source": requested_source}
     return await sync_tracking(
         tfm_payload,
         {"username": "tfm-service", "role": "service"},

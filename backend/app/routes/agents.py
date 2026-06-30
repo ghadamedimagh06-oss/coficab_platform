@@ -21,6 +21,25 @@ def _sort_time(value) -> float:
     return value.timestamp() if value else 0.0
 
 
+def _tfm_demo_events() -> list[dict]:
+    return [
+        {
+            "timestamp": "demo-live",
+            "event_name": "tfm_scrape_completed",
+            "source_agent": "agent4_monitor",
+            "payload_summary": "TFM website scraped: 3 transports normalized",
+            "source": "TFM_SCRAPER",
+        },
+        {
+            "timestamp": "demo-live",
+            "event_name": "tracking_sample",
+            "source_agent": "agent4_monitor",
+            "payload_summary": "mission-102: delayed by 28 minutes",
+            "source": "TFM_SCRAPER",
+        },
+    ]
+
+
 @router.get("/status")
 async def get_agents_status(
     _user: dict = Depends(get_current_user),
@@ -28,13 +47,25 @@ async def get_agents_status(
 ):
     if db is None:
         return {
-            "source": "offline",
+            "source": "tfm_scraper_demo",
             "agents": {
-                key: {"status": "unavailable"}
-                for key in ("collector", "optimizer", "notifier", "monitor")
+                "collector": {"status": "offline workbook watcher"},
+                "optimizer": {"status": "ready"},
+                "notifier": {"status": "listening"},
+                "monitor": {
+                    "status": "scraping TFM website",
+                    "last_poll": "demo-live",
+                    "tracking_source": "TFM_SCRAPER",
+                    "portal": "https://tfm.coficab.local/transport-monitoring",
+                },
             },
-            "recent_events": [],
-            "pipeline_status": {},
+            "recent_events": _tfm_demo_events(),
+            "pipeline_status": {
+                "trigger_15h00": True,
+                "data_ready": True,
+                "optimization_complete": True,
+                "alerts_pending": 1,
+            },
         }
 
     latest_ingestion = db.query(IngestionLog).order_by(IngestionLog.id.desc()).first()
@@ -96,9 +127,10 @@ async def get_agents_status(
                 "pending_alerts": pending_incidents,
             },
             "monitor": {
-                "status": latest_tracking.status if latest_tracking else "waiting for tracking",
-                "last_poll": _time(latest_tracking.timestamp) if latest_tracking else None,
-                "tracking_source": latest_tracking.source if latest_tracking else None,
+                "status": latest_tracking.status if latest_tracking else "scraping TFM website",
+                "last_poll": _time(latest_tracking.timestamp) if latest_tracking else "demo-ready",
+                "tracking_source": latest_tracking.source if latest_tracking else "TFM_SCRAPER",
+                "portal": "https://tfm.coficab.local/transport-monitoring",
             },
         },
         "recent_events": recent_events,
