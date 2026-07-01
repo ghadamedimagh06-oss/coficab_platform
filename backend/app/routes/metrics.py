@@ -45,7 +45,11 @@ def _live_plan_kpis(ref_date: Optional[date]) -> dict:
     try:
         # routes/metrics.py → parents[3] is the repo root (matches optimization.py).
         weekly_dir = Path(__file__).resolve().parents[3] / "weekly planning"
-        plan = DailyPlanBuilder(weekly_dir, cfg=DailyPlanConfig(prefer_ortools=True)).build(day)
+        # Straight-line matrix (no live OSRM call) keeps this live-KPI fallback
+        # fast — it mirrors the dashboard endpoint, which also skips OSRM here.
+        plan = DailyPlanBuilder(
+            weekly_dir, cfg=DailyPlanConfig(prefer_ortools=True, use_osrm_road_matrix=False)
+        ).build(day)
         kpis = dashboard_service.plan_kpis(plan)
         s = plan.get("sustainability", {})
         if s.get("co2_saved_kg") is not None:

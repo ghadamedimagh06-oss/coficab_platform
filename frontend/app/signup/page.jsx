@@ -6,20 +6,23 @@ import Link from 'next/link';
 import { motion, useAnimationControls } from 'framer-motion';
 import {
   User,
+  Mail,
   Lock,
   AlertCircle,
   Eye,
   EyeOff,
   ArrowRight,
   Loader2,
+  Check,
   Route,
   ShieldCheck,
   Sparkles,
   TrendingUp,
 } from 'lucide-react';
-import { signIn, findAccount, DEMO_ACCOUNT } from '@/lib/auth';
+import { signIn, accountExists, registerAccount } from '@/lib/auth';
 
-// Brand-side talking points. Kept short so the panel reads as a hero, not a wall.
+// Brand-side talking points — shared with the login screen so the two pages
+// read as one product.
 const highlights = [
   { icon: Route, title: 'AI route optimization', desc: 'VRPTW planning that fills every truck.' },
   { icon: TrendingUp, title: 'Live control tower', desc: 'Load efficiency rate, load and fuel KPIs in real time.' },
@@ -51,36 +54,64 @@ const item = {
 const ROUTE_PATH =
   'M 40 -20 C 180 90, 60 210, 240 300 C 360 370, 180 470, 300 560 C 380 620, 300 700, 420 760';
 
-export default function LoginPage() {
+// Live strength read-out for the password field.
+function passwordStrength(pw) {
+  let score = 0;
+  if (pw.length >= 8) score += 1;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score += 1;
+  if (/\d/.test(pw)) score += 1;
+  if (/[^A-Za-z0-9]/.test(pw)) score += 1;
+  return score; // 0..4
+}
+const STRENGTH_LABEL = ['Too short', 'Weak', 'Fair', 'Good', 'Strong'];
+const STRENGTH_COLOR = ['bg-danger', 'bg-danger', 'bg-amber-500', 'bg-emerald-500', 'bg-emerald-500'];
+
+export default function SignUpPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [agree, setAgree] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const shake = useAnimationControls();
+
+  const strength = passwordStrength(password);
+
+  function fail(message) {
+    setSubmitting(false);
+    setError(message);
+    shake.start({ x: [0, -10, 10, -7, 7, -4, 4, 0], transition: { duration: 0.5 } });
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (submitting) return;
     setError('');
     setSubmitting(true);
-    // Validate against the demo account or any account created via sign-up,
-    // with a short delay so the loading state reads as a real round-trip.
+
+    // Short delay so the loading state reads as a real round-trip, matching login.
     setTimeout(() => {
-      const account = findAccount(username, password);
-      if (account) {
-        signIn(account.username, account.role);
-        // Play the branded transition, then enter the platform. The dashboard's
-        // own entrance animations finish the "dynamic reveal in white".
-        setSuccess(true);
-        setTimeout(() => router.push('/dashboard'), 1850);
-      } else {
-        setSubmitting(false);
-        setError('Invalid username or password. Please try again.');
-        shake.start({ x: [0, -10, 10, -7, 7, -4, 4, 0], transition: { duration: 0.5 } });
-      }
+      const name = fullName.trim();
+      const mail = email.trim();
+
+      if (name.length < 2) return fail('Please enter your full name.');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return fail('Please enter a valid email address.');
+      if (password.length < 8) return fail('Password must be at least 8 characters.');
+      if (password !== confirm) return fail('Passwords do not match.');
+      if (!agree) return fail('Please accept the terms to continue.');
+      if (accountExists(name, mail)) return fail('An account with that name or email already exists.');
+
+      registerAccount({ username: name, email: mail, password, role: 'Administrator' });
+
+      // Sign in and play the branded transition, then enter the platform — the
+      // dashboard's own entrance animations finish the reveal.
+      signIn(name, 'Administrator');
+      setSuccess(true);
+      setTimeout(() => router.push('/dashboard'), 1850);
     }, 700);
   }
 
@@ -138,7 +169,6 @@ export default function LoginPage() {
             animate={{ strokeDashoffset: -140 }}
             transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
           />
-          {/* Soft halo + bright core, riding the same path */}
           <circle r="9" fill="rgba(255,255,255,0.25)">
             <animateMotion dur="9s" repeatCount="indefinite" rotate="auto" path={ROUTE_PATH} />
           </circle>
@@ -198,7 +228,7 @@ export default function LoginPage() {
             AI logistics control tower
           </motion.div>
           <motion.h1 variants={item} className="text-4xl font-bold leading-tight tracking-tight">
-            Move every delivery,
+            Get your fleet
             <br />
             <motion.span
               className="bg-clip-text text-transparent"
@@ -210,11 +240,11 @@ export default function LoginPage() {
               animate={{ backgroundPositionX: ['0%', '200%'] }}
               transition={{ duration: 5, repeat: Infinity, ease: 'linear' }}
             >
-              optimized to the last km.
+              moving in minutes.
             </motion.span>
           </motion.h1>
           <motion.p variants={item} className="mt-4 text-sm leading-relaxed text-white/70">
-            Plan, dispatch and track your fleet from one intelligent workspace built for COFICAB operations.
+            Create your workspace to plan, dispatch and track every COFICAB delivery from one intelligent control tower.
           </motion.p>
 
           <div className="mt-10 space-y-2">
@@ -262,7 +292,7 @@ export default function LoginPage() {
       </div>
 
       {/* ────────────────────────────────────────────────────────────
-          Right — sign-in form. */}
+          Right — sign-up form. */}
       <div className="relative flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         {/* Soft glow behind the card, mobile included */}
         <div
@@ -285,15 +315,15 @@ export default function LoginPage() {
             </motion.div>
 
             <motion.div variants={item}>
-              <h2 className="text-3xl font-bold tracking-tight text-ink">Welcome back</h2>
-              <p className="mt-2 text-sm text-muted">Sign in to your control tower to continue.</p>
+              <h2 className="text-3xl font-bold tracking-tight text-ink">Create your account</h2>
+              <p className="mt-2 text-sm text-muted">Set up your control tower in under a minute.</p>
             </motion.div>
 
             <motion.form variants={item} onSubmit={handleSubmit} className="mt-8 space-y-5">
-              {/* Username */}
+              {/* Full name */}
               <motion.div variants={item} className="space-y-1.5">
-                <label htmlFor="username" className="text-sm font-medium text-ink">
-                  Username
+                <label htmlFor="fullName" className="text-sm font-medium text-ink">
+                  Full name
                 </label>
                 <div className="group relative">
                   <User
@@ -301,13 +331,13 @@ export default function LoginPage() {
                     className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted transition-colors group-focus-within:text-brand-600"
                   />
                   <input
-                    id="username"
+                    id="fullName"
                     type="text"
                     required
-                    autoComplete="username"
-                    value={username}
+                    autoComplete="name"
+                    value={fullName}
                     onChange={(e) => {
-                      setUsername(e.target.value);
+                      setFullName(e.target.value);
                       if (error) setError('');
                     }}
                     placeholder="Ghada Medimagh"
@@ -316,16 +346,37 @@ export default function LoginPage() {
                 </div>
               </motion.div>
 
+              {/* Email */}
+              <motion.div variants={item} className="space-y-1.5">
+                <label htmlFor="email" className="text-sm font-medium text-ink">
+                  Work email
+                </label>
+                <div className="group relative">
+                  <Mail
+                    size={18}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted transition-colors group-focus-within:text-brand-600"
+                  />
+                  <input
+                    id="email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (error) setError('');
+                    }}
+                    placeholder="you@coficab.com"
+                    className="w-full rounded-2xl border border-border bg-white py-3 pl-11 pr-4 text-sm text-ink placeholder:text-muted/60 transition-all focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-400/20"
+                  />
+                </div>
+              </motion.div>
+
               {/* Password */}
               <motion.div variants={item} className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="password" className="text-sm font-medium text-ink">
-                    Password
-                  </label>
-                  <a href="#" className="text-xs font-semibold text-brand-600 transition-colors hover:text-brand-800">
-                    Forgot password?
-                  </a>
-                </div>
+                <label htmlFor="password" className="text-sm font-medium text-ink">
+                  Password
+                </label>
                 <div className="group relative">
                   <Lock
                     size={18}
@@ -335,13 +386,13 @@ export default function LoginPage() {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
                       if (error) setError('');
                     }}
-                    placeholder="••••••••"
+                    placeholder="At least 8 characters"
                     className="w-full rounded-2xl border border-border bg-white py-3 pl-11 pr-11 text-sm text-ink placeholder:text-muted/60 transition-all focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-400/20"
                   />
                   <button
@@ -353,16 +404,75 @@ export default function LoginPage() {
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                {/* Strength meter */}
+                {password && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <div className="flex flex-1 gap-1">
+                      {[0, 1, 2, 3].map((i) => (
+                        <span
+                          key={i}
+                          className={`h-1.5 flex-1 rounded-full transition-colors ${
+                            i < strength ? STRENGTH_COLOR[strength] : 'bg-border'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="w-16 text-right text-xs font-medium text-muted">{STRENGTH_LABEL[strength]}</span>
+                  </div>
+                )}
               </motion.div>
 
-              {/* Remember me */}
-              <motion.label variants={item} className="flex cursor-pointer items-center gap-2.5 text-sm text-muted">
+              {/* Confirm password */}
+              <motion.div variants={item} className="space-y-1.5">
+                <label htmlFor="confirm" className="text-sm font-medium text-ink">
+                  Confirm password
+                </label>
+                <div className="group relative">
+                  <Lock
+                    size={18}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted transition-colors group-focus-within:text-brand-600"
+                  />
+                  <input
+                    id="confirm"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="new-password"
+                    value={confirm}
+                    onChange={(e) => {
+                      setConfirm(e.target.value);
+                      if (error) setError('');
+                    }}
+                    placeholder="Re-enter your password"
+                    className="w-full rounded-2xl border border-border bg-white py-3 pl-11 pr-11 text-sm text-ink placeholder:text-muted/60 transition-all focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-400/20"
+                  />
+                  {confirm && password === confirm && (
+                    <Check size={18} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-emerald-500" />
+                  )}
+                </div>
+              </motion.div>
+
+              {/* Terms */}
+              <motion.label variants={item} className="flex cursor-pointer items-start gap-2.5 text-sm text-muted">
                 <input
                   type="checkbox"
-                  defaultChecked
-                  className="h-4 w-4 rounded border-border text-brand-600 accent-brand-600 focus:ring-brand-400/30"
+                  checked={agree}
+                  onChange={(e) => {
+                    setAgree(e.target.checked);
+                    if (error) setError('');
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 accent-brand-600 focus:ring-brand-400/30"
                 />
-                Keep me signed in
+                <span>
+                  I agree to the{' '}
+                  <a href="#" className="font-semibold text-brand-600 transition-colors hover:text-brand-800">
+                    Terms
+                  </a>{' '}
+                  and{' '}
+                  <a href="#" className="font-semibold text-brand-600 transition-colors hover:text-brand-800">
+                    Privacy Policy
+                  </a>
+                  .
+                </span>
               </motion.label>
 
               {/* Error */}
@@ -398,11 +508,11 @@ export default function LoginPage() {
                   {submitting ? (
                     <>
                       <Loader2 size={18} className="animate-spin" />
-                      Signing in…
+                      Creating account…
                     </>
                   ) : (
                     <>
-                      Sign in
+                      Create account
                       <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
                     </>
                   )}
@@ -410,40 +520,10 @@ export default function LoginPage() {
               </motion.button>
             </motion.form>
 
-            {/* Divider */}
-            <motion.div variants={item} className="my-6 flex items-center gap-4">
-              <span className="h-px flex-1 bg-border" />
-              <span className="text-xs font-medium text-muted">or continue with</span>
-              <span className="h-px flex-1 bg-border" />
-            </motion.div>
-
-            {/* SSO */}
-            <motion.button
-              variants={item}
-              type="button"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              onClick={() => {
-                if (success) return;
-                signIn(DEMO_ACCOUNT.username, DEMO_ACCOUNT.role);
-                setSuccess(true);
-                setTimeout(() => router.push('/dashboard'), 1850);
-              }}
-              className="flex w-full items-center justify-center gap-3 rounded-2xl border border-border bg-white px-5 py-3 text-sm font-semibold text-ink transition-colors hover:bg-canvas"
-            >
-              <svg viewBox="0 0 23 23" width="17" height="17" aria-hidden>
-                <path fill="#f25022" d="M1 1h10v10H1z" />
-                <path fill="#7fba00" d="M12 1h10v10H12z" />
-                <path fill="#00a4ef" d="M1 12h10v10H1z" />
-                <path fill="#ffb900" d="M12 12h10v10H12z" />
-              </svg>
-              Microsoft 365
-            </motion.button>
-
             <motion.p variants={item} className="mt-8 text-center text-sm text-muted">
-              New to OptiRoute?{' '}
-              <Link href="/signup" className="font-semibold text-brand-600 transition-colors hover:text-brand-800">
-                Sign up
+              Already have an account?{' '}
+              <Link href="/login" className="font-semibold text-brand-600 transition-colors hover:text-brand-800">
+                Sign in
               </Link>
             </motion.p>
           </motion.div>
@@ -498,7 +578,7 @@ export default function LoginPage() {
               transition={{ delay: 0.6 }}
             >
               <Loader2 size={15} className="animate-spin" />
-              Welcome back, Ghada — preparing your control tower…
+              Welcome aboard, {fullName.trim().split(' ')[0] || 'there'} — building your control tower…
             </motion.div>
           </motion.div>
 

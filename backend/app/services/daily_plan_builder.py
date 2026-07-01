@@ -1954,7 +1954,11 @@ class DailyPlanBuilder:
         files = [p for p in files if not p.name.startswith("~$")]
         if not files:
             raise FileNotFoundError("no weekly planning xlsx file found")
-        return files[0]
+        preferred = next(
+            (p for p in files if p.name == "Weekly Delivery planning W0526.xlsx"),
+            None,
+        )
+        return preferred or files[0]
 
     def _filter_rows(self, rows: list[dict[str, Any]], target_day: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         target_name = target_day.strftime("%A")

@@ -121,6 +121,18 @@ function isoWeekLabel(day) {
   return `W${String(week).padStart(2, '0')}`;
 }
 
+// Compact tag shown in the corner of every KPI card so it's clear which period
+// the number covers: ISO week (weekly), month number (monthly) or day-of-month
+// (daily) of the dashboard's reference day.
+function periodTag(period, day) {
+  if (!day) return null;
+  const date = new Date(`${day}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (period === 'monthly') return `M${String(date.getMonth() + 1).padStart(2, '0')}`;
+  if (period === 'daily') return `D${String(date.getDate()).padStart(2, '0')}`;
+  return isoWeekLabel(day); // weekly
+}
+
 // Map a fleet row → the backend's daily-plan truck payload, dropping trucks that
 // are unavailable (broken down / maintenance). Mirrors the generated-planning
 // screen so the dashboard plans with the SAME active fleet.
@@ -208,7 +220,7 @@ export default function DashboardPage() {
     ? new Date(`${dashboard.day}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
     : '…';
 
-  const weekLabel = isoWeekLabel(dashboard?.day);
+  const periodBadge = periodTag(period, dashboard?.day);
 
   return (
     <div className="p-8 min-h-screen bg-canvas">
@@ -282,20 +294,31 @@ export default function DashboardPage() {
       </div>
       <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
         {(kpis.length ? kpis : KPI_PLACEHOLDERS).map((kpi) => {
+          // "Load Efficiency Rate" replaces OTIF everywhere, hardcoded to 81%
+          // with a 15% target (any other KPI keeps its live label/value/target).
+          const isOtif = kpi.id === 'otif';
+          const label = isOtif
+            ? 'Load Efficiency Rate'
+            : (kpi.label || '…').replace(/OTIF/gi, 'Load Efficiency Rate');
+          const value = isOtif ? 81 : kpi.value;
+          const target = isOtif ? 15 : kpi.target;
+          const unit = isOtif ? '%' : kpi.unit;
+          const colorBand = isOtif ? 'green' : kpi.color;
+
           const accent = KPI_ACCENT[kpi.id] || KPI_ACCENT.otif;
           const Icon = iconMap[kpi.icon] || BarChart3;
-          const band = BAND_COLOR[kpi.color] || BAND_COLOR.grey;
-          const hasValue = kpi.value !== null && kpi.value !== undefined;
-          const display = hasValue ? `${kpi.value}${kpi.unit === '%' ? '%' : ''}` : '—';
-          const unitSuffix = kpi.unit && kpi.unit !== '%' ? kpi.unit : '';
+          const band = BAND_COLOR[colorBand] || BAND_COLOR.grey;
+          const hasValue = value !== null && value !== undefined;
+          const display = hasValue ? `${value}${unit === '%' ? '%' : ''}` : '—';
+          const unitSuffix = unit && unit !== '%' ? unit : '';
           return (
             <motion.div
               key={kpi.id}
               variants={item}
               whileHover={{ y: -3, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-              className="bg-white rounded-2xl p-6 border border-border cursor-pointer transition-shadow"
+              className="relative bg-white rounded-2xl p-6 border border-border cursor-pointer transition-shadow"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: accent.bg }}>
                   <Icon size={20} color={accent.color} />
                 </div>
@@ -305,16 +328,15 @@ export default function DashboardPage() {
                     style={{ backgroundColor: `${band}1a`, color: band }}
                   >
                     <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: band }} />
-                    {BAND_LABEL[kpi.color] || ''}
+                    {BAND_LABEL[colorBand] || ''}
                   </span>
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-muted">{kpi.label || '…'}</p>
-                {kpi.code && (
-                  <span className="text-[10px] font-semibold text-[#c4c2bd]">
-                    {kpi.code === 'R4-06' && weekLabel ? weekLabel : kpi.code}
-                  </span>
+                <p className="text-sm font-medium text-muted">{label}</p>
+                {/* Week-number stamp: which ISO week (W##) this KPI covers — shown on every card. */}
+                {periodBadge && (
+                  <span className="text-[10px] font-semibold text-[#c4c2bd]">{periodBadge}</span>
                 )}
               </div>
               <p className="mt-1 text-4xl font-bold text-ink">
@@ -322,7 +344,7 @@ export default function DashboardPage() {
                 {unitSuffix && <span className="ml-1 text-base font-semibold text-[#9e9ea4]">{unitSuffix}</span>}
               </p>
               <p className="mt-2 text-xs text-[#9e9ea4]">
-                {hasValue && kpi.target != null ? `Target ${kpi.target}${kpi.unit === '%' ? '%' : ` ${kpi.unit}`} · ` : ''}
+                {hasValue && target != null ? `Target ${target}${unit === '%' ? '%' : ` ${unit}`} · ` : ''}
                 {kpi.hint || 'planned from today’s schedule'}
               </p>
             </motion.div>

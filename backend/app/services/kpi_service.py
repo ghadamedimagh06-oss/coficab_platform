@@ -27,7 +27,7 @@ DEFAULT_DIESEL_CO2E_KG_PER_L = 2.68
 KPI_CODES_ORDERED = ["R4-06", "R4-02", "R4-02-PF", "R4-03", "R4-13", "R5-10", "R4-12", "R4"]
 
 FRIENDLY_LABELS = {
-    "R4-06":   "OTIF",
+    "R4-06":   "Load Efficiency Rate",
     "R4-02":   "OTD",
     "R4-02-PF":"Premium Freight Cost",
     "R4-03":   "Premium Freight Occurrences",

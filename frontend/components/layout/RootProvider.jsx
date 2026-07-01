@@ -6,8 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import AppShell from './AppShell';
 
 // Standalone routes that render full-bleed, without the app chrome (sidebar /
-// copilot launcher). The login screen owns the whole viewport.
-const BARE_ROUTES = ['/login'];
+// copilot launcher). The login and sign-up screens own the whole viewport.
+const BARE_ROUTES = ['/login', '/signup'];
 
 // Session flag set by the login screen (app/login/page.jsx). Its presence is
 // what gates access to the rest of the app.

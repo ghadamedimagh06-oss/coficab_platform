@@ -326,7 +326,7 @@ def _finalize_kpis(acc: dict[str, float]) -> list[dict[str, Any]]:
     fuel_eff = round(FUEL_L_PER_100KM * 10.0 / gross_kg, 4) if gross_kg else None
 
     raw = [
-        ("R4-06", "otif", "OTIF", otif, "%", "truck", "delivered in full on the demanded day"),
+        ("R4-06", "otif", "Load Efficiency Rate", otif, "%", "truck", "delivered in full on the demanded day"),
         ("R4", "load", "Load Efficiency", load_eff, "%", "gauge", "positions ÷ capacity"),
         ("R4-02", "otd", "OTD", otd, "%", "clock", "delivered on the demanded day"),
         ("R4-13", "fuel", "Fuel / Tonnage", fuel_eff, "L/T·km", "gauge", "fuel ÷ (tonnage × distance)"),

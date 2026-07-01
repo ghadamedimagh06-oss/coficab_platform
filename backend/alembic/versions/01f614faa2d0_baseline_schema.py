@@ -34,7 +34,7 @@ def upgrade() -> None:
     sa.UniqueConstraint('plate_number')
     )
     op.create_table('chauffeurs',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('full_name', sa.String(), nullable=False),
     sa.Column('phone', sa.String(length=30), nullable=True),
     sa.Column('permis_type', sa.Enum('B', 'C', 'CE', 'D', name='permis_type_enum'), nullable=False),

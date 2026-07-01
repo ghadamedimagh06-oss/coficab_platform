@@ -76,7 +76,7 @@ export function openExecutiveReport({ plan, day, esg, confidence }) {
     ? `<div class="section">
          <h2>Plan Confidence (Monte-Carlo, ${n(confidence.runs)} runs)</h2>
          <div class="kpis">
-           ${kpi('Expected OTIF', `${n(confidence.expected_otif_pct, 0)}%`)}
+           ${kpi('Expected Load Efficiency Rate', `${n(confidence.expected_otif_pct, 0)}%`)}
            ${kpi(`Reliable (≥${n(confidence.otif_target_pct)}%)`, `${n(confidence.confidence_pct, 0)}% of days`)}
            ${kpi('Finish P50 / P90', `${confidence.finish_p50 || '—'} / ${confidence.finish_p90 || '—'}`)}
          </div>

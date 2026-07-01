@@ -86,10 +86,10 @@ export default function ConfidencePanel({ plan, day, objective }) {
           <div className="flex items-center gap-4">
             <div className={`flex h-28 w-28 flex-col items-center justify-center rounded-full border-8 ${otifRing(otif)}`}>
               <span className={`text-3xl font-bold ${otifTone(otif)}`}>{num(otif, 0)}%</span>
-              <span className="text-[10px] uppercase tracking-wide text-muted">exp. OTIF</span>
+              <span className="text-[10px] uppercase tracking-wide text-muted">exp. load eff.</span>
             </div>
             <div className="text-sm">
-              <p className="text-muted">Reliable (≥{num(report.otif_target_pct)}% OTIF) on</p>
+              <p className="text-muted">Reliable (≥{num(report.otif_target_pct)}% load eff. rate) on</p>
               <p className="text-2xl font-semibold text-ink">{num(report.confidence_pct, 1)}%</p>
               <p className="text-muted">of {num(report.runs)} simulated days</p>
             </div>
@@ -98,7 +98,7 @@ export default function ConfidencePanel({ plan, day, objective }) {
           {/* Detail metrics */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Metric label="Perfect days" value={`${num(report.all_ontime_pct, 1)}%`} />
-            <Metric label="Worst-case OTIF (P10)" value={`${num(report.otif_p10_pct, 1)}%`} />
+            <Metric label="Worst-case load eff. rate (P10)" value={`${num(report.otif_p10_pct, 1)}%`} />
             <Metric label="Stops simulated" value={num(report.stops_simulated)} />
             <Metric icon={<Clock size={13} />} label="Finish P50" value={report.finish_p50 || '—'} />
             <Metric icon={<Clock size={13} />} label="Finish P90" value={report.finish_p90 || '—'} />

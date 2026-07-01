@@ -1306,8 +1306,16 @@ def daily_dashboard(
         # unassigned (hard time windows), making OTIF read 100% while the planning
         # page still lists those clients as undelivered. Cached below to bound the
         # extra solve cost over the period's days.
+        # use_osrm_road_matrix=False: the dashboard rebuilds up to 7 (weekly) or
+        # 31 (monthly) daily plans per refresh, each of which would otherwise fire
+        # a live OSRM /table call to the public demo server — the dominant cost
+        # (~90-100s for a cold weekly build). Straight-line (haversine × winding)
+        # distances keep this responsive (~seconds); the generated-planning screen
+        # still uses real road distances where per-route precision matters.
         builder = DailyPlanBuilder(
-            WEEKLY_DIR, cfg=DailyPlanConfig(prefer_ortools=True), trucks=fleet
+            WEEKLY_DIR,
+            cfg=DailyPlanConfig(prefer_ortools=True, use_osrm_road_matrix=False),
+            trucks=fleet,
         )
         result = dashboard_service.period_dashboard(
             lambda d: builder.build(day=d), ref_day, builder.cfg.avg_speed_kmh, period=period,
@@ -1585,19 +1593,35 @@ def _available_trucks_for_daily_plan(db: Optional[Session]) -> Optional[List[Dic
         driver.id: driver
         for driver in db.query(Chauffeur).filter(Chauffeur.status == ChauffeurStatus.ACTIF).all()
     }
+    # A driver may be linked to a truck from either side of the relation: the
+    # truck's ``chauffeur_defaut_id`` OR the driver's ``camion_defaut_id``. The
+    # seed data only populates the driver side, so resolving just the truck side
+    # (as before) matched zero trucks and left every delivery unassigned. Build a
+    # truck_id -> active driver map from both directions, preferring the truck's
+    # own link when present.
+    driver_by_truck: Dict[Any, Any] = {}
+    for driver in active_drivers.values():
+        if driver.camion_defaut_id is not None:
+            driver_by_truck.setdefault(driver.camion_defaut_id, driver)
+
     rows = db.query(Camion).filter(Camion.status == CamionStatus.DISPONIBLE).order_by(
         Camion.max_palettes.desc(), Camion.id.asc()
     ).all()
-    return [
-        {
+
+    result: List[Dict[str, Any]] = []
+    for truck in rows:
+        if (truck.max_palettes or 0) <= 0:
+            continue
+        driver = active_drivers.get(truck.chauffeur_defaut_id) or driver_by_truck.get(truck.id)
+        if driver is None:
+            continue  # DISPONIBLE but no active driver -> out of service for the day
+        result.append({
             "truck_id": truck.id,
             "truck_label": truck.plate_number,
             "capacity_positions": int(truck.max_palettes or 0),
             "capacity_kg": float(truck.capacite_kg or 0),
             "capacity_m3": float(getattr(truck, "capacite_m3", 0) or 0) or None,
-            "driver_id": truck.chauffeur_defaut_id,
-            "driver": active_drivers[truck.chauffeur_defaut_id].full_name,
-        }
-        for truck in rows
-        if (truck.max_palettes or 0) > 0 and truck.chauffeur_defaut_id in active_drivers
-    ]
+            "driver_id": driver.id,
+            "driver": driver.full_name,
+        })
+    return result

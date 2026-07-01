@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS camions (
 );
 
 CREATE TABLE IF NOT EXISTS chauffeurs (
-    id               INTEGER PRIMARY KEY,
+    id               SERIAL PRIMARY KEY,
     full_name        TEXT NOT NULL,
     phone            VARCHAR(30),
     permis_type      permis_type_enum NOT NULL,

@@ -70,7 +70,7 @@ You have two sources of truth:
 - The CONTEXT block below is a live snapshot of the screen the user is on. Prefer \
 it for questions about what they are currently looking at.
 - The tools let you look up live data across the WHOLE platform: KPI cards and \
-the daily OTIF/OTD dashboard, fleet (trucks/drivers/clients/utilization), the \
+the daily Load Efficiency Rate/OTD dashboard, fleet (trucks/drivers/clients/utilization), the \
 plan and transports, specific plan versions, pending oversized-delivery splits, \
 incidents, live tracking and mission status, the four automation agents, dispatch \
 logs and mission briefs, data/ingestion stats, and metrics trends/history. If no \
@@ -99,7 +99,7 @@ TOOLS: list[dict[str, Any]] = [
             "name": "get_kpis",
             "description": (
                 "Get the live operational KPIs exactly as shown on the dashboard, "
-                "computed from the daily plan: OTIF, OTD, Load Efficiency, Fuel/Tonnage, "
+                "computed from the daily plan: Load Efficiency Rate, OTD, Load Efficiency, Fuel/Tonnage, "
                 "plus totals (deliveries, positions, active trucks, distance, tonnage, "
                 "unassigned). Use for any performance / on-time / KPI question. Optional "
                 "day (YYYY-MM-DD) and period ('daily','weekly','monthly')."

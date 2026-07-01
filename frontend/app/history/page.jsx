@@ -3,15 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  AlertTriangle,
   BarChart3,
   CalendarDays,
   CalendarRange,
-  Clock3,
   RefreshCcw,
-  Truck,
 } from 'lucide-react';
-import { getDeliveryHistory } from '../services/api';
+import { deliveryHistory2026, deliveryHistory2026Meta } from '../../data/deliveryHistory2026';
 
 const VIEWS = [
   { id: 'daily', label: 'Daily', icon: CalendarDays },
@@ -84,52 +81,21 @@ function number(value, digits = 0) {
   return Number(value).toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
-function StatTile({ icon: Icon, label, value, hint, tone = 'brand' }) {
-  const tones = {
-    brand: 'bg-brand-50 text-brand-700',
-    green: 'bg-emerald-50 text-emerald-700',
-    amber: 'bg-amber-50 text-amber-700',
-    red: 'bg-rose-50 text-rose-700',
-  };
-  return (
-    <div className="rounded-[1.5rem] border border-border bg-white p-5 shadow-sm">
-      <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${tones[tone] || tones.brand}`}>
-        <Icon size={20} />
-      </div>
-      <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-muted">{label}</p>
-      <p className="mt-2 text-3xl font-semibold text-ink">{value}</p>
-      <p className="mt-2 text-xs text-[#8f8a94]">{hint}</p>
-    </div>
-  );
-}
-
 export default function DailyPlanningPage() {
-  const [rows, setRows] = useState([]);
-  const [meta, setMeta] = useState(null);
+  // Data is baked straight from the 2026 delivery workbook
+  // (docs/history data/Planning de Livraison 2026 v0.xlsx → "Details local delivery").
+  const meta = deliveryHistory2026Meta;
+  const [rows, setRows] = useState(deliveryHistory2026);
   const [view, setView] = useState('daily');
   const [period, setPeriod] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  async function loadHistory() {
+  function loadHistory() {
     setLoading(true);
-    setError('');
-    try {
-      const data = await getDeliveryHistory();
-      const nextRows = Array.isArray(data?.rows) ? data.rows : [];
-      setRows(nextRows);
-      setMeta(data);
-    } catch (err) {
-      setRows([]);
-      setError(err?.response?.data?.detail || err.message || 'Unable to load delivery history.');
-    } finally {
-      setLoading(false);
-    }
+    setRows(deliveryHistory2026);
+    // Purely cosmetic spinner — the workbook data is already in the bundle.
+    setTimeout(() => setLoading(false), 250);
   }
-
-  useEffect(() => {
-    loadHistory();
-  }, []);
 
   const periods = useMemo(() => {
     const map = new Map();
@@ -150,23 +116,6 @@ export default function DailyPlanningPage() {
   const visibleRows = useMemo(() => (
     rows.filter((row) => periodFor(row, view).key === period)
   ), [rows, view, period]);
-
-  const stats = useMemo(() => {
-    const total = visibleRows.length;
-    const late = visibleRows.filter((row) => row.is_late).length;
-    const positions = visibleRows.reduce((sum, row) => sum + Number(row.positions || 0), 0);
-    const weight = visibleRows.reduce((sum, row) => sum + Number(row.weight || 0), 0);
-    const trucks = new Set(visibleRows.map((row) => row.truck).filter(Boolean)).size;
-    return {
-      total,
-      late,
-      onTime: Math.max(0, total - late),
-      otd: total ? Math.round(((total - late) / total) * 100) : 0,
-      positions,
-      weight,
-      trucks,
-    };
-  }, [visibleRows]);
 
   const causeStats = useMemo(() => {
     const counts = new Map();
@@ -209,20 +158,7 @@ export default function DailyPlanningPage() {
               </button>
             </div>
           </div>
-          {error ? (
-            <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {error}
-            </div>
-          ) : null}
         </motion.header>
-
-        <motion.section variants={item} className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
-          <StatTile icon={Truck} label="Shipments" value={stats.total} hint="selected period" />
-          <StatTile icon={Clock3} label="OTD" value={`${stats.otd}%`} hint={`${stats.onTime} on time`} tone="green" />
-          <StatTile icon={AlertTriangle} label="Retards" value={stats.late} hint="late deliveries" tone={stats.late ? 'red' : 'green'} />
-          <StatTile icon={CalendarRange} label="Positions" value={number(stats.positions)} hint="loaded positions" tone="amber" />
-          <StatTile icon={BarChart3} label="Weight" value={`${number(stats.weight / 1000, 1)} t`} hint={`${stats.trucks} trucks used`} />
-        </motion.section>
 
         <motion.section variants={item} className="rounded-[2rem] border border-border bg-white shadow-sm">
           <div className="flex flex-col gap-5 border-b border-border p-6 xl:flex-row xl:items-center xl:justify-between">
